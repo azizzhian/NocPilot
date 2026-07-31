@@ -1,0 +1,80 @@
+# Instalasi awal NocPilot di VPS kosong (satu kali).
+# Update rutin tetap pakai workflow Deploy (push ke main).
+name: Install
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "Domain produksi (contoh noc.example.com)"
+        required: true
+        type: string
+      seed:
+        description: "Jalankan db:seed"
+        required: true
+        type: boolean
+        default: true
+      ssl:
+        description: "Pasang Let's Encrypt (DNS harus sudah mengarah ke VPS)"
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: install-production
+  cancel-in-progress: false
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          NOCPILOT_REPO: ${{ secrets.NOCPILOT_REPO }}
+          NOCPILOT_DOMAIN: ${{ inputs.domain }}
+          NOCPILOT_PATH: ${{ secrets.VPS_PATH }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_DATABASE: ${{ secrets.DB_DATABASE }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_USERNAME: ${{ secrets.TELEGRAM_BOT_USERNAME }}
+          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
+          SEED_INPUT: ${{ inputs.seed }}
+          SSL_INPUT: ${{ inputs.ssl }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: NOCPILOT_REPO,NOCPILOT_DOMAIN,NOCPILOT_PATH,DB_PASSWORD,DB_DATABASE,DB_USERNAME,TELEGRAM_BOT_TOKEN,TELEGRAM_BOT_USERNAME,CERTBOT_EMAIL,SEED_INPUT,SSL_INPUT
+          script_stop: true
+          script: |
+            set -euo pipefail
+            REPO="${NOCPILOT_REPO:?Set secret NOCPILOT_REPO}"
+            DOMAIN="${NOCPILOT_DOMAIN:?}"
+            PATH_APP="${NOCPILOT_PATH:-/var/www/nocpilot}"
+
+            export NOCPILOT_REPO="$REPO"
+            export NOCPILOT_DOMAIN="$DOMAIN"
+            export NOCPILOT_PATH="$PATH_APP"
+            export DB_PASSWORD="${DB_PASSWORD:?Set secret DB_PASSWORD}"
+            export DB_DATABASE="${DB_DATABASE:-nocpilot}"
+            export DB_USERNAME="${DB_USERNAME:-nocpilot}"
+            export TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+            export TELEGRAM_BOT_USERNAME="${TELEGRAM_BOT_USERNAME:-}"
+            export CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
+            export INSTALL_MYSQL_LOCAL=1
+            export INSTALL_NGINX=1
+            export INSTALL_SYSTEMD=1
+            export NOCPILOT_SEED=0
+            export INSTALL_SSL=0
+            [[ "${SEED_INPUT}" == "true" ]] && export NOCPILOT_SEED=1
+            [[ "${SSL_INPUT}" == "true" ]] && export INSTALL_SSL=1
+
+            # Pastikan repo ada dulu (supaya install.sh selalu dari GitHub Anda)
+            if [[ ! -d "$PATH_APP/.git" ]]; then
+              sudo mkdir -p "$(dirname "$PATH_APP")"
+              sudo git clone "$REPO" "$PATH_APP"
+            fi
+            sudo chmod +x "$PATH_APP/scripts/"*.sh
+            sudo -E "$PATH_APP/scripts/install.sh"

@@ -6,7 +6,8 @@ Versioning mengikuti [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Alur deploy: `.gitignore` root, `scripts/deploy.sh`, `scripts/backup-db.sh`, `DEPLOY.md`, GitHub Actions contoh
+- Instalasi VPS otomatis: `scripts/install.sh`, `scripts/install.env.example`, workflow GitHub **Install**
+- Alur deploy: `.gitignore` root, `scripts/deploy.sh`, `scripts/backup-db.sh`, `DEPLOY.md`, GitHub Actions Deploy
 - Carry-over item On-Progress di Input Harian (badge "Open dari …")
 
 ## [1.0.0] - 2026-07-31

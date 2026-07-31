@@ -25,5 +25,5 @@ jobs:
           script: |
             set -euo pipefail
             cd "${{ secrets.VPS_PATH }}"
-            ./scripts/backup-db.sh
+            ./scripts/backup-db.sh || true
             ./scripts/deploy.sh

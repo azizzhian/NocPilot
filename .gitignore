@@ -57,6 +57,10 @@ backups/
 *.csv
 !**/fixtures/**/*.csv
 
+# Install secrets (salinan lokal dari install.env.example)
+/install.env
+scripts/install.env
+
 # PHP / Node tooling
 .phpunit.result.cache
 .phpactor.json

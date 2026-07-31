@@ -26,11 +26,18 @@ cp apps/frontend/.env.example apps/frontend/.env
 cd apps/backend && php artisan key:generate && php artisan migrate --seed
 ```
 
-## Production / update
+## Production
 
-Lihat **[DEPLOY.md](./DEPLOY.md)** dan **[CHANGELOG.md](./CHANGELOG.md)**.
+**Instalasi awal (sekali di VPS):**
 
 ```bash
-./scripts/backup-db.sh
-./scripts/deploy.sh
+curl -fsSL https://raw.githubusercontent.com/ORG/NocPilot/main/scripts/install.sh \
+  | sudo env NOCPILOT_REPO=https://github.com/ORG/NocPilot.git \
+             NOCPILOT_DOMAIN=noc.example.com \
+             DB_PASSWORD='secret' \
+             bash
 ```
+
+**Update selanjutnya:** `git push origin main` (otomatis via GitHub Actions).
+
+Detail: **[DEPLOY.md](./DEPLOY.md)** · **[CHANGELOG.md](./CHANGELOG.md)**
