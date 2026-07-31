@@ -6,9 +6,8 @@ Aplikasi operasional NOC ISP: input harian, monitoring, report, role/permission.
 
 - Backend: Laravel (`apps/backend`)
 - Frontend: Vue 3 + Vite (`apps/frontend`)
-- Dev: satu perintah menjalankan API + queue + scheduler + web
 
-## Development (Laragon / lokal)
+## Development (lokal)
 
 ```bash
 npm run setup   # sekali
@@ -28,7 +27,7 @@ cd apps/backend && php artisan key:generate && php artisan migrate --seed
 
 ## Production
 
-**Instalasi awal (sekali di VPS)** — clone dulu (cocok untuk repo private):
+**Instalasi awal di VPS** :
 
 ```bash
 sudo git clone https://github.com/azizzhian/NocPilot.git /var/www/nocpilot
