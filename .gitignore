@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+apps/backend/vendor/
+apps/frontend/node_modules/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
+apps/backend/.env
+apps/backend/.env.backup
+apps/backend/.env.production
+apps/frontend/.env
+apps/frontend/.env.*
+!apps/frontend/.env.example
+
+# Build outputs
+apps/frontend/dist/
+apps/frontend/dist-ssr/
+apps/backend/public/build/
+apps/backend/public/hot
+apps/backend/public/storage
+
+# Laravel storage / caches
+apps/backend/storage/*.key
+apps/backend/storage/pail
+apps/backend/storage/logs/*
+apps/backend/storage/framework/cache/*
+apps/backend/storage/framework/sessions/*
+apps/backend/storage/framework/views/*
+!apps/backend/storage/logs/.gitignore
+!apps/backend/storage/framework/cache/.gitignore
+!apps/backend/storage/framework/sessions/.gitignore
+!apps/backend/storage/framework/views/.gitignore
+apps/backend/bootstrap/cache/*.php
+!apps/backend/bootstrap/cache/.gitignore
+
+# IDE / OS
+.idea/
+.vscode/
+.cursor/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs & local dumps
+*.log
+*.sql
+*.sql.gz
+backups/
+*.tar.gz
+
+# Local data exports (jangan commit data pelanggan)
+*.xls
+*.xlsx
+*.csv
+!**/fixtures/**/*.csv
+
+# PHP / Node tooling
+.phpunit.result.cache
+.phpactor.json
+auth.json
