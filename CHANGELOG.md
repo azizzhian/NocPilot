@@ -10,6 +10,9 @@ Versioning mengikuti [Semantic Versioning](https://semver.org/).
 - Alur deploy: `.gitignore` root, `scripts/deploy.sh`, `scripts/backup-db.sh`, `DEPLOY.md`, GitHub Actions Deploy
 - Carry-over item On-Progress di Input Harian (badge "Open dari …")
 
+### Fixed
+- `install.sh`: `composer install` sebelum `artisan key:generate` (vendor kosong di VPS baru)
+
 ## [1.0.0] - 2026-07-31
 
 ### Added

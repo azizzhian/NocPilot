@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # Instalasi awal NocPilot di VPS (Ubuntu/Debian).
 #
-# Cara yang disarankan (repo private / public) — clone dulu:
+# Cara yang disarankan di Ubuntu VPS kosong (repo private/public):
+#   sudo apt-get update && sudo apt-get install -y git
 #   sudo git clone https://github.com/USER/NocPilot.git /var/www/nocpilot
 #   cd /var/www/nocpilot
 #   sudo cp scripts/install.env.example /root/nocpilot-install.env
-#   sudo nano /root/nocpilot-install.env   # isi domain + DB_PASSWORD
+#   sudo nano /root/nocpilot-install.env   # isi NOCPILOT_DOMAIN + DB_PASSWORD
 #   sudo ./scripts/install.sh /root/nocpilot-install.env
 #
-# Setelah ini, update rutin: git push → GitHub Actions (lihat DEPLOY.md)
+# Satu perintah di atas menginstall: PHP, nginx, Node, Composer, MariaDB,
+# vendor Laravel, build frontend, migrate, nginx site, queue + scheduler.
+#
+# Update rutin: git push → GitHub Actions (lihat DEPLOY.md)
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -130,6 +134,10 @@ install_packages() {
     php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer
     rm -f /tmp/composer-setup.php
   fi
+  # Pastikan php8.3 jadi default bila tersedia
+  if command -v php8.3 >/dev/null 2>&1; then
+    update-alternatives --set php /usr/bin/php8.3 2>/dev/null || true
+  fi
 
   if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | sed 's/v//' | cut -d. -f1)" -lt 20 ]]; then
     log "Install Node.js 20"
@@ -174,7 +182,7 @@ clone_or_update() {
 
 write_backend_env() {
   local envf="$NOCPILOT_PATH/apps/backend/.env"
-  log "Tulis $envf"
+  log "Tulis $envf (tanpa artisan — vendor belum ada)"
   if [[ ! -f "$envf" ]]; then
     cp "$NOCPILOT_PATH/apps/backend/.env.example" "$envf"
   fi
@@ -195,11 +203,7 @@ write_backend_env() {
   set_env_file LOG_LEVEL warning "$envf"
   set_env_file TELEGRAM_BOT_TOKEN "$TELEGRAM_BOT_TOKEN" "$envf"
   set_env_file TELEGRAM_BOT_USERNAME "$TELEGRAM_BOT_USERNAME" "$envf"
-
-  if ! grep -qE '^APP_KEY=base64:' "$envf"; then
-    log "Generate APP_KEY"
-    (cd "$NOCPILOT_PATH/apps/backend" && php artisan key:generate --force)
-  fi
+  # APP_KEY diisi setelah composer install (lihat run_app_build)
 }
 
 write_frontend_env() {
@@ -331,10 +335,29 @@ fix_permissions() {
 }
 
 run_app_build() {
-  log "Composer + npm build + migrate"
+  log "Composer + key + npm build + migrate"
   cd "$NOCPILOT_PATH"
 
-  composer install --working-dir=apps/backend --no-dev --optimize-autoloader --no-interaction
+  export COMPOSER_ALLOW_SUPERUSER=1
+  local COMPOSER_BIN
+  COMPOSER_BIN="$(command -v composer || echo /usr/local/bin/composer)"
+  local PHP_BIN
+  PHP_BIN="$(command -v php8.3 || command -v php)"
+
+  log "composer install (membuat apps/backend/vendor)"
+  "$COMPOSER_BIN" install \
+    --working-dir=apps/backend \
+    --no-dev \
+    --optimize-autoloader \
+    --no-interaction
+
+  [[ -f apps/backend/vendor/autoload.php ]] \
+    || die "composer install gagal — apps/backend/vendor/autoload.php tidak ada."
+
+  if ! grep -qE '^APP_KEY=base64:' apps/backend/.env; then
+    log "Generate APP_KEY"
+    (cd apps/backend && "$PHP_BIN" artisan key:generate --force)
+  fi
 
   if [[ -f apps/frontend/package-lock.json ]]; then
     npm ci --prefix apps/frontend
@@ -342,17 +365,21 @@ run_app_build() {
     npm install --prefix apps/frontend
   fi
   npm run build --prefix apps/frontend
+  [[ -f apps/frontend/dist/index.html ]] \
+    || die "npm build gagal — apps/frontend/dist/index.html tidak ada."
 
-  php apps/backend/artisan migrate --force
+  log "migrate"
+  "$PHP_BIN" apps/backend/artisan migrate --force
   if [[ "$NOCPILOT_SEED" == "1" ]]; then
     log "db:seed"
-    php apps/backend/artisan db:seed --force || log "Seed gagal/lewati (mungkin sudah pernah dijalankan)"
+    "$PHP_BIN" apps/backend/artisan db:seed --force \
+      || log "Seed gagal/lewati (mungkin sudah pernah dijalankan)"
   fi
 
-  php apps/backend/artisan storage:link 2>/dev/null || true
-  php apps/backend/artisan config:cache
-  php apps/backend/artisan route:cache
-  php apps/backend/artisan view:cache
+  "$PHP_BIN" apps/backend/artisan storage:link 2>/dev/null || true
+  "$PHP_BIN" apps/backend/artisan config:cache
+  "$PHP_BIN" apps/backend/artisan route:cache
+  "$PHP_BIN" apps/backend/artisan view:cache
 }
 
 maybe_ssl() {

@@ -27,9 +27,10 @@ cd apps/backend && php artisan key:generate && php artisan migrate --seed
 
 ## Production
 
-**Instalasi awal di VPS** :
+**Ubuntu VPS kosong** — clone lalu 1 perintah `install.sh`:
 
 ```bash
+sudo apt-get update && sudo apt-get install -y git
 sudo git clone https://github.com/azizzhian/NocPilot.git /var/www/nocpilot
 cd /var/www/nocpilot
 sudo cp scripts/install.env.example /root/nocpilot-install.env
@@ -37,6 +38,8 @@ sudo cp scripts/install.env.example /root/nocpilot-install.env
 sudo ./scripts/install.sh /root/nocpilot-install.env
 ```
 
-**Update selanjutnya:** `git push origin main` (otomatis via GitHub Actions).
+Script memasang PHP, nginx, Node, Composer, MariaDB, `vendor`, build frontend, migrate, queue.
+
+**Update selanjutnya (di laptop):** `git push origin main`
 
 Detail: **[DEPLOY.md](./DEPLOY.md)** · **[CHANGELOG.md](./CHANGELOG.md)**

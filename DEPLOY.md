@@ -10,31 +10,31 @@ Repo **private**: jangan pakai `raw.githubusercontent.com` — **clone dulu**, l
 
 ---
 
-## A. Instalasi awal (sekali)
+## A. Instalasi awal (Ubuntu kosong → install.sh)
 
-SSH ke VPS (Ubuntu), lalu:
+SSH ke VPS, lalu:
 
 ```bash
-# 1) Clone dari GitHub (login/token/SSH key bila repo private)
+# Minimal git untuk clone (sisanya diurus install.sh)
+sudo apt-get update && sudo apt-get install -y git
+
 sudo mkdir -p /var/www
 sudo git clone https://github.com/azizzhian/NocPilot.git /var/www/nocpilot
 cd /var/www/nocpilot
 
-# 2) Isi konfigurasi
 sudo cp scripts/install.env.example /root/nocpilot-install.env
 sudo nano /root/nocpilot-install.env
 # wajib: NOCPILOT_DOMAIN, DB_PASSWORD
-# NOCPILOT_PATH=/var/www/nocpilot (sudah default)
-# NOCPILOT_REPO boleh dikosongkan jika sudah clone
 
-# 3) Install otomatis (paket OS + DB + build + nginx + queue)
+# Satu perintah: PHP, nginx, Node, Composer, MariaDB, vendor, build, migrate, queue
 sudo ./scripts/install.sh /root/nocpilot-install.env
 ```
 
 Script akan:
 - install PHP 8.3, nginx, Node, Composer, MariaDB
 - buat database + `.env`
-- `composer` + build frontend + migrate (+ seed)
+- **`composer install`** (folder `vendor`) lalu `key:generate`
+- build frontend + migrate (+ seed)
 - pasang nginx + queue worker + scheduler
 
 Opsional SSL di `install.env`: `INSTALL_SSL=1` dan `CERTBOT_EMAIL=...`
