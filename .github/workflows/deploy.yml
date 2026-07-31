@@ -1,5 +1,6 @@
 # Deploy ke VPS saat push ke main (atau manual via Actions → Run workflow).
 # Aktifkan setelah secrets VPS_* diisi di GitHub → Settings → Secrets.
+# Instalasi pertama kali: pakai workflow Install atau scripts/install.sh (lihat DEPLOY.md).
 name: Deploy
 
 on:

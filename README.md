@@ -28,14 +28,14 @@ cd apps/backend && php artisan key:generate && php artisan migrate --seed
 
 ## Production
 
-**Instalasi awal (sekali di VPS):**
+**Instalasi awal (sekali di VPS)** — clone dulu (cocok untuk repo private):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ORG/NocPilot/main/scripts/install.sh \
-  | sudo env NOCPILOT_REPO=https://github.com/ORG/NocPilot.git \
-             NOCPILOT_DOMAIN=noc.example.com \
-             DB_PASSWORD='secret' \
-             bash
+sudo git clone https://github.com/azizzhian/NocPilot.git /var/www/nocpilot
+cd /var/www/nocpilot
+sudo cp scripts/install.env.example /root/nocpilot-install.env
+# edit: NOCPILOT_DOMAIN + DB_PASSWORD
+sudo ./scripts/install.sh /root/nocpilot-install.env
 ```
 
 **Update selanjutnya:** `git push origin main` (otomatis via GitHub Actions).

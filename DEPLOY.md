@@ -6,49 +6,43 @@ Laptop → git push → GitHub → VPS otomatis
 
 Jangan edit kode langsung di server.
 
+Repo **private**: jangan pakai `raw.githubusercontent.com` — **clone dulu**, lalu jalankan `install.sh`.
+
 ---
 
 ## A. Instalasi awal (sekali)
 
-### Opsi 1 — Satu perintah di VPS (paling sederhana)
-
 SSH ke VPS (Ubuntu), lalu:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ORG/NocPilot/main/scripts/install.sh \
-  | sudo env \
-      NOCPILOT_REPO=https://github.com/ORG/NocPilot.git \
-      NOCPILOT_DOMAIN=noc.example.com \
-      DB_PASSWORD='password_kuat' \
-      bash
+# 1) Clone dari GitHub (login/token/SSH key bila repo private)
+sudo mkdir -p /var/www
+sudo git clone https://github.com/azizzhian/NocPilot.git /var/www/nocpilot
+cd /var/www/nocpilot
+
+# 2) Isi konfigurasi
+sudo cp scripts/install.env.example /root/nocpilot-install.env
+sudo nano /root/nocpilot-install.env
+# wajib: NOCPILOT_DOMAIN, DB_PASSWORD
+# NOCPILOT_PATH=/var/www/nocpilot (sudah default)
+# NOCPILOT_REPO boleh dikosongkan jika sudah clone
+
+# 3) Install otomatis (paket OS + DB + build + nginx + queue)
+sudo ./scripts/install.sh /root/nocpilot-install.env
 ```
 
-Ganti `ORG/NocPilot` dan domain/password.
-
-Script otomatis:
+Script akan:
 - install PHP 8.3, nginx, Node, Composer, MariaDB
-- `git clone` dari GitHub
 - buat database + `.env`
 - `composer` + build frontend + migrate (+ seed)
-- nginx + queue worker + scheduler
+- pasang nginx + queue worker + scheduler
 
-Opsional SSL:
+Opsional SSL di `install.env`: `INSTALL_SSL=1` dan `CERTBOT_EMAIL=...`
 
-```bash
-... INSTALL_SSL=1 CERTBOT_EMAIL=admin@example.com bash
-```
-
-Atau salin `scripts/install.env.example` → `install.env`, isi, lalu:
-
-```bash
-sudo ./scripts/install.sh ./install.env
-```
-
-### Opsi 2 — Tombol di GitHub Actions
+### Alternatif — GitHub Actions
 
 1. Isi secrets (lihat bawah)
 2. Actions → **Install** → Run workflow → isi domain
-3. VPS terisi otomatis lewat SSH
 
 ---
 
@@ -82,7 +76,7 @@ cd /var/www/nocpilot
 | `VPS_USER` | Deploy + Install | user SSH (punya sudo) |
 | `VPS_SSH_KEY` | Deploy + Install | private key |
 | `VPS_PATH` | Deploy + Install | `/var/www/nocpilot` |
-| `NOCPILOT_REPO` | Install | URL clone, mis. `https://github.com/ORG/NocPilot.git` |
+| `NOCPILOT_REPO` | Install | URL clone, mis. `https://github.com/azizzhian/NocPilot.git` |
 | `DB_PASSWORD` | Install | password DB |
 | `DB_DATABASE` | Install | opsional, default `nocpilot` |
 | `DB_USERNAME` | Install | opsional, default `nocpilot` |
@@ -90,8 +84,8 @@ cd /var/www/nocpilot
 | `TELEGRAM_BOT_USERNAME` | Install | opsional |
 | `CERTBOT_EMAIL` | Install | wajib jika SSL=true |
 
-Repo private: pakai URL dengan token, mis.  
-`https://x-access-token:TOKEN@github.com/ORG/NocPilot.git`
+Repo private: pakai deploy key / SSH di VPS, atau URL  
+`https://x-access-token:TOKEN@github.com/azizzhian/NocPilot.git`
 
 ---
 
@@ -110,7 +104,7 @@ git checkout v1.0.0
 ## E. Checklist production
 
 - [ ] Domain DNS → IP VPS
-- [ ] Install selesai (`scripts/install.sh` atau workflow Install)
+- [ ] Clone + `./scripts/install.sh` (atau workflow Install)
 - [ ] Secrets Actions terisi → Deploy otomatis saat push
 - [ ] Ganti password user admin (hasil seed)
 - [ ] BotFather `/setdomain` ke domain production

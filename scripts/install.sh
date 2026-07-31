@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
 # Instalasi awal NocPilot di VPS (Ubuntu/Debian).
 #
-# Cara 1 — dari repo yang sudah di-clone:
-#   cp scripts/install.env.example install.env   # edit isinya
-#   sudo ./scripts/install.sh ./install.env
-#
-# Cara 2 — satu perintah (belum ada clone):
-#   curl -fsSL https://raw.githubusercontent.com/ORG/NocPilot/main/scripts/install.sh \
-#     | sudo env NOCPILOT_REPO=https://github.com/ORG/NocPilot.git \
-#                NOCPILOT_DOMAIN=noc.example.com \
-#                DB_PASSWORD=secret \
-#                bash
+# Cara yang disarankan (repo private / public) — clone dulu:
+#   sudo git clone https://github.com/USER/NocPilot.git /var/www/nocpilot
+#   cd /var/www/nocpilot
+#   sudo cp scripts/install.env.example /root/nocpilot-install.env
+#   sudo nano /root/nocpilot-install.env   # isi domain + DB_PASSWORD
+#   sudo ./scripts/install.sh /root/nocpilot-install.env
 #
 # Setelah ini, update rutin: git push → GitHub Actions (lihat DEPLOY.md)
 set -euo pipefail
@@ -22,12 +18,23 @@ die() { echo "[install] ERROR: $*" >&2; exit 1; }
 
 [[ "$(id -u)" -eq 0 ]] || die "Jalankan sebagai root (sudo)."
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT_FROM_SCRIPT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 if [[ "${1:-}" != "" && -f "$1" ]]; then
   log "Memuat env: $1"
   set -a
   # shellcheck disable=SC1090
   source "$1"
   set +a
+fi
+
+# Jika dijalankan dari hasil clone, pakai folder itu (tanpa clone ulang)
+if [[ -f "$REPO_ROOT_FROM_SCRIPT/apps/backend/artisan" ]]; then
+  NOCPILOT_PATH="$REPO_ROOT_FROM_SCRIPT"
+  if [[ -z "${NOCPILOT_REPO:-}" ]] && command -v git >/dev/null 2>&1; then
+    NOCPILOT_REPO="$(git -C "$REPO_ROOT_FROM_SCRIPT" remote get-url origin 2>/dev/null || true)"
+  fi
 fi
 
 NOCPILOT_REPO="${NOCPILOT_REPO:-}"
@@ -50,9 +57,11 @@ INSTALL_SSL="${INSTALL_SSL:-0}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
 APP_URL="${APP_URL:-https://${NOCPILOT_DOMAIN}}"
 
-[[ -n "$NOCPILOT_REPO" ]] || die "Set NOCPILOT_REPO (URL git clone)."
 [[ -n "$NOCPILOT_DOMAIN" ]] || die "Set NOCPILOT_DOMAIN (domain produksi)."
 [[ -n "$DB_PASSWORD" ]] || die "Set DB_PASSWORD."
+if [[ ! -f "$NOCPILOT_PATH/apps/backend/artisan" && -z "$NOCPILOT_REPO" ]]; then
+  die "Set NOCPILOT_REPO, atau jalankan script dari dalam folder hasil git clone."
+fi
 
 if [[ ! -f /etc/os-release ]]; then
   die "Hanya mendukung Linux dengan /etc/os-release (Ubuntu/Debian)."
@@ -151,11 +160,12 @@ SQL
 clone_or_update() {
   mkdir -p "$(dirname "$NOCPILOT_PATH")"
   if [[ -d "$NOCPILOT_PATH/.git" ]]; then
-    log "Repo sudah ada — pull $NOCPILOT_BRANCH"
+    log "Repo sudah ada di $NOCPILOT_PATH — pull $NOCPILOT_BRANCH"
     git -C "$NOCPILOT_PATH" fetch --all --tags
     git -C "$NOCPILOT_PATH" checkout "$NOCPILOT_BRANCH"
     git -C "$NOCPILOT_PATH" pull --ff-only origin "$NOCPILOT_BRANCH" || true
   else
+    [[ -n "$NOCPILOT_REPO" ]] || die "NOCPILOT_PATH kosong dan NOCPILOT_REPO belum di-set."
     log "Clone $NOCPILOT_REPO → $NOCPILOT_PATH"
     git clone --branch "$NOCPILOT_BRANCH" "$NOCPILOT_REPO" "$NOCPILOT_PATH"
   fi
