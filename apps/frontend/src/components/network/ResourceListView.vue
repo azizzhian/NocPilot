@@ -243,8 +243,16 @@ function checkConnectionFromForm() {
 }
 
 function checkConnectionFromRow(row: Record<string, unknown>) {
-  const hasPassword = Boolean(row.has_api_password)
-  if (!hasPassword) {
+  const via = String(row.monitor_via ?? 'api')
+  if (via === 'snmp') {
+    if (!row.has_snmp_community) {
+      connectionResult.value = {
+        success: false,
+        message: 'SNMP community belum tersimpan. Edit router dan isi community, lalu simpan.',
+      }
+      return
+    }
+  } else if (!row.has_api_password) {
     connectionResult.value = {
       success: false,
       message: 'Password API belum tersimpan. Edit router dan isi password, lalu simpan.',
