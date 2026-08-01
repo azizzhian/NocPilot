@@ -30,13 +30,11 @@ const recentActivities = ref<DashboardStats['recent_activities']>([])
 const nocUsers = ref<DashboardStats['noc_users']>([])
 
 const showKpis = computed(() => auth.can('dashboard.widget.kpis'))
-const showTrend = computed(() => auth.can('dashboard.widget.trend'))
 const showClearByType = computed(() => auth.can('dashboard.widget.clear_by_type'))
 const showClearByNoc = computed(() => auth.can('dashboard.widget.clear_by_noc'))
 const showNocPerformance = computed(() => auth.can('dashboard.widget.noc_performance'))
 const showQuickActions = computed(() => auth.can('dashboard.widget.quick_actions'))
 const showRecent = computed(() => auth.can('dashboard.widget.recent'))
-const showAnyChart = computed(() => showTrend.value || showClearByType.value)
 
 const periodOptions = [
   { value: 'day', label: 'Hari ini' },
@@ -57,13 +55,6 @@ const emptyCharts = (): DashboardStats['charts'] => ({
       { name: 'CCTV', data: [], color: '#9B59B6' },
     ],
   },
-  trend: {
-    categories: [],
-    series: [
-      { name: 'Input', data: [] },
-      { name: 'Clear', data: [] },
-    ],
-  },
   clear_by_type: { categories: [], series: [{ name: 'Clear', data: [] }], colors: [] },
   contribution: { categories: [], series: [{ name: 'Kontribusi', data: [] }], colors: [] },
 })
@@ -73,12 +64,6 @@ const subtitle = computed(() =>
     ? `Kinerja NOC — ${periodLabel.value}`
     : 'Dashboard kinerja operasional NOC',
 )
-
-const trendSubtitle = computed(() => {
-  if (period.value === 'day') return '7 hari terakhir (termasuk tanggal acuan)'
-  if (period.value === 'year') return 'Tren bulanan dalam tahun'
-  return 'Input vs Clear per hari dalam periode'
-})
 
 const stacked = computed(() => charts.value?.stacked_by_noc ?? emptyCharts().stacked_by_noc!)
 const contribution = computed(() => charts.value?.contribution ?? emptyCharts().contribution!)
@@ -191,25 +176,22 @@ onMounted(load)
       />
     </div>
 
-    <!-- 2. Trend + Composition -->
-    <div v-if="loading && showAnyChart" class="mt-6 grid gap-6 lg:grid-cols-3">
-      <Skeleton v-if="showTrend" class="h-72 lg:col-span-2" />
+    <!-- 2. Composition + Badge Spesialis -->
+    <div
+      v-if="loading && (showClearByType || showNocPerformance)"
+      class="mt-6 grid gap-6 lg:grid-cols-3"
+    >
       <Skeleton v-if="showClearByType" class="h-72" />
+      <Skeleton v-if="showNocPerformance" class="h-72 lg:col-span-2" />
     </div>
-    <div v-else-if="charts && showAnyChart" class="mt-6 grid gap-6 lg:grid-cols-3">
+    <div
+      v-else-if="!loading && (showClearByType || showNocPerformance)"
+      class="mt-6 grid gap-6"
+      :class="showClearByType && showNocPerformance ? 'lg:grid-cols-3' : ''"
+    >
       <ChartCard
-        v-if="showTrend"
-        class="lg:col-span-2"
-        title="Tren Input vs Clear"
-        :subtitle="trendSubtitle"
-        :categories="charts.trend.categories"
-        :series="charts.trend.series"
-        type="area"
-        :height="260"
-      />
-      <ChartCard
-        v-if="showClearByType"
-        title="Komposisi Clear"
+        v-if="showClearByType && charts"
+        title="Persentase Penyelesaian"
         subtitle="Komplain · Aktivasi · Ticket · Dismantle · CCTV"
         :categories="charts.clear_by_type.categories"
         :series="charts.clear_by_type.series"
@@ -217,32 +199,20 @@ onMounted(load)
         type="donut"
         :height="260"
       />
-    </div>
 
-    <!-- 3. Stacked bar + Specialist badges -->
-    <div v-if="!loading && (showClearByNoc || showNocPerformance)" class="mt-6 grid gap-6 lg:grid-cols-3">
-      <ChartCard
-        v-if="showClearByNoc"
-        class="lg:col-span-2"
-        title="Performa NOC per Kategori"
-        subtitle="Stacked bar — pembagian kerja tiap orang"
-        :categories="stacked.categories"
-        :series="stacked.series"
-        type="bar"
-        horizontal
-        stacked
-        :height="Math.max(240, (stacked.categories.length || 1) * 42 + 90)"
-      />
-
-      <Card v-if="showNocPerformance" class="p-5">
+      <Card
+        v-if="showNocPerformance"
+        class="p-5"
+        :class="showClearByType ? 'lg:col-span-2' : ''"
+      >
         <div class="mb-4 flex items-center gap-2">
           <Award class="h-4 w-4 text-primary" />
           <div>
-            <h3 class="text-sm font-semibold text-foreground">Badge Spesialis</h3>
+            <h3 class="text-sm font-semibold text-foreground">Lencana</h3>
             <p class="text-xs text-muted">Top performer per kategori</p>
           </div>
         </div>
-        <div v-if="specialists.length" class="space-y-2.5">
+        <div v-if="specialists.length" class="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
           <div
             v-for="badge in specialists"
             :key="badge.key"
@@ -258,7 +228,21 @@ onMounted(load)
       </Card>
     </div>
 
-    <!-- 4. Leaderboard + Contribution pie + Radar -->
+    <!-- 3. Stacked bar -->
+    <div v-if="!loading && showClearByNoc" class="mt-6">
+      <ChartCard
+        title="Performa NOC per Kategori"
+        subtitle="Stacked bar — pembagian kerja tiap orang"
+        :categories="stacked.categories"
+        :series="stacked.series"
+        type="bar"
+        horizontal
+        stacked
+        :height="Math.max(240, (stacked.categories.length || 1) * 42 + 90)"
+      />
+    </div>
+
+    <!-- 4. Leaderboard + Contribution -->
     <div v-if="!loading && showNocPerformance" class="mt-6 grid gap-6 lg:grid-cols-3">
       <Card class="p-5 lg:col-span-2">
         <div class="mb-4">
@@ -303,18 +287,16 @@ onMounted(load)
         <p v-else class="py-8 text-center text-sm text-muted">Belum ada data di periode ini.</p>
       </Card>
 
-      <div class="space-y-6">
-        <ChartCard
-          title="Kontribusi"
-          :subtitle="`Persentase total clear — ${periodLabel || 'periode'}`"
-          :categories="contribution.categories"
-          :series="contribution.series"
-          :colors="contribution.colors"
-          type="pie"
-          unit="%"
-          :height="260"
-        />
-      </div>
+      <ChartCard
+        title="Kontribusi"
+        :subtitle="`Persentase total clear — ${periodLabel || 'periode'}`"
+        :categories="contribution.categories"
+        :series="contribution.series"
+        :colors="contribution.colors"
+        type="pie"
+        unit="%"
+        :height="260"
+      />
     </div>
 
     <!-- 5. Heatmap -->

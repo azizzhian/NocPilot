@@ -67,7 +67,7 @@ class DashboardController extends Controller
 
         $categoryKpis = $this->categoryKpis($summary, $nocPerformance);
         $specialists = $this->specialistBadges($nocPerformance);
-        $charts = $this->buildCharts($period, $from, $to, $userId, $summary, $nocPerformance);
+        $charts = $this->buildCharts($summary, $nocPerformance);
 
         return response()->json([
             'period' => [
@@ -430,16 +430,10 @@ class DashboardController extends Controller
      * @return array<string, mixed>
      */
     protected function buildCharts(
-        string $period,
-        Carbon $from,
-        Carbon $to,
-        ?int $userId,
         array $summary,
         array $nocPerformance,
     ): array {
-        $rows = $userId
-            ? array_values(array_filter($nocPerformance, fn ($row) => (int) $row['user_id'] === $userId))
-            : $nocPerformance;
+        $rows = $nocPerformance;
 
         $names = array_map(fn ($row) => (string) $row['name'], $rows);
 
@@ -512,7 +506,6 @@ class DashboardController extends Controller
         return [
             'clear_by_noc' => $clearByNoc,
             'stacked_by_noc' => $stackedByNoc,
-            'trend' => $this->trendChart($period, $from, $to, $userId),
             'clear_by_type' => $clearByType,
             'contribution' => $contribution,
         ];
@@ -606,103 +599,6 @@ class DashboardController extends Controller
             'days' => $days,
             'rows' => $heatmapRows,
         ];
-    }
-
-    /** @return array{categories: list<string>, series: list<array{name: string, data: list<int>, color: string}>} */
-    protected function trendChart(string $period, Carbon $from, Carbon $to, ?int $userId): array
-    {
-        [$trendFrom, $trendTo, $bucket] = match ($period) {
-            'day' => [$to->copy()->subDays(6)->startOfDay(), $to->copy()->endOfDay(), 'day'],
-            'year' => [$from->copy()->startOfMonth(), $to->copy()->endOfMonth(), 'month'],
-            default => [$from->copy()->startOfDay(), $to->copy()->endOfDay(), 'day'],
-        };
-
-        $categories = [];
-        $inputs = [];
-        $clears = [];
-
-        if ($bucket === 'month') {
-            $cursor = $trendFrom->copy()->startOfMonth();
-            while ($cursor->lte($trendTo)) {
-                $monthStart = $cursor->copy()->startOfMonth();
-                $monthEnd = $cursor->copy()->endOfMonth();
-                $categories[] = $cursor->translatedFormat('M Y');
-                $inputs[] = $this->countInputsBetween($monthStart, $monthEnd, $userId);
-                $clears[] = $this->countClearsBetween($monthStart, $monthEnd, $userId);
-                $cursor->addMonth();
-            }
-        } else {
-            $cursor = $trendFrom->copy()->startOfDay();
-            while ($cursor->lte($trendTo)) {
-                $day = $cursor->copy();
-                $categories[] = $day->format('d M');
-                $inputs[] = $this->countInputsBetween($day->copy()->startOfDay(), $day->copy()->endOfDay(), $userId);
-                $clears[] = $this->countClearsBetween($day->copy()->startOfDay(), $day->copy()->endOfDay(), $userId);
-                $cursor->addDay();
-            }
-        }
-
-        return [
-            'categories' => $categories,
-            'series' => [
-                ['name' => 'Input', 'data' => $inputs, 'color' => '#6366F1'],
-                ['name' => 'Clear', 'data' => $clears, 'color' => '#22C55E'],
-            ],
-        ];
-    }
-
-    protected function countInputsBetween(Carbon $from, Carbon $to, ?int $userId): int
-    {
-        $fromDate = $from->toDateString();
-        $toDate = $to->toDateString();
-
-        $count = 0;
-        foreach ([DailyActivation::class, DailyComplaint::class, DailyDismantle::class, DailyCctvSetup::class] as $model) {
-            $count += $model::query()
-                ->whereBetween('report_date', [$fromDate, $toDate])
-                ->when($userId, fn ($q) => $q->where('created_by', $userId))
-                ->count();
-        }
-
-        $count += ReportTicket::query()
-            ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
-                $q->whereBetween('opened_at', [$fromDate, $toDate])
-                    ->orWhereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
-            })
-            ->when($userId, fn ($q) => $q->where('created_by', $userId))
-            ->count();
-
-        return $count;
-    }
-
-    protected function countClearsBetween(Carbon $from, Carbon $to, ?int $userId): int
-    {
-        $fromDate = $from->toDateString();
-        $toDate = $to->toDateString();
-
-        $count = 0;
-        foreach ([DailyActivation::class, DailyComplaint::class, DailyDismantle::class, DailyCctvSetup::class] as $model) {
-            $count += $model::query()
-                ->whereBetween('report_date', [$fromDate, $toDate])
-                ->where('status', ReportStatus::CLEAR)
-                ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
-                ->count();
-        }
-
-        $count += ReportTicket::query()
-            ->whereNotNull('cleared_by')
-            ->whereIn('status', ['Clear', 'Closed'])
-            ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
-                $q->whereBetween('cleared_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()])
-                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
-                        $q2->whereNull('cleared_at')
-                            ->whereBetween('closed_at', [$fromDate, $toDate]);
-                    });
-            })
-            ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
-            ->count();
-
-        return $count;
     }
 
     /** @return array<int, array<string, mixed>> */

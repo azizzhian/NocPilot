@@ -129,10 +129,6 @@ export interface DashboardStats {
       categories: string[]
       series: Array<{ name: string; data: number[]; color?: string }>
     }
-    trend: {
-      categories: string[]
-      series: Array<{ name: string; data: number[]; color?: string }>
-    }
     clear_by_type: {
       categories: string[]
       series: Array<{ name: string; data: number[]; color?: string }>
