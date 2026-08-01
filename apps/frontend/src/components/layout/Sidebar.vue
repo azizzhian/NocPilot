@@ -76,7 +76,7 @@ function isActive(path: string) {
       </div>
       <div v-if="!appStore.sidebarCollapsed" class="animate-fade-in overflow-hidden">
         <h1 class="text-sm font-bold text-white tracking-tight">NocPilot</h1>
-        <p class="text-[10px] text-slate-400">ISP NOC Enterprise</p>
+        <p class="text-[10px] text-slate-400">Aplikasi Untuk Report NOC</p>
       </div>
     </div>
 

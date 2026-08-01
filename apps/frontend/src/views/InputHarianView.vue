@@ -973,7 +973,7 @@ onUnmounted(stopPoll)
           <label class="mb-1.5 block text-sm font-medium text-foreground">Paste teks aktivasi</label>
           <Textarea
             v-model="activationPasteText"
-            rows="5"
+            :rows="5"
             placeholder="Nama Pelanggan: ...&#10;ODP : ...&#10;Kapasitas: ...&#10;OLT: ...&#10;Port | ONU: ...&#10;Status: Clear"
           />
           <div class="mt-2 flex flex-wrap items-center gap-2">
