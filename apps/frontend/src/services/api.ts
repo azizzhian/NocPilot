@@ -48,12 +48,29 @@ export interface PaginatedResponse<T> {
   }
 }
 
+export interface DashboardTopPerformer {
+  user_id: number
+  name: string
+  count: number
+}
+
+export interface DashboardSpecialist {
+  key: string
+  title: string
+  emoji: string
+  color: string
+  name: string
+  count: number
+  unit: string
+}
+
 export interface DashboardStats {
   period: {
     type: 'day' | 'week' | 'month' | 'year'
     from: string
     to: string
     label: string
+    days?: number
   }
   summary: {
     activations: number
@@ -63,8 +80,20 @@ export interface DashboardStats {
     dismantles: number
     dismantles_clear: number
     cctv: number
+    cctv_clear?: number
+    tickets?: number
+    tickets_clear?: number
     noc_updates: number
   }
+  category_kpis?: Array<{
+    key: string
+    label: string
+    value: number
+    total?: number
+    color: string
+    icon?: string
+    top?: DashboardTopPerformer | null
+  }>
   kpis: Array<{
     key: string
     label: string
@@ -72,7 +101,9 @@ export interface DashboardStats {
     total?: number
     color: string
     icon?: string
+    top?: DashboardTopPerformer | null
   }>
+  specialists?: DashboardSpecialist[]
   noc_performance: Array<{
     user_id: number
     name: string
@@ -83,10 +114,18 @@ export interface DashboardStats {
     dismantles: number
     dismantles_clear: number
     tickets_clear: number
+    cctv?: number
+    cctv_clear?: number
     total: number
+    avg_per_day?: number
+    contribution_pct?: number
   }>
   charts: {
     clear_by_noc: {
+      categories: string[]
+      series: Array<{ name: string; data: number[]; color?: string }>
+    }
+    stacked_by_noc?: {
       categories: string[]
       series: Array<{ name: string; data: number[]; color?: string }>
     }
@@ -99,6 +138,15 @@ export interface DashboardStats {
       series: Array<{ name: string; data: number[]; color?: string }>
       colors?: string[]
     }
+    contribution?: {
+      categories: string[]
+      series: Array<{ name: string; data: number[]; color?: string }>
+      colors?: string[]
+    }
+  }
+  heatmap?: {
+    days: string[]
+    rows: Array<{ user_id: number; name: string; values: number[] }>
   }
   recent_activities: Array<{
     id: number

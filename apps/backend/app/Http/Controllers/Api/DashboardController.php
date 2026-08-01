@@ -54,9 +54,19 @@ class DashboardController extends Controller
 
         [$from, $to] = $this->periodRange($period, $anchor);
         $userId = $request->integer('user_id', 0) ?: null;
+        $periodDays = max(1, $from->diffInDays($to) + 1);
 
         $summary = $this->summaryForRange($from, $to, $userId);
-        $nocPerformance = $this->nocPerformance($from, $to);
+        $nocPerformance = $this->nocPerformance($from, $to, $periodDays);
+        if ($userId) {
+            $nocPerformance = array_values(array_filter(
+                $nocPerformance,
+                fn ($row) => (int) $row['user_id'] === $userId,
+            ));
+        }
+
+        $categoryKpis = $this->categoryKpis($summary, $nocPerformance);
+        $specialists = $this->specialistBadges($nocPerformance);
         $charts = $this->buildCharts($period, $from, $to, $userId, $summary, $nocPerformance);
 
         return response()->json([
@@ -65,20 +75,15 @@ class DashboardController extends Controller
                 'from' => $from->toDateString(),
                 'to' => $to->toDateString(),
                 'label' => $this->periodLabel($period, $from, $to),
+                'days' => $periodDays,
             ],
             'summary' => $summary,
-            'kpis' => [
-                ['key' => 'activations', 'label' => 'Aktivasi', 'value' => $summary['activations'], 'color' => 'success', 'icon' => 'activation'],
-                ['key' => 'activations_clear', 'label' => 'Aktivasi Clear', 'value' => $summary['activations_clear'], 'color' => 'success', 'icon' => 'activation'],
-                ['key' => 'complaints', 'label' => 'Komplain', 'value' => $summary['complaints'], 'color' => 'danger', 'icon' => 'ticket'],
-                ['key' => 'complaints_clear', 'label' => 'Komplain Clear', 'value' => $summary['complaints_clear'], 'color' => 'success', 'icon' => 'ticket'],
-                ['key' => 'dismantles', 'label' => 'Dismantle', 'value' => $summary['dismantles'], 'color' => 'warning', 'icon' => 'dismantle'],
-                ['key' => 'dismantles_clear', 'label' => 'Dismantle Clear', 'value' => $summary['dismantles_clear'], 'color' => 'info', 'icon' => 'dismantle'],
-                ['key' => 'cctv', 'label' => 'CCTV', 'value' => $summary['cctv'], 'color' => 'primary', 'icon' => 'onu'],
-                ['key' => 'noc_updates', 'label' => 'Update NOC', 'value' => $summary['noc_updates'], 'color' => 'info', 'icon' => 'router'],
-            ],
+            'category_kpis' => $categoryKpis,
+            'kpis' => $categoryKpis,
+            'specialists' => $specialists,
             'noc_performance' => $nocPerformance,
             'charts' => $charts,
+            'heatmap' => $this->weeklyHeatmap($to, $userId),
             'recent_activities' => $this->recentActivities(),
             'noc_users' => User::role(['noc', 'administrator', 'teknisi'])
                 ->orderBy('name')
@@ -145,6 +150,12 @@ class DashboardController extends Controller
         $nocUpdates = DailyNocUpdate::query()
             ->whereBetween('report_date', [$fromDate, $toDate]);
 
+        $tickets = ReportTicket::query()
+            ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
+                $q->whereBetween('opened_at', [$fromDate, $toDate])
+                    ->orWhereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
+            });
+
         return [
             'activations' => (clone $activations)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
@@ -170,6 +181,25 @@ class DashboardController extends Controller
             'cctv' => (clone $cctv)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
+            'cctv_clear' => (clone $cctv)
+                ->where('status', ReportStatus::CLEAR)
+                ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
+                ->count(),
+            'tickets' => (clone $tickets)
+                ->when($userId, fn ($q) => $q->where('created_by', $userId))
+                ->count(),
+            'tickets_clear' => ReportTicket::query()
+                ->whereNotNull('cleared_by')
+                ->whereIn('status', ['Clear', 'Closed'])
+                ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
+                    $q->whereBetween('cleared_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()])
+                        ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                            $q2->whereNull('cleared_at')
+                                ->whereBetween('closed_at', [$fromDate, $toDate]);
+                        });
+                })
+                ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
+                ->count(),
             'noc_updates' => (clone $nocUpdates)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
@@ -177,43 +207,22 @@ class DashboardController extends Controller
     }
 
     /** @return array<int, array<string, mixed>> */
-    protected function nocPerformance(Carbon $from, Carbon $to): array
+    protected function nocPerformance(Carbon $from, Carbon $to, int $periodDays = 1): array
     {
         $fromDate = $from->toDateString();
         $toDate = $to->toDateString();
 
-        $activationClears = DailyActivation::query()
-            ->select('cleared_by', DB::raw('COUNT(*) as total'))
-            ->whereBetween('report_date', [$fromDate, $toDate])
-            ->where('status', ReportStatus::CLEAR)
-            ->whereNotNull('cleared_by')
-            ->groupBy('cleared_by')
-            ->get()
-            ->keyBy('cleared_by');
-
-        $complaintClears = DailyComplaint::query()
-            ->select('cleared_by', DB::raw('COUNT(*) as total'))
-            ->whereBetween('report_date', [$fromDate, $toDate])
-            ->where('status', ReportStatus::CLEAR)
-            ->whereNotNull('cleared_by')
-            ->groupBy('cleared_by')
-            ->get()
-            ->keyBy('cleared_by');
-
-        $dismantleClears = DailyDismantle::query()
-            ->select('cleared_by', DB::raw('COUNT(*) as total'))
-            ->whereBetween('report_date', [$fromDate, $toDate])
-            ->where('status', ReportStatus::CLEAR)
-            ->whereNotNull('cleared_by')
-            ->groupBy('cleared_by')
-            ->get()
-            ->keyBy('cleared_by');
+        $activationClears = $this->groupClears(DailyActivation::class, $fromDate, $toDate);
+        $complaintClears = $this->groupClears(DailyComplaint::class, $fromDate, $toDate);
+        $dismantleClears = $this->groupClears(DailyDismantle::class, $fromDate, $toDate);
+        $cctvClears = $this->groupClears(DailyCctvSetup::class, $fromDate, $toDate);
+        $cctvInputs = $this->groupInputs(DailyCctvSetup::class, $fromDate, $toDate);
 
         $ticketClears = ReportTicket::query()
             ->select('cleared_by', DB::raw('COUNT(*) as total'))
             ->whereNotNull('cleared_by')
             ->whereIn('status', ['Clear', 'Closed'])
-            ->where(function ($q) use ($from, $to) {
+            ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
                 $q->whereBetween('cleared_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()])
                     ->orWhere(function ($q2) use ($fromDate, $toDate) {
                         $q2->whereNull('cleared_at')
@@ -224,32 +233,12 @@ class DashboardController extends Controller
             ->get()
             ->keyBy('cleared_by');
 
-        $activationInputs = DailyActivation::query()
-            ->select('created_by', DB::raw('COUNT(*) as total'))
-            ->whereBetween('report_date', [$fromDate, $toDate])
-            ->whereNotNull('created_by')
-            ->groupBy('created_by')
-            ->get()
-            ->keyBy('created_by');
-
-        $complaintInputs = DailyComplaint::query()
-            ->select('created_by', DB::raw('COUNT(*) as total'))
-            ->whereBetween('report_date', [$fromDate, $toDate])
-            ->whereNotNull('created_by')
-            ->groupBy('created_by')
-            ->get()
-            ->keyBy('created_by');
-
-        $dismantleInputs = DailyDismantle::query()
-            ->select('created_by', DB::raw('COUNT(*) as total'))
-            ->whereBetween('report_date', [$fromDate, $toDate])
-            ->whereNotNull('created_by')
-            ->groupBy('created_by')
-            ->get()
-            ->keyBy('created_by');
+        $activationInputs = $this->groupInputs(DailyActivation::class, $fromDate, $toDate);
+        $complaintInputs = $this->groupInputs(DailyComplaint::class, $fromDate, $toDate);
+        $dismantleInputs = $this->groupInputs(DailyDismantle::class, $fromDate, $toDate);
 
         $userIds = collect([
-            $activationClears, $complaintClears, $dismantleClears, $ticketClears,
+            $activationClears, $complaintClears, $dismantleClears, $ticketClears, $cctvClears, $cctvInputs,
             $activationInputs, $complaintInputs, $dismantleInputs,
         ])
             ->flatMap(fn ($rows) => $rows->keys())
@@ -259,21 +248,27 @@ class DashboardController extends Controller
 
         $users = User::query()->whereIn('id', $userIds)->get(['id', 'name'])->keyBy('id');
 
-        return $userIds
+        $rows = $userIds
             ->map(function ($id) use (
                 $users,
                 $activationClears,
                 $complaintClears,
                 $dismantleClears,
                 $ticketClears,
+                $cctvClears,
+                $cctvInputs,
                 $activationInputs,
                 $complaintInputs,
                 $dismantleInputs,
+                $periodDays,
             ) {
                 $activationsClear = (int) ($activationClears->get($id)?->total ?? 0);
                 $complaintsClear = (int) ($complaintClears->get($id)?->total ?? 0);
                 $dismantlesClear = (int) ($dismantleClears->get($id)?->total ?? 0);
                 $ticketsClear = (int) ($ticketClears->get($id)?->total ?? 0);
+                $cctvClear = (int) ($cctvClears->get($id)?->total ?? 0);
+                $cctv = max($cctvClear, (int) ($cctvInputs->get($id)?->total ?? 0));
+                $total = $activationsClear + $complaintsClear + $dismantlesClear + $ticketsClear + $cctvClear;
 
                 return [
                     'user_id' => (int) $id,
@@ -285,12 +280,148 @@ class DashboardController extends Controller
                     'dismantles' => (int) ($dismantleInputs->get($id)?->total ?? 0),
                     'dismantles_clear' => $dismantlesClear,
                     'tickets_clear' => $ticketsClear,
-                    'total' => $activationsClear + $complaintsClear + $dismantlesClear + $ticketsClear,
+                    'cctv' => $cctv,
+                    'cctv_clear' => $cctvClear,
+                    'total' => $total,
+                    'avg_per_day' => round($total / max(1, $periodDays), 2),
                 ];
             })
             ->sortByDesc('total')
-            ->values()
+            ->values();
+
+        $grandTotal = max(1, (int) $rows->sum('total'));
+
+        return $rows
+            ->map(function (array $row) use ($grandTotal) {
+                $row['contribution_pct'] = round(($row['total'] / $grandTotal) * 100, 1);
+
+                return $row;
+            })
             ->all();
+    }
+
+    /** @param  class-string  $model */
+    protected function groupClears(string $model, string $fromDate, string $toDate)
+    {
+        return $model::query()
+            ->select('cleared_by', DB::raw('COUNT(*) as total'))
+            ->whereBetween('report_date', [$fromDate, $toDate])
+            ->where('status', ReportStatus::CLEAR)
+            ->whereNotNull('cleared_by')
+            ->groupBy('cleared_by')
+            ->get()
+            ->keyBy('cleared_by');
+    }
+
+    /** @param  class-string  $model */
+    protected function groupInputs(string $model, string $fromDate, string $toDate)
+    {
+        return $model::query()
+            ->select('created_by', DB::raw('COUNT(*) as total'))
+            ->whereBetween('report_date', [$fromDate, $toDate])
+            ->whereNotNull('created_by')
+            ->groupBy('created_by')
+            ->get()
+            ->keyBy('created_by');
+    }
+
+    /**
+     * @param  array<string, int>  $summary
+     * @param  array<int, array<string, mixed>>  $nocPerformance
+     * @return array<int, array<string, mixed>>
+     */
+    protected function categoryKpis(array $summary, array $nocPerformance): array
+    {
+        $top = function (string $field) use ($nocPerformance): ?array {
+            $best = collect($nocPerformance)->sortByDesc($field)->first();
+            if (! $best || (int) ($best[$field] ?? 0) <= 0) {
+                return null;
+            }
+
+            return [
+                'user_id' => (int) $best['user_id'],
+                'name' => (string) $best['name'],
+                'count' => (int) $best[$field],
+            ];
+        };
+
+        return [
+            [
+                'key' => 'complaints',
+                'label' => 'Komplain',
+                'value' => (int) $summary['complaints'],
+                'color' => 'danger',
+                'icon' => 'ticket',
+                'top' => $top('complaints_clear'),
+            ],
+            [
+                'key' => 'activations',
+                'label' => 'Aktivasi',
+                'value' => (int) $summary['activations'],
+                'color' => 'success',
+                'icon' => 'activation',
+                'top' => $top('activations_clear'),
+            ],
+            [
+                'key' => 'tickets',
+                'label' => 'Ticket',
+                'value' => (int) ($summary['tickets'] ?? 0),
+                'color' => 'info',
+                'icon' => 'ticket',
+                'top' => $top('tickets_clear'),
+            ],
+            [
+                'key' => 'dismantles',
+                'label' => 'Dismantle',
+                'value' => (int) $summary['dismantles'],
+                'color' => 'warning',
+                'icon' => 'dismantle',
+                'top' => $top('dismantles_clear'),
+            ],
+            [
+                'key' => 'cctv',
+                'label' => 'CCTV',
+                'value' => (int) $summary['cctv'],
+                'color' => 'primary',
+                'icon' => 'cctv',
+                'top' => $top('cctv_clear') ?? $top('cctv'),
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $nocPerformance
+     * @return array<int, array<string, mixed>>
+     */
+    protected function specialistBadges(array $nocPerformance): array
+    {
+        $pick = function (string $field, string $title, string $emoji, string $color) use ($nocPerformance): ?array {
+            $best = collect($nocPerformance)->sortByDesc($field)->first();
+            if (! $best || (int) ($best[$field] ?? 0) <= 0) {
+                return null;
+            }
+
+            return [
+                'key' => $field,
+                'title' => $title,
+                'emoji' => $emoji,
+                'color' => $color,
+                'name' => (string) $best['name'],
+                'count' => (int) $best[$field],
+                'unit' => str_contains($field, 'activation') ? 'Aktivasi'
+                    : (str_contains($field, 'complaint') ? 'Clear'
+                    : (str_contains($field, 'ticket') ? 'Ticket'
+                    : (str_contains($field, 'cctv') ? 'CCTV' : 'Dismantle'))),
+            ];
+        };
+
+        return array_values(array_filter([
+            $pick('complaints_clear', 'King of Komplain', '👑', 'danger'),
+            $pick('activations_clear', 'Aktivator Terbaik', '⚡', 'success'),
+            $pick('tickets_clear', 'Ticket Master', '📦', 'info'),
+            $pick('cctv_clear', 'CCTV Expert', '📹', 'primary') ?? $pick('cctv', 'CCTV Expert', '📹', 'primary'),
+            $pick('dismantles_clear', 'Dismantle Hero', '🛠', 'warning'),
+        ]));
     }
 
     /**
@@ -310,8 +441,42 @@ class DashboardController extends Controller
             ? array_values(array_filter($nocPerformance, fn ($row) => (int) $row['user_id'] === $userId))
             : $nocPerformance;
 
+        $names = array_map(fn ($row) => (string) $row['name'], $rows);
+
+        $stackedByNoc = [
+            'categories' => $names,
+            'series' => [
+                [
+                    'name' => 'Komplain',
+                    'data' => array_map(fn ($row) => (int) $row['complaints_clear'], $rows),
+                    'color' => '#EF4444',
+                ],
+                [
+                    'name' => 'Aktivasi',
+                    'data' => array_map(fn ($row) => (int) $row['activations_clear'], $rows),
+                    'color' => '#22C55E',
+                ],
+                [
+                    'name' => 'Ticket',
+                    'data' => array_map(fn ($row) => (int) $row['tickets_clear'], $rows),
+                    'color' => '#3498DB',
+                ],
+                [
+                    'name' => 'Dismantle',
+                    'data' => array_map(fn ($row) => (int) $row['dismantles_clear'], $rows),
+                    'color' => '#E67E22',
+                ],
+                [
+                    'name' => 'CCTV',
+                    'data' => array_map(fn ($row) => (int) ($row['cctv_clear'] ?? $row['cctv'] ?? 0), $rows),
+                    'color' => '#9B59B6',
+                ],
+            ],
+        ];
+
+        // Legacy alias for older clients
         $clearByNoc = [
-            'categories' => array_map(fn ($row) => (string) $row['name'], $rows),
+            'categories' => $names,
             'series' => [[
                 'name' => 'Total Clear',
                 'data' => array_map(fn ($row) => (int) $row['total'], $rows),
@@ -320,23 +485,126 @@ class DashboardController extends Controller
         ];
 
         $clearByType = [
-            'categories' => ['Aktivasi', 'Komplain', 'Dismantle'],
+            'categories' => ['Komplain', 'Aktivasi', 'Ticket', 'Dismantle', 'CCTV'],
             'series' => [[
                 'name' => 'Clear',
                 'data' => [
-                    (int) $summary['activations_clear'],
                     (int) $summary['complaints_clear'],
+                    (int) $summary['activations_clear'],
+                    (int) ($summary['tickets_clear'] ?? 0),
                     (int) $summary['dismantles_clear'],
+                    (int) ($summary['cctv_clear'] ?? 0),
                 ],
                 'color' => '#4F46E5',
             ]],
-            'colors' => ['#22C55E', '#EF4444', '#F59E0B'],
+            'colors' => ['#EF4444', '#22C55E', '#3498DB', '#E67E22', '#9B59B6'],
+        ];
+
+        $contribution = [
+            'categories' => $names,
+            'series' => [[
+                'name' => 'Kontribusi',
+                'data' => array_map(fn ($row) => (float) ($row['contribution_pct'] ?? 0), $rows),
+            ]],
+            'colors' => ['#3498DB', '#22C55E', '#F59E0B', '#EF4444', '#9B59B6', '#14B8A6', '#E67E22'],
         ];
 
         return [
             'clear_by_noc' => $clearByNoc,
+            'stacked_by_noc' => $stackedByNoc,
             'trend' => $this->trendChart($period, $from, $to, $userId),
             'clear_by_type' => $clearByType,
+            'contribution' => $contribution,
+        ];
+    }
+
+    /**
+     * Heatmap produktivitas 7 hari terakhir (Sen–Min) per NOC.
+     *
+     * @return array{days: list<string>, rows: list<array{user_id: int, name: string, values: list<int>}>}
+     */
+    protected function weeklyHeatmap(Carbon $to, ?int $userId): array
+    {
+        $weekEnd = $to->copy()->endOfDay();
+        $weekStart = $to->copy()->subDays(6)->startOfDay();
+        $days = [];
+        $dayKeys = [];
+
+        $cursor = $weekStart->copy();
+        while ($cursor->lte($weekEnd)) {
+            $dayKeys[] = $cursor->toDateString();
+            $days[] = $cursor->translatedFormat('D');
+            $cursor->addDay();
+        }
+
+        $totals = [];
+
+        foreach ([DailyActivation::class, DailyComplaint::class, DailyDismantle::class, DailyCctvSetup::class] as $model) {
+            $rows = $model::query()
+                ->select('cleared_by', 'report_date', DB::raw('COUNT(*) as total'))
+                ->whereBetween('report_date', [$weekStart->toDateString(), $weekEnd->toDateString()])
+                ->where('status', ReportStatus::CLEAR)
+                ->whereNotNull('cleared_by')
+                ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
+                ->groupBy('cleared_by', 'report_date')
+                ->get();
+
+            foreach ($rows as $row) {
+                $uid = (int) $row->cleared_by;
+                $date = Carbon::parse($row->report_date)->toDateString();
+                $totals[$uid][$date] = ($totals[$uid][$date] ?? 0) + (int) $row->total;
+            }
+        }
+
+        $ticketRows = ReportTicket::query()
+            ->select('cleared_by', DB::raw('DATE(COALESCE(cleared_at, closed_at)) as clear_date'), DB::raw('COUNT(*) as total'))
+            ->whereNotNull('cleared_by')
+            ->whereIn('status', ['Clear', 'Closed'])
+            ->where(function ($q) use ($weekStart, $weekEnd) {
+                $q->whereBetween('cleared_at', [$weekStart, $weekEnd])
+                    ->orWhere(function ($q2) use ($weekStart, $weekEnd) {
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('closed_at', [$weekStart->toDateString(), $weekEnd->toDateString()]);
+                    });
+            })
+            ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
+            ->groupBy('cleared_by', DB::raw('DATE(COALESCE(cleared_at, closed_at))'))
+            ->get();
+
+        foreach ($ticketRows as $row) {
+            if (! $row->clear_date) {
+                continue;
+            }
+            $uid = (int) $row->cleared_by;
+            $date = Carbon::parse($row->clear_date)->toDateString();
+            $totals[$uid][$date] = ($totals[$uid][$date] ?? 0) + (int) $row->total;
+        }
+
+        $users = User::query()->whereIn('id', array_keys($totals))->get(['id', 'name'])->keyBy('id');
+
+        $heatmapRows = collect($totals)
+            ->map(function (array $byDate, $uid) use ($users, $dayKeys) {
+                $values = array_map(fn ($d) => (int) ($byDate[$d] ?? 0), $dayKeys);
+
+                return [
+                    'user_id' => (int) $uid,
+                    'name' => $users->get($uid)?->name ?? 'User #'.$uid,
+                    'values' => $values,
+                    'total' => array_sum($values),
+                ];
+            })
+            ->sortByDesc('total')
+            ->values()
+            ->map(fn ($row) => [
+                'user_id' => $row['user_id'],
+                'name' => $row['name'],
+                'values' => $row['values'],
+            ])
+            ->all();
+
+        return [
+            'days' => $days,
+            'rows' => $heatmapRows,
         ];
     }
 
@@ -389,12 +657,20 @@ class DashboardController extends Controller
         $toDate = $to->toDateString();
 
         $count = 0;
-        foreach ([DailyActivation::class, DailyComplaint::class, DailyDismantle::class] as $model) {
+        foreach ([DailyActivation::class, DailyComplaint::class, DailyDismantle::class, DailyCctvSetup::class] as $model) {
             $count += $model::query()
                 ->whereBetween('report_date', [$fromDate, $toDate])
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count();
         }
+
+        $count += ReportTicket::query()
+            ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
+                $q->whereBetween('opened_at', [$fromDate, $toDate])
+                    ->orWhereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
+            })
+            ->when($userId, fn ($q) => $q->where('created_by', $userId))
+            ->count();
 
         return $count;
     }
@@ -405,13 +681,26 @@ class DashboardController extends Controller
         $toDate = $to->toDateString();
 
         $count = 0;
-        foreach ([DailyActivation::class, DailyComplaint::class, DailyDismantle::class] as $model) {
+        foreach ([DailyActivation::class, DailyComplaint::class, DailyDismantle::class, DailyCctvSetup::class] as $model) {
             $count += $model::query()
                 ->whereBetween('report_date', [$fromDate, $toDate])
                 ->where('status', ReportStatus::CLEAR)
                 ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
                 ->count();
         }
+
+        $count += ReportTicket::query()
+            ->whereNotNull('cleared_by')
+            ->whereIn('status', ['Clear', 'Closed'])
+            ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
+                $q->whereBetween('cleared_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()])
+                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('closed_at', [$fromDate, $toDate]);
+                    });
+            })
+            ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
+            ->count();
 
         return $count;
     }

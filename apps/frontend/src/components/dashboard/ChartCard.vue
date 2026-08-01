@@ -9,15 +9,17 @@ const props = defineProps<{
   subtitle?: string
   categories: string[]
   series: { name: string; data: number[]; color?: string }[]
-  type?: 'area' | 'line' | 'bar' | 'donut'
+  type?: 'area' | 'line' | 'bar' | 'donut' | 'radar' | 'pie'
   height?: number
   unit?: string
   horizontal?: boolean
+  stacked?: boolean
   colors?: string[]
 }>()
 
 const appStore = useAppStore()
-const isDonut = computed(() => props.type === 'donut')
+const isDonut = computed(() => props.type === 'donut' || props.type === 'pie')
+const isRadar = computed(() => props.type === 'radar')
 
 const chartOptions = computed(() => {
   const palette = props.colors?.length
@@ -27,7 +29,7 @@ const chartOptions = computed(() => {
   if (isDonut.value) {
     return {
       chart: {
-        type: 'donut' as const,
+        type: (props.type === 'pie' ? 'pie' : 'donut') as 'pie' | 'donut',
         toolbar: { show: false },
         fontFamily: 'Inter, sans-serif',
         background: 'transparent',
@@ -35,7 +37,10 @@ const chartOptions = computed(() => {
       },
       labels: props.categories,
       colors: palette.length ? palette : ['#22C55E', '#EF4444', '#F59E0B'],
-      dataLabels: { enabled: true },
+      dataLabels: {
+        enabled: true,
+        formatter: (val: number) => `${Math.round(val)}%`,
+      },
       legend: {
         position: 'bottom' as const,
         labels: { colors: '#94a3b8' },
@@ -44,9 +49,9 @@ const chartOptions = computed(() => {
       plotOptions: {
         pie: {
           donut: {
-            size: '65%',
+            size: props.type === 'pie' ? '0%' : '65%',
             labels: {
-              show: true,
+              show: props.type !== 'pie',
               total: {
                 show: true,
                 label: 'Total',
@@ -58,6 +63,37 @@ const chartOptions = computed(() => {
       },
       tooltip: {
         theme: (appStore.isDark ? 'dark' : 'light') as 'dark' | 'light',
+        y: {
+          formatter: (val: number) => `${val}${props.unit ?? '%'}`,
+        },
+      },
+    }
+  }
+
+  if (isRadar.value) {
+    return {
+      chart: {
+        type: 'radar' as const,
+        toolbar: { show: false },
+        fontFamily: 'Inter, sans-serif',
+        background: 'transparent',
+        animations: { enabled: true, easing: 'easeinout', speed: 800 },
+      },
+      colors: palette,
+      xaxis: {
+        categories: props.categories,
+        labels: { style: { colors: Array(props.categories.length).fill('#94a3b8'), fontSize: '11px' } },
+      },
+      yaxis: { show: false },
+      stroke: { width: 2 },
+      fill: { opacity: 0.15 },
+      markers: { size: 3 },
+      legend: {
+        position: 'bottom' as const,
+        labels: { colors: '#94a3b8' },
+      },
+      tooltip: {
+        theme: (appStore.isDark ? 'dark' : 'light') as 'dark' | 'light',
       },
     }
   }
@@ -65,6 +101,7 @@ const chartOptions = computed(() => {
   return {
     chart: {
       type: props.type ?? 'area',
+      stacked: props.stacked ?? false,
       toolbar: { show: false },
       zoom: { enabled: false },
       fontFamily: 'Inter, sans-serif',
@@ -75,7 +112,7 @@ const chartOptions = computed(() => {
     dataLabels: { enabled: false },
     stroke: { curve: 'smooth' as const, width: props.type === 'bar' ? 0 : 2 },
     fill: props.type === 'bar'
-      ? { type: 'solid' as const, opacity: 0.9 }
+      ? { type: 'solid' as const, opacity: 0.95 }
       : {
           type: 'gradient',
           gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] },
@@ -83,8 +120,9 @@ const chartOptions = computed(() => {
     plotOptions: {
       bar: {
         horizontal: props.horizontal ?? false,
-        borderRadius: 4,
+        borderRadius: props.stacked ? 2 : 4,
         columnWidth: '55%',
+        barHeight: '70%',
       },
     },
     grid: {
@@ -123,6 +161,13 @@ const chartSeries = computed(() => {
   }
   return props.series.map((s) => ({ name: s.name, data: s.data }))
 })
+
+const hasData = computed(() => {
+  if (!props.categories.length && !isRadar.value) return false
+  if (isDonut.value) return props.series[0]?.data?.some((n) => n > 0) ?? false
+  if (isRadar.value) return props.series.some((s) => s.data.some((n) => n > 0))
+  return props.series.some((s) => s.data.some((n) => n > 0))
+})
 </script>
 
 <template>
@@ -134,7 +179,7 @@ const chartSeries = computed(() => {
       </div>
     </div>
     <div
-      v-if="!categories.length || (isDonut ? !(series[0]?.data?.some((n) => n > 0)) : !series.some((s) => s.data.some((n) => n > 0)))"
+      v-if="!hasData"
       class="flex h-[220px] items-center justify-center text-sm text-muted"
     >
       Belum ada data untuk grafik ini.

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { cn, formatNumber } from '@/lib/utils'
 import Card from '@/components/ui/Card.vue'
 import {
-  Router, Radio, Wifi, Users, Ticket, Zap, Trash2, WifiOff,
+  Router, Radio, Wifi, Users, Ticket, Zap, Trash2, WifiOff, Camera,
 } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -13,6 +13,8 @@ const props = defineProps<{
   color: string
   icon: string
   delay?: number
+  topName?: string | null
+  topCount?: number | null
 }>()
 
 const iconMap: Record<string, typeof Router> = {
@@ -27,14 +29,15 @@ const iconMap: Record<string, typeof Router> = {
   ticket: Ticket,
   activation: Zap,
   dismantle: Trash2,
+  cctv: Camera,
 }
 
-const colorMap: Record<string, { bg: string; text: string; icon: string }> = {
-  success: { bg: 'bg-success/10', text: 'text-success', icon: 'text-success' },
-  danger: { bg: 'bg-danger/10', text: 'text-danger', icon: 'text-danger' },
-  warning: { bg: 'bg-warning/10', text: 'text-warning', icon: 'text-warning' },
-  info: { bg: 'bg-info/10', text: 'text-info', icon: 'text-info' },
-  primary: { bg: 'bg-primary/10', text: 'text-primary', icon: 'text-primary' },
+const colorMap: Record<string, { bg: string; text: string; icon: string; ring: string }> = {
+  success: { bg: 'bg-success/10', text: 'text-success', icon: 'text-success', ring: 'ring-success/20' },
+  danger: { bg: 'bg-danger/10', text: 'text-danger', icon: 'text-danger', ring: 'ring-danger/20' },
+  warning: { bg: 'bg-warning/10', text: 'text-warning', icon: 'text-warning', ring: 'ring-warning/20' },
+  info: { bg: 'bg-info/10', text: 'text-info', icon: 'text-info', ring: 'ring-info/20' },
+  primary: { bg: 'bg-primary/10', text: 'text-primary', icon: 'text-primary', ring: 'ring-primary/20' },
 }
 
 const colors = computed(() => colorMap[props.color] ?? colorMap.primary)
@@ -64,6 +67,15 @@ const percentage = computed(() =>
         {{ formatNumber(value) }}
       </p>
       <p class="mt-0.5 text-xs text-muted">{{ label }}</p>
+      <p
+        v-if="topName"
+        class="mt-2 truncate rounded-lg bg-muted/40 px-2 py-1 text-[11px] font-medium text-foreground"
+        :title="`${topName} (${topCount ?? 0})`"
+      >
+        👑 {{ topName }}
+        <span class="text-muted">({{ topCount ?? 0 }})</span>
+      </p>
+      <p v-else class="mt-2 text-[11px] text-muted/70">Belum ada top performer</p>
     </div>
   </Card>
 </template>
