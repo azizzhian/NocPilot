@@ -13,9 +13,7 @@ import {
   Cable,
   Network,
   Database,
-  BarChart3,
   FileText,
-  LineChart,
   Settings,
   Shield,
   ScrollText,
@@ -90,10 +88,8 @@ export const navigation: NavSection[] = [
   {
     title: 'LAPORAN',
     items: [
-      { label: 'Dashboard Report', to: '/report', icon: BarChart3, permission: 'report.view' },
       { label: 'Generate Report', to: '/report/generate', icon: FileText, permission: 'report.generate' },
       { label: 'History Report', to: '/report/history', icon: History, permission: 'report.view' },
-      { label: 'Analytics', to: '/analytics', icon: LineChart, permission: 'analytics.view' },
     ],
   },
   {

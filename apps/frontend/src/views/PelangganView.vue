@@ -11,7 +11,7 @@ import Modal from '@/components/ui/Modal.vue'
 import ComplaintHistoryPanel from '@/components/daily/ComplaintHistoryPanel.vue'
 import { customerApi, odcApi, dailyEntryApi, type Customer, type ComplaintHistoryItem, type ComplaintHistorySummary } from '@/services/api'
 import { formatNumber } from '@/lib/utils'
-import { Download, Upload, Users, UserCheck, UserX, UserMinus, Pencil } from 'lucide-vue-next'
+import { Download, Upload, Users, UserCheck, UserX, UserMinus, Pencil, Trash2 } from 'lucide-vue-next'
 
 const search = ref('')
 const statusFilter = ref('')
@@ -27,6 +27,8 @@ const complaintHistorySummary = ref<ComplaintHistorySummary | null>(null)
 const complaintHistoryLoading = ref(false)
 const loading = ref(true)
 const saving = ref(false)
+const deleting = ref(false)
+const deleteTarget = ref<Customer | null>(null)
 const exporting = ref(false)
 const importing = ref(false)
 const modalOpen = ref(false)
@@ -139,6 +141,31 @@ function openEdit(c: Customer) {
   }
   drawerOpen.value = false
   modalOpen.value = true
+}
+
+function requestDelete(c: Customer, e?: Event) {
+  e?.stopPropagation()
+  deleteTarget.value = c
+}
+
+async function confirmDelete() {
+  if (!deleteTarget.value) return
+  deleting.value = true
+  error.value = ''
+  try {
+    await customerApi.destroy(deleteTarget.value.id)
+    if (selectedCustomer.value?.id === deleteTarget.value.id) {
+      drawerOpen.value = false
+      selectedCustomer.value = null
+    }
+    deleteTarget.value = null
+    await loadData()
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { message?: string } } }
+    error.value = err.response?.data?.message ?? 'Gagal menghapus pelanggan.'
+  } finally {
+    deleting.value = false
+  }
 }
 
 async function submitForm() {
@@ -288,7 +315,8 @@ onMounted(async () => {
             <th class="pb-3 pr-4 font-medium">Alamat</th>
             <th class="pb-3 pr-4 font-medium">ODC</th>
             <th class="pb-3 pr-4 font-medium">Status</th>
-            <th class="pb-3 font-medium">Telepon</th>
+            <th class="pb-3 pr-4 font-medium">Telepon</th>
+            <th class="pb-3 font-medium text-right">Aksi</th>
           </tr>
         </thead>
         <tbody>
@@ -305,10 +333,30 @@ onMounted(async () => {
             <td class="py-3 pr-4">
               <Badge :variant="statusVariant(customer.status)">{{ statusLabel[customer.status] }}</Badge>
             </td>
-            <td class="py-3 text-muted">{{ customer.phone ?? '—' }}</td>
+            <td class="py-3 pr-4 text-muted">{{ customer.phone ?? '—' }}</td>
+            <td class="py-3 text-right" @click.stop>
+              <div class="flex justify-end gap-1">
+                <button
+                  type="button"
+                  class="rounded-lg p-1.5 text-muted hover:bg-muted"
+                  title="Edit"
+                  @click="openEdit(customer)"
+                >
+                  <Pencil class="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  class="rounded-lg p-1.5 text-danger hover:bg-danger/10"
+                  title="Hapus"
+                  @click="requestDelete(customer)"
+                >
+                  <Trash2 class="h-4 w-4" />
+                </button>
+              </div>
+            </td>
           </tr>
           <tr v-if="!customers.length">
-            <td colspan="6" class="py-12 text-center text-sm text-muted">Belum ada data pelanggan.</td>
+            <td colspan="7" class="py-12 text-center text-sm text-muted">Belum ada data pelanggan.</td>
           </tr>
         </tbody>
       </table>
@@ -378,6 +426,24 @@ onMounted(async () => {
       </template>
     </Modal>
 
+    <Modal
+      :open="!!deleteTarget"
+      title="Hapus Pelanggan"
+      :subtitle="deleteTarget ? `Yakin ingin menghapus ${deleteTarget.name} (${deleteTarget.customer_code})? Tindakan ini tidak bisa dibatalkan.` : undefined"
+      size="sm"
+      @close="deleteTarget = null"
+    >
+      <p class="text-sm text-muted">
+        Data pelanggan akan dihapus permanen dari master.
+      </p>
+      <template #footer>
+        <Button type="button" variant="outline" :disabled="deleting" @click="deleteTarget = null">Batal</Button>
+        <Button type="button" variant="danger" :disabled="deleting" @click="confirmDelete">
+          {{ deleting ? 'Menghapus...' : 'Hapus' }}
+        </Button>
+      </template>
+    </Modal>
+
     <Teleport to="body">
       <Transition enter-active-class="transition duration-300" enter-from-class="opacity-0" enter-to-class="opacity-100"
         leave-active-class="transition duration-200" leave-from-class="opacity-100" leave-to-class="opacity-0">
@@ -395,8 +461,11 @@ onMounted(async () => {
                 <p class="font-mono text-sm text-primary">{{ selectedCustomer.customer_code }}</p>
               </div>
               <div class="flex items-center gap-1">
-                <Button variant="ghost" size="icon" @click="openEdit(selectedCustomer)">
+                <Button variant="ghost" size="icon" title="Edit" @click="openEdit(selectedCustomer)">
                   <Pencil class="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" title="Hapus" @click="requestDelete(selectedCustomer)">
+                  <Trash2 class="h-4 w-4 text-danger" />
                 </Button>
                 <Button variant="ghost" size="icon" @click="drawerOpen = false">✕</Button>
               </div>

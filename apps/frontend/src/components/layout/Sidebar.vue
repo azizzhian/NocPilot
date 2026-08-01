@@ -56,8 +56,6 @@ function badgeForItem(to: string): number | undefined {
 
 function isActive(path: string) {
   if (path === '/') return route.path === '/'
-  // Hindari /report ikut aktif saat di /report/dismantle atau /report/ticket
-  if (path === '/report') return route.path === '/report'
   return route.path === path || route.path.startsWith(`${path}/`)
 }
 </script>
