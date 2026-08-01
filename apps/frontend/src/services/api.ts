@@ -82,6 +82,7 @@ export interface DashboardStats {
     complaints_clear: number
     dismantles: number
     dismantles_clear: number
+    tickets_clear: number
     total: number
   }>
   charts: {

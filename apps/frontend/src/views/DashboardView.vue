@@ -172,7 +172,7 @@ onMounted(load)
             <Trophy class="h-4 w-4 text-primary" />
             <h3 class="text-sm font-semibold text-foreground">Peringkat Kinerja NOC</h3>
           </div>
-          <p class="mt-1 text-xs text-muted">Diurutkan dari jumlah Clear (siapa yang menyelesaikan)</p>
+          <p class="mt-1 text-xs text-muted">Diurutkan dari jumlah Clear / Close (siapa yang menyelesaikan)</p>
         </div>
         <div v-if="nocPerformance.length" class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -183,7 +183,8 @@ onMounted(load)
                 <th class="pb-2 pr-3 text-right">Aktivasi Clear</th>
                 <th class="pb-2 pr-3 text-right">Komplain Clear</th>
                 <th class="pb-2 pr-3 text-right">Dismantle Clear</th>
-                <th class="pb-2 text-right">Total Clear</th>
+                <th class="pb-2 pr-3 text-right">Ticket Close</th>
+                <th class="pb-2 text-right">Total</th>
               </tr>
             </thead>
             <tbody>
@@ -197,6 +198,7 @@ onMounted(load)
                 <td class="py-2.5 pr-3 text-right text-success">{{ row.activations_clear }}</td>
                 <td class="py-2.5 pr-3 text-right text-success">{{ row.complaints_clear }}</td>
                 <td class="py-2.5 pr-3 text-right text-success">{{ row.dismantles_clear }}</td>
+                <td class="py-2.5 pr-3 text-right text-success">{{ row.tickets_clear ?? 0 }}</td>
                 <td class="py-2.5 text-right font-semibold">{{ row.total }}</td>
               </tr>
             </tbody>

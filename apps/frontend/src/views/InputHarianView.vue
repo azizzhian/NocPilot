@@ -18,6 +18,7 @@ import Toast from '@/components/ui/Toast.vue'
 import { dailyEntryApi, type DailyEntryData, type DailyEntryItem } from '@/services/api'
 import { useDailyEntryPoll, type DailyEntryRealtimeEvent } from '@/composables/useDailyEntryPoll'
 import { toDateInput } from '@/lib/date-input'
+import { parseActivationText } from '@/lib/parse-activation-text'
 import { cn } from '@/lib/utils'
 import { Pencil, Trash2, Plus } from 'lucide-vue-next'
 
@@ -56,6 +57,8 @@ const activationForm = ref({
   status: 'On-Progress',
   notes: '',
 })
+const activationPasteText = ref('')
+const activationPasteHint = ref('')
 const cctvForm = ref({ customer_name: '', router: '', status: 'On-Progress' })
 const dismantleForm = ref({
   customer_name: '',
@@ -338,7 +341,43 @@ function resetActivationForm(closeModal = true) {
     status: 'On-Progress',
     notes: '',
   }
+  activationPasteText.value = ''
+  activationPasteHint.value = ''
   if (closeModal) formModalOpen.value = false
+}
+function applyActivationPaste() {
+  const parsed = parseActivationText(activationPasteText.value)
+  const filled: string[] = []
+  if (parsed.customer_name) {
+    activationForm.value.customer_name = parsed.customer_name
+    filled.push('Nama')
+  }
+  if (parsed.package_name) {
+    activationForm.value.package_name = parsed.package_name
+    filled.push('Paket')
+  }
+  if (parsed.olt_name) {
+    activationForm.value.olt_name = parsed.olt_name
+    filled.push('OLT')
+  }
+  if (parsed.odp_name) {
+    activationForm.value.odp_name = parsed.odp_name
+    filled.push('ODP')
+  }
+  if (parsed.port_onu) {
+    activationForm.value.port_onu = parsed.port_onu
+    filled.push('Port')
+  }
+  if (parsed.status) {
+    activationForm.value.status = parsed.status
+    filled.push('Status')
+  }
+  if (!filled.length) {
+    activationPasteHint.value = 'Tidak ada field yang dikenali. Pastikan format Label: nilai.'
+    return
+  }
+  activationPasteHint.value = `Terisi: ${filled.join(', ')}`
+  showToast(`Form diisi dari teks (${filled.length} field).`)
 }
 function openEditActivation(item: DailyEntryItem) {
   editingActivationId.value = item.id
@@ -930,6 +969,26 @@ onUnmounted(stopPoll)
       <div v-if="error" class="mb-4 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">{{ error }}</div>
 
       <form v-if="activeTab === 'activation'" class="max-h-[70vh] space-y-4 overflow-y-auto pr-1" @submit.prevent="submitActivation">
+        <div class="rounded-xl border border-border bg-muted/30 p-3">
+          <label class="mb-1.5 block text-sm font-medium text-foreground">Paste teks aktivasi</label>
+          <Textarea
+            v-model="activationPasteText"
+            rows="5"
+            placeholder="Nama Pelanggan: ...&#10;ODP : ...&#10;Kapasitas: ...&#10;OLT: ...&#10;Port | ONU: ...&#10;Status: Clear"
+          />
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <Button type="button" variant="secondary" @click="applyActivationPaste">Isi form dari teks</Button>
+            <button
+              v-if="activationPasteText"
+              type="button"
+              class="text-xs text-muted hover:text-foreground"
+              @click="activationPasteText = ''; activationPasteHint = ''"
+            >
+              Hapus teks
+            </button>
+          </div>
+          <p v-if="activationPasteHint" class="mt-1.5 text-xs text-muted">{{ activationPasteHint }}</p>
+        </div>
         <div>
           <label class="mb-1.5 block text-sm font-medium text-foreground">Nama Pelanggan</label>
           <Input v-model="activationForm.customer_name" required />
@@ -947,12 +1006,16 @@ onUnmounted(stopPoll)
         </div>
         <div>
           <label class="mb-1.5 block text-sm font-medium text-foreground">OLT</label>
-          <Select v-model="activationForm.olt_name">
-            <option value="">— Pilih OLT —</option>
-            <option v-for="o in lookups.olts" :key="o.id" :value="o.name">{{ o.name }}</option>
-          </Select>
+          <Input
+            v-model="activationForm.olt_name"
+            list="activation-olt-suggestions"
+            placeholder="Contoh: Pacitan"
+          />
+          <datalist id="activation-olt-suggestions">
+            <option v-for="o in lookups.olts" :key="o.id" :value="o.name" />
+          </datalist>
           <p v-if="lookups.olts.length === 0" class="mt-1 text-xs text-muted">
-            Belum ada data OLT — tambahkan di menu Jaringan → OLT.
+            Belum ada data OLT — bisa ketik manual atau tambahkan di menu Jaringan → OLT.
           </p>
         </div>
         <div>

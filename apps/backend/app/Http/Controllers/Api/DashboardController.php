@@ -9,6 +9,7 @@ use App\Models\DailyCctvSetup;
 use App\Models\DailyComplaint;
 use App\Models\DailyDismantle;
 use App\Models\DailyNocUpdate;
+use App\Models\ReportTicket;
 use App\Models\User;
 use App\Support\ReportStatus;
 use Carbon\Carbon;
@@ -208,6 +209,21 @@ class DashboardController extends Controller
             ->get()
             ->keyBy('cleared_by');
 
+        $ticketClears = ReportTicket::query()
+            ->select('cleared_by', DB::raw('COUNT(*) as total'))
+            ->whereNotNull('cleared_by')
+            ->whereIn('status', ['Clear', 'Closed'])
+            ->where(function ($q) use ($from, $to) {
+                $q->whereBetween('cleared_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()])
+                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('closed_at', [$fromDate, $toDate]);
+                    });
+            })
+            ->groupBy('cleared_by')
+            ->get()
+            ->keyBy('cleared_by');
+
         $activationInputs = DailyActivation::query()
             ->select('created_by', DB::raw('COUNT(*) as total'))
             ->whereBetween('report_date', [$fromDate, $toDate])
@@ -233,7 +249,7 @@ class DashboardController extends Controller
             ->keyBy('created_by');
 
         $userIds = collect([
-            $activationClears, $complaintClears, $dismantleClears,
+            $activationClears, $complaintClears, $dismantleClears, $ticketClears,
             $activationInputs, $complaintInputs, $dismantleInputs,
         ])
             ->flatMap(fn ($rows) => $rows->keys())
@@ -249,6 +265,7 @@ class DashboardController extends Controller
                 $activationClears,
                 $complaintClears,
                 $dismantleClears,
+                $ticketClears,
                 $activationInputs,
                 $complaintInputs,
                 $dismantleInputs,
@@ -256,6 +273,7 @@ class DashboardController extends Controller
                 $activationsClear = (int) ($activationClears->get($id)?->total ?? 0);
                 $complaintsClear = (int) ($complaintClears->get($id)?->total ?? 0);
                 $dismantlesClear = (int) ($dismantleClears->get($id)?->total ?? 0);
+                $ticketsClear = (int) ($ticketClears->get($id)?->total ?? 0);
 
                 return [
                     'user_id' => (int) $id,
@@ -266,7 +284,8 @@ class DashboardController extends Controller
                     'complaints_clear' => $complaintsClear,
                     'dismantles' => (int) ($dismantleInputs->get($id)?->total ?? 0),
                     'dismantles_clear' => $dismantlesClear,
-                    'total' => $activationsClear + $complaintsClear + $dismantlesClear,
+                    'tickets_clear' => $ticketsClear,
+                    'total' => $activationsClear + $complaintsClear + $dismantlesClear + $ticketsClear,
                 ];
             })
             ->sortByDesc('total')

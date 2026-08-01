@@ -212,16 +212,18 @@ onMounted(load)
             <th class="pb-3 pr-3 font-medium">Problem</th>
             <th class="pb-3 pr-3 font-medium">Status</th>
             <th class="pb-3 pr-3 font-medium">Tgl Open</th>
+            <th class="pb-3 pr-3 font-medium">Input oleh</th>
             <th class="pb-3 pr-3 font-medium">Tgl Close</th>
+            <th class="pb-3 pr-3 font-medium">Close oleh</th>
             <th class="pb-3 font-medium">Aksi</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="8" class="py-10 text-center text-muted">Memuat...</td>
+            <td colspan="10" class="py-10 text-center text-muted">Memuat...</td>
           </tr>
           <tr v-else-if="!items.length">
-            <td colspan="8" class="py-10 text-center text-muted">Belum ada ticket.</td>
+            <td colspan="10" class="py-10 text-center text-muted">Belum ada ticket.</td>
           </tr>
           <tr
             v-for="item in items"
@@ -234,7 +236,9 @@ onMounted(load)
             <td class="py-3 pr-3 max-w-[12rem] truncate">{{ item.problem || '—' }}</td>
             <td class="py-3 pr-3"><Badge :variant="statusVariant(item.status)">{{ item.status }}</Badge></td>
             <td class="py-3 pr-3 text-xs text-muted">{{ item.opened_at || '—' }}</td>
+            <td class="py-3 pr-3 text-xs text-foreground">{{ item.creator_name || '—' }}</td>
             <td class="py-3 pr-3 text-xs text-muted">{{ item.closed_at || '—' }}</td>
+            <td class="py-3 pr-3 text-xs text-foreground">{{ item.clearer_name || '—' }}</td>
             <td class="py-3">
               <div class="flex gap-1">
                 <button type="button" class="rounded-lg p-1.5 text-muted hover:bg-muted" @click="openEdit(item)">
