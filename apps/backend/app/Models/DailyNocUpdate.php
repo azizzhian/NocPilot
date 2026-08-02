@@ -10,7 +10,7 @@ class DailyNocUpdate extends Model
     use HasDailyAttribution;
 
     protected $fillable = [
-        'report_date', 'description', 'status', 'sort_order',
+        'report_date', 'description', 'odc_name', 'status', 'sort_order',
         'created_by', 'cleared_by', 'cleared_at',
     ];
 

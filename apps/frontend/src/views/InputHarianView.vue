@@ -20,7 +20,8 @@ import { useDailyEntryPoll, type DailyEntryRealtimeEvent } from '@/composables/u
 import { toDateInput } from '@/lib/date-input'
 import { parseActivationText } from '@/lib/parse-activation-text'
 import { cn } from '@/lib/utils'
-import { Pencil, Trash2, Plus } from 'lucide-vue-next'
+import { Pencil, Trash2, Plus, Download } from 'lucide-vue-next'
+import SearchInput from '@/components/ui/SearchInput.vue'
 
 function todayInput() {
   const d = new Date()
@@ -32,6 +33,11 @@ function todayInput() {
 
 const route = useRoute()
 const date = ref(todayInput())
+const filterFrom = ref(todayInput())
+const filterTo = ref(todayInput())
+const filterOdc = ref('')
+const filterSearch = ref('')
+const exporting = ref(false)
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
@@ -92,7 +98,16 @@ const gamasKindOptions = [
   { value: 'olt', label: 'OLT / Site' },
   { value: 'other', label: 'Lainnya' },
 ] as const
-const nocForm = ref({ description: '', status: 'On-Progress', sort_order: 0 })
+const nocForm = ref({ description: '', odc_name: '', status: 'On-Progress', sort_order: 0 })
+
+function filterParams() {
+  return {
+    from: filterFrom.value || date.value,
+    to: filterTo.value || date.value,
+    odc_name: filterOdc.value || undefined,
+    search: filterSearch.value.trim() || undefined,
+  }
+}
 
 const allTabs = [
   { key: 'activation', label: 'Aktivasi' },
@@ -115,6 +130,7 @@ const tabs = computed(() => allTabs.filter((t) => allowedTabKeys.value.includes(
 const pageTitle = computed(() => {
   if (route.meta.title && typeof route.meta.title === 'string') return route.meta.title
   if (allowedTabKeys.value.length === 1 && allowedTabKeys.value[0] === 'complaint') return 'Komplain'
+  if (allowedTabKeys.value.length === 1 && allowedTabKeys.value[0] === 'noc') return 'Update NOC'
   if (allowedTabKeys.value.includes('activation') && allowedTabKeys.value.includes('cctv')) return 'Aktivasi'
   return 'Input Harian'
 })
@@ -122,7 +138,8 @@ const pageTitle = computed(() => {
 const pageSubtitle = computed(() => {
   if (route.meta.subtitle && typeof route.meta.subtitle === 'string') return route.meta.subtitle
   if (pageTitle.value === 'Komplain') return 'Input dan pantau komplain harian NOC'
-  if (pageTitle.value === 'Aktivasi') return 'Aktivasi, CCTV, dan update NOC harian'
+  if (pageTitle.value === 'Update NOC') return 'Input dan pantau update NOC harian'
+  if (pageTitle.value === 'Aktivasi') return 'Aktivasi dan setup CCTV harian'
   return 'Laporan operasional harian NOC'
 })
 
@@ -192,6 +209,22 @@ const isComplaintOnlyPage = computed(
   () => allowedTabKeys.value.length === 1 && allowedTabKeys.value[0] === 'complaint',
 )
 
+const isNocOnlyPage = computed(
+  () => allowedTabKeys.value.length === 1 && allowedTabKeys.value[0] === 'noc',
+)
+
+const showRangeFilter = computed(() =>
+  ['complaint', 'noc', 'activation', 'cctv'].includes(activeTab.value),
+)
+
+const showOdcExportFilter = computed(
+  () => activeTab.value === 'complaint' || activeTab.value === 'noc',
+)
+
+const showNameSearch = computed(
+  () => activeTab.value === 'activation' || activeTab.value === 'cctv',
+)
+
 watch(
   () => [route.meta.dailyTab, route.meta.dailyTabs, route.path] as const,
   () => {
@@ -205,6 +238,14 @@ watch(
 
 watch(activeTab, () => {
   if (formModalOpen.value) closeFormModal()
+  if (showRangeFilter.value) void refreshFilteredLists()
+})
+
+let filterTimeout: ReturnType<typeof setTimeout>
+watch([filterFrom, filterTo, filterOdc, filterSearch], () => {
+  if (!showRangeFilter.value) return
+  clearTimeout(filterTimeout)
+  filterTimeout = setTimeout(() => void refreshFilteredLists(), 350)
 })
 
 const summary = computed(() => data.value?.summary ?? { activations: 0, complaints: 0, dismantles: 0 })
@@ -277,6 +318,7 @@ async function load() {
   try {
     const res = await dailyEntryApi.index(date.value)
     data.value = res.data
+    await refreshFilteredLists()
   } catch {
     error.value = 'Gagal memuat data input harian.'
   } finally {
@@ -284,8 +326,59 @@ async function load() {
   }
 }
 
+async function refreshFilteredLists() {
+  if (!data.value) return
+  const params = filterParams()
+
+  try {
+    if (allowedTabKeys.value.includes('complaint') && (activeTab.value === 'complaint' || isComplaintOnlyPage.value)) {
+      const res = await dailyEntryApi.listComplaints(params)
+      data.value.complaints = res.data.data
+      if (data.value.summary) {
+        data.value.summary = { ...data.value.summary, complaints: res.data.data.length }
+      }
+    }
+    if (allowedTabKeys.value.includes('noc') && (activeTab.value === 'noc' || isNocOnlyPage.value)) {
+      const res = await dailyEntryApi.listNocUpdates(params)
+      data.value.noc_updates = res.data.data
+    }
+    if (allowedTabKeys.value.includes('activation') && activeTab.value === 'activation') {
+      const res = await dailyEntryApi.listActivations(params)
+      data.value.activations = res.data.data
+      if (data.value.summary) {
+        data.value.summary = { ...data.value.summary, activations: res.data.data.length }
+      }
+    }
+    if (allowedTabKeys.value.includes('cctv') && activeTab.value === 'cctv') {
+      const res = await dailyEntryApi.listCctvSetups(params)
+      data.value.cctv_setups = res.data.data
+    }
+  } catch {
+    // keep index data if filter list fails
+  }
+}
+
+async function exportCurrentTab() {
+  exporting.value = true
+  error.value = ''
+  try {
+    const params = filterParams()
+    if (activeTab.value === 'complaint') {
+      await dailyEntryApi.exportComplaints(params)
+    } else if (activeTab.value === 'noc') {
+      await dailyEntryApi.exportNocUpdates(params)
+    }
+  } catch {
+    error.value = 'Gagal export Excel.'
+  } finally {
+    exporting.value = false
+  }
+}
+
 function changeDate(e: Event) {
   date.value = (e.target as HTMLInputElement).value
+  filterFrom.value = date.value
+  filterTo.value = date.value
   load()
 }
 
@@ -627,12 +720,17 @@ async function submitComplaint() {
 // NOC
 function resetNocForm(closeModal = true) {
   editingNocId.value = null
-  nocForm.value = { description: '', status: 'On-Progress', sort_order: 0 }
+  nocForm.value = { description: '', odc_name: '', status: 'On-Progress', sort_order: 0 }
   if (closeModal) formModalOpen.value = false
 }
 function openEditNoc(item: DailyEntryItem) {
   editingNocId.value = item.id
-  nocForm.value = { description: item.description ?? '', status: item.status, sort_order: item.sort_order ?? 0 }
+  nocForm.value = {
+    description: item.description ?? '',
+    odc_name: item.odc_name ?? '',
+    status: item.status,
+    sort_order: item.sort_order ?? 0,
+  }
   activeTab.value = 'noc'
   formModalOpen.value = true
 }
@@ -780,7 +878,7 @@ onUnmounted(stopPoll)
 
 <template>
   <AppLayout :title="pageTitle" :subtitle="pageSubtitle">
-    <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <div class="mb-6 flex flex-wrap items-end justify-between gap-4">
         <p class="text-sm text-muted">
           Operasional NOC · {{ pageTitle }}
           <span
@@ -792,7 +890,38 @@ onUnmounted(stopPoll)
             Live
           </span>
         </p>
-        <input type="date" :value="date" class="form-control h-10 w-auto px-4" @change="changeDate" />
+        <div class="flex flex-wrap items-end gap-2">
+          <template v-if="showRangeFilter">
+            <div>
+              <label class="mb-1 block text-[11px] text-muted">Dari</label>
+              <Input v-model="filterFrom" type="date" class="w-36" />
+            </div>
+            <div>
+              <label class="mb-1 block text-[11px] text-muted">Sampai</label>
+              <Input v-model="filterTo" type="date" class="w-36" />
+            </div>
+            <div v-if="showNameSearch" class="min-w-[12rem]">
+              <label class="mb-1 block text-[11px] text-muted">Cari nama pelanggan</label>
+              <SearchInput v-model="filterSearch" placeholder="Nama pelanggan..." class="w-48" />
+            </div>
+            <template v-if="showOdcExportFilter">
+              <div>
+                <label class="mb-1 block text-[11px] text-muted">ODC / Site</label>
+                <Select v-model="filterOdc" class="w-44">
+                  <option value="">Semua ODC</option>
+                  <option v-for="o in lookups.odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
+                </Select>
+              </div>
+              <Button variant="outline" :disabled="exporting" @click="exportCurrentTab">
+                <Download class="h-4 w-4" /> {{ exporting ? 'Export...' : 'Excel' }}
+              </Button>
+            </template>
+          </template>
+          <div>
+            <label class="mb-1 block text-[11px] text-muted">{{ showRangeFilter ? 'Hari input' : 'Tanggal' }}</label>
+            <input type="date" :value="date" class="form-control h-10 w-auto px-4" @change="changeDate" />
+          </div>
+        </div>
       </div>
 
       <div v-if="error && !formModalOpen" class="mb-4 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">{{ error }}</div>
@@ -800,7 +929,7 @@ onUnmounted(stopPoll)
       <div v-if="isComplaintOnlyPage" class="mb-6">
         <ComplaintKpiCard :value="summary.complaints" />
       </div>
-      <div v-else class="mb-6 grid gap-4 md:grid-cols-3">
+      <div v-else-if="!isNocOnlyPage" class="mb-6 grid gap-4 md:grid-cols-3">
         <KpiCard v-if="allowedTabKeys.includes('activation')" label="Aktivasi" :value="summary.activations" icon="activation" color="success" />
         <KpiCard v-if="allowedTabKeys.includes('complaint')" label="Komplain" :value="summary.complaints" icon="ticket" color="danger" />
         <KpiCard v-if="allowedTabKeys.includes('cctv')" label="CCTV" :value="data?.cctv_setups.length ?? 0" icon="onu" color="primary" />
@@ -940,6 +1069,12 @@ onUnmounted(stopPoll)
               <div class="flex justify-between gap-2">
                 <div class="min-w-0 flex flex-wrap items-center gap-2">
                   <p class="font-medium text-foreground">* {{ item.description }}</p>
+                  <span
+                    v-if="item.odc_name"
+                    class="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
+                  >
+                    {{ item.odc_name }}
+                  </span>
                   <span
                     v-if="item.is_carryover"
                     class="inline-flex items-center rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700/80 dark:text-slate-200"
@@ -1249,6 +1384,13 @@ onUnmounted(stopPoll)
         <div>
           <label class="mb-1.5 block text-sm font-medium text-foreground">Deskripsi</label>
           <Textarea v-model="nocForm.description" required />
+        </div>
+        <div>
+          <label class="mb-1.5 block text-sm font-medium text-foreground">ODC / Site</label>
+          <Select v-model="nocForm.odc_name">
+            <option value="">— Pilih ODC —</option>
+            <option v-for="o in lookups.odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
+          </Select>
         </div>
         <div>
           <label class="mb-1.5 block text-sm font-medium text-foreground">Status</label>

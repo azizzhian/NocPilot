@@ -66,7 +66,7 @@ export interface DashboardSpecialist {
 
 export interface DashboardStats {
   period: {
-    type: 'day' | 'week' | 'month' | 'year'
+    type: 'day' | 'week' | 'month' | 'year' | 'custom'
     from: string
     to: string
     label: string
@@ -173,8 +173,14 @@ export const authApi = {
 }
 
 export const dashboardApi = {
-  stats: (params?: { period?: string; date?: string; user_id?: number }) =>
-    api.get<DashboardStats>('/dashboard/stats', { params }),
+  stats: (params?: {
+    period?: string
+    date?: string
+    from?: string
+    to?: string
+    user_id?: number
+    odc_name?: string
+  }) => api.get<DashboardStats>('/dashboard/stats', { params }),
   navBadges: () => api.get<{ nav_badges: DashboardStats['nav_badges'] }>('/dashboard/nav-badges'),
 }
 
@@ -476,6 +482,7 @@ export const dismantleApi = {
 export interface ReportTicketItem {
   id: number
   location: string | null
+  odc_name?: string | null
   customer_code: string | null
   customer_name: string
   problem: string | null
@@ -495,6 +502,8 @@ export const reportTicketApi = {
   create: (data: Record<string, unknown>) => api.post('/report-tickets', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/report-tickets/${id}`, data),
   destroy: (id: number) => api.delete(`/report-tickets/${id}`),
+  exportExcel: (params?: Record<string, unknown>) =>
+    downloadFile('/report-tickets/export', `report-ticket-${Date.now()}.xlsx`, params),
 }
 
 export const technicianApi = {
@@ -535,7 +544,11 @@ export const realtimeApi = {
 }
 
 export async function downloadCsv(path: string, filename: string) {
-  const { data } = await api.get(path, { responseType: 'blob' })
+  return downloadFile(path, filename)
+}
+
+export async function downloadFile(path: string, filename: string, params?: Record<string, unknown>) {
+  const { data } = await api.get(path, { responseType: 'blob', params })
   const url = URL.createObjectURL(data)
   const a = document.createElement('a')
   a.href = url
@@ -704,6 +717,18 @@ export const dailyEntryApi = {
   destroy: (type: string, id: number) => api.delete(`/daily-entry/${type}/${id}`),
   updateStatus: (type: string, id: number, status: string) =>
     api.patch(`/daily-entry/${type}/${id}/status`, { status }),
+  listComplaints: (params: { from: string; to: string; odc_name?: string }) =>
+    api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/complaints', { params }),
+  listNocUpdates: (params: { from: string; to: string; odc_name?: string }) =>
+    api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/noc-updates', { params }),
+  listActivations: (params: { from: string; to: string; search?: string }) =>
+    api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/activations', { params }),
+  listCctvSetups: (params: { from: string; to: string; search?: string }) =>
+    api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/cctv', { params }),
+  exportComplaints: (params: { from: string; to: string; odc_name?: string }) =>
+    downloadFile('/daily-entry/export/complaints', `komplain-${params.from}-${params.to}.xlsx`, params),
+  exportNocUpdates: (params: { from: string; to: string; odc_name?: string }) =>
+    downloadFile('/daily-entry/export/noc-updates', `update-noc-${params.from}-${params.to}.xlsx`, params),
 }
 
 export interface ReportTemplateMeta {

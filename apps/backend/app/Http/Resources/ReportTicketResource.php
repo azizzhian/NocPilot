@@ -13,6 +13,7 @@ class ReportTicketResource extends JsonResource
         return [
             'id' => $this->id,
             'location' => $this->location,
+            'odc_name' => $this->odc_name,
             'customer_code' => $this->customer_code,
             'customer_name' => $this->customer_name,
             'problem' => $this->problem,

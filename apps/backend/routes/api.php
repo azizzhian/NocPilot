@@ -65,6 +65,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('dismantles', DismantleController::class);
 
         Route::get('/report-tickets/stats', [ReportTicketController::class, 'stats']);
+        Route::get('/report-tickets/export', [ReportTicketController::class, 'export']);
         Route::apiResource('report-tickets', ReportTicketController::class);
 
         Route::get('/technicians', [UserController::class, 'technicians']);
@@ -75,6 +76,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/', [DailyEntryController::class, 'index']);
             Route::get('/customers/search', [DailyEntryController::class, 'searchCustomers']);
             Route::get('/complaint-history', [DailyEntryController::class, 'complaintHistory']);
+            Route::get('/export/complaints', [DailyEntryController::class, 'exportComplaints']);
+            Route::get('/export/noc-updates', [DailyEntryController::class, 'exportNocUpdates']);
+            Route::get('/list/complaints', [DailyEntryController::class, 'listComplaints']);
+            Route::get('/list/noc-updates', [DailyEntryController::class, 'listNocUpdates']);
+            Route::get('/list/activations', [DailyEntryController::class, 'listActivations']);
+            Route::get('/list/cctv', [DailyEntryController::class, 'listCctvSetups']);
             Route::post('/activation', [DailyEntryController::class, 'storeActivation']);
             Route::put('/activation/{dailyActivation}', [DailyEntryController::class, 'updateActivation']);
             Route::post('/cctv', [DailyEntryController::class, 'storeCctv']);

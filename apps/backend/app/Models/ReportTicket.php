@@ -9,6 +9,7 @@ class ReportTicket extends Model
 {
     protected $fillable = [
         'location',
+        'odc_name',
         'customer_code',
         'customer_name',
         'problem',

@@ -11,6 +11,7 @@ import {
   LogOut,
   ChevronDown,
   User,
+  Menu,
 } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 
@@ -49,12 +50,23 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 <template>
   <header
     :class="cn(
-      'sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card/80 px-6 backdrop-blur-xl transition-all duration-300',
+      'sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card/80 px-4 sm:px-6 backdrop-blur-xl transition-all duration-300',
     )"
   >
-    <div class="animate-fade-in">
-      <h2 class="text-lg font-semibold text-foreground">{{ title }}</h2>
-      <p v-if="subtitle" class="text-xs text-muted">{{ subtitle }}</p>
+    <div class="flex min-w-0 items-center gap-2">
+      <Button
+        variant="ghost"
+        size="icon"
+        class="shrink-0 lg:hidden"
+        aria-label="Buka menu"
+        @click="appStore.openMobileSidebar()"
+      >
+        <Menu class="h-5 w-5" />
+      </Button>
+      <div class="animate-fade-in min-w-0">
+        <h2 class="truncate text-base font-semibold text-foreground sm:text-lg">{{ title }}</h2>
+        <p v-if="subtitle" class="hidden truncate text-xs text-muted sm:block">{{ subtitle }}</p>
+      </div>
     </div>
 
     <div class="flex items-center gap-2">

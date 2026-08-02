@@ -9,14 +9,16 @@ import Button from '@/components/ui/Button.vue'
 import Select from '@/components/ui/Select.vue'
 import Input from '@/components/ui/Input.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
-import { dashboardApi, type DashboardStats, type DashboardSpecialist } from '@/services/api'
+import { dashboardApi, odcApi, type DashboardStats, type DashboardSpecialist } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { FileText, Zap, Activity, Trophy, Award } from 'lucide-vue-next'
 
 const auth = useAuthStore()
-const period = ref<'day' | 'week' | 'month' | 'year'>('day')
-const date = ref(new Date().toISOString().slice(0, 10))
+const fromDate = ref(new Date().toISOString().slice(0, 10))
+const toDate = ref(new Date().toISOString().slice(0, 10))
 const userId = ref<number | ''>('')
+const odcName = ref('')
+const odcs = ref<{ id: number; name: string }[]>([])
 const loading = ref(true)
 
 const periodLabel = ref('')
@@ -35,13 +37,6 @@ const showClearByNoc = computed(() => auth.can('dashboard.widget.clear_by_noc'))
 const showNocPerformance = computed(() => auth.can('dashboard.widget.noc_performance'))
 const showQuickActions = computed(() => auth.can('dashboard.widget.quick_actions'))
 const showRecent = computed(() => auth.can('dashboard.widget.recent'))
-
-const periodOptions = [
-  { value: 'day', label: 'Hari ini' },
-  { value: 'week', label: 'Minggu ini' },
-  { value: 'month', label: 'Bulan ini' },
-  { value: 'year', label: 'Tahun ini' },
-]
 
 const emptyCharts = (): DashboardStats['charts'] => ({
   clear_by_noc: { categories: [], series: [{ name: 'Total Clear', data: [] }] },
@@ -97,13 +92,27 @@ const heatmapMax = computed(() => {
   return Math.max(1, ...values, 0)
 })
 
+async function loadOdcs() {
+  try {
+    const res = await odcApi.list({ per_page: 200 })
+    odcs.value = res.data.data.map((o) => ({
+      id: o.id as number,
+      name: String(o.name ?? ''),
+    }))
+  } catch {
+    odcs.value = []
+  }
+}
+
 async function load() {
   loading.value = true
   try {
     const { data } = await dashboardApi.stats({
-      period: period.value,
-      date: date.value,
+      period: 'custom',
+      from: fromDate.value,
+      to: toDate.value,
       user_id: userId.value === '' ? undefined : Number(userId.value),
+      odc_name: odcName.value || undefined,
     })
     periodLabel.value = data.period.label
     periodDays.value = data.period.days ?? 1
@@ -128,25 +137,33 @@ async function load() {
   }
 }
 
-watch([period, date, userId], () => {
+watch([fromDate, toDate, userId, odcName], () => {
   void load()
 })
 
-onMounted(load)
+onMounted(async () => {
+  await loadOdcs()
+  await load()
+})
 </script>
 
 <template>
   <AppLayout title="Dashboard Kinerja NOC" :subtitle="subtitle">
     <div class="mb-6 flex flex-wrap items-end gap-3">
       <div>
-        <label class="mb-1.5 block text-xs font-medium text-muted">Periode</label>
-        <Select v-model="period" class="w-36">
-          <option v-for="opt in periodOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-        </Select>
+        <label class="mb-1.5 block text-xs font-medium text-muted">Dari</label>
+        <Input v-model="fromDate" type="date" class="w-40" />
       </div>
       <div>
-        <label class="mb-1.5 block text-xs font-medium text-muted">Tanggal acuan</label>
-        <Input v-model="date" type="date" class="w-40" />
+        <label class="mb-1.5 block text-xs font-medium text-muted">Sampai</label>
+        <Input v-model="toDate" type="date" class="w-40" />
+      </div>
+      <div>
+        <label class="mb-1.5 block text-xs font-medium text-muted">ODC / Site</label>
+        <Select v-model="odcName" class="w-48">
+          <option value="">Semua ODC</option>
+          <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
+        </Select>
       </div>
       <div>
         <label class="mb-1.5 block text-xs font-medium text-muted">NOC</label>

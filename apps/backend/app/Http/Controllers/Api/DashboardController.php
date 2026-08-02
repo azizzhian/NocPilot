@@ -45,19 +45,33 @@ class DashboardController extends Controller
     public function stats(Request $request): JsonResponse
     {
         $period = $request->string('period', 'day')->toString();
-        if (! in_array($period, ['day', 'week', 'month', 'year'], true)) {
+        if (! in_array($period, ['day', 'week', 'month', 'year', 'custom'], true)) {
             $period = 'day';
         }
 
         $anchor = Carbon::parse($request->string('date', now()->toDateString())->toString())
             ->timezone(config('app.timezone'));
 
-        [$from, $to] = $this->periodRange($period, $anchor);
+        if ($period === 'custom') {
+            $from = Carbon::parse($request->string('from', $anchor->toDateString())->toString())
+                ->timezone(config('app.timezone'))
+                ->startOfDay();
+            $to = Carbon::parse($request->string('to', $from->toDateString())->toString())
+                ->timezone(config('app.timezone'))
+                ->endOfDay();
+            if ($from->gt($to)) {
+                [$from, $to] = [$to->copy()->startOfDay(), $from->copy()->endOfDay()];
+            }
+        } else {
+            [$from, $to] = $this->periodRange($period, $anchor);
+        }
+
         $userId = $request->integer('user_id', 0) ?: null;
+        $odcName = trim($request->string('odc_name')->toString()) ?: null;
         $periodDays = max(1, $from->diffInDays($to) + 1);
 
-        $summary = $this->summaryForRange($from, $to, $userId);
-        $nocPerformance = $this->nocPerformance($from, $to, $periodDays);
+        $summary = $this->summaryForRange($from, $to, $userId, $odcName);
+        $nocPerformance = $this->nocPerformance($from, $to, $periodDays, $odcName);
         if ($userId) {
             $nocPerformance = array_values(array_filter(
                 $nocPerformance,
@@ -74,7 +88,9 @@ class DashboardController extends Controller
                 'type' => $period,
                 'from' => $from->toDateString(),
                 'to' => $to->toDateString(),
-                'label' => $this->periodLabel($period, $from, $to),
+                'label' => $period === 'custom'
+                    ? $from->translatedFormat('d M Y').' – '.$to->translatedFormat('d M Y')
+                    : $this->periodLabel($period, $from, $to),
                 'days' => $periodDays,
             ],
             'summary' => $summary,
@@ -83,7 +99,7 @@ class DashboardController extends Controller
             'specialists' => $specialists,
             'noc_performance' => $nocPerformance,
             'charts' => $charts,
-            'heatmap' => $this->weeklyHeatmap($to, $userId),
+            'heatmap' => $this->weeklyHeatmap($to, $userId, $odcName),
             'recent_activities' => $this->recentActivities(),
             'noc_users' => User::role(['noc', 'administrator', 'teknisi'])
                 ->orderBy('name')
@@ -130,31 +146,44 @@ class DashboardController extends Controller
     }
 
     /** @return array<string, int> */
-    protected function summaryForRange(Carbon $from, Carbon $to, ?int $userId): array
+    protected function summaryForRange(Carbon $from, Carbon $to, ?int $userId, ?string $odcName = null): array
     {
         $fromDate = $from->toDateString();
         $toDate = $to->toDateString();
 
         $activations = DailyActivation::query()
             ->whereBetween('report_date', [$fromDate, $toDate]);
+        // Aktivasi belum punya odc_name — jika filter ODC aktif, anggap 0
+        if ($odcName) {
+            $activations->whereRaw('1 = 0');
+        }
 
         $complaints = DailyComplaint::query()
-            ->whereBetween('report_date', [$fromDate, $toDate]);
+            ->whereBetween('report_date', [$fromDate, $toDate])
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName));
 
         $dismantles = DailyDismantle::query()
             ->whereBetween('report_date', [$fromDate, $toDate]);
+        if ($odcName) {
+            $dismantles->whereRaw('1 = 0');
+        }
 
         $cctv = DailyCctvSetup::query()
             ->whereBetween('report_date', [$fromDate, $toDate]);
+        if ($odcName) {
+            $cctv->whereRaw('1 = 0');
+        }
 
         $nocUpdates = DailyNocUpdate::query()
-            ->whereBetween('report_date', [$fromDate, $toDate]);
+            ->whereBetween('report_date', [$fromDate, $toDate])
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName));
 
         $tickets = ReportTicket::query()
             ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
                 $q->whereBetween('opened_at', [$fromDate, $toDate])
                     ->orWhereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
-            });
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName));
 
         return [
             'activations' => (clone $activations)
@@ -198,6 +227,7 @@ class DashboardController extends Controller
                                 ->whereBetween('closed_at', [$fromDate, $toDate]);
                         });
                 })
+                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
                 ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
                 ->count(),
             'noc_updates' => (clone $nocUpdates)
@@ -207,16 +237,24 @@ class DashboardController extends Controller
     }
 
     /** @return array<int, array<string, mixed>> */
-    protected function nocPerformance(Carbon $from, Carbon $to, int $periodDays = 1): array
+    protected function nocPerformance(Carbon $from, Carbon $to, int $periodDays = 1, ?string $odcName = null): array
     {
         $fromDate = $from->toDateString();
         $toDate = $to->toDateString();
 
-        $activationClears = $this->groupClears(DailyActivation::class, $fromDate, $toDate);
-        $complaintClears = $this->groupClears(DailyComplaint::class, $fromDate, $toDate);
-        $dismantleClears = $this->groupClears(DailyDismantle::class, $fromDate, $toDate);
-        $cctvClears = $this->groupClears(DailyCctvSetup::class, $fromDate, $toDate);
-        $cctvInputs = $this->groupInputs(DailyCctvSetup::class, $fromDate, $toDate);
+        $activationClears = $odcName
+            ? collect()
+            : $this->groupClears(DailyActivation::class, $fromDate, $toDate);
+        $complaintClears = $this->groupClears(DailyComplaint::class, $fromDate, $toDate, $odcName);
+        $dismantleClears = $odcName
+            ? collect()
+            : $this->groupClears(DailyDismantle::class, $fromDate, $toDate);
+        $cctvClears = $odcName
+            ? collect()
+            : $this->groupClears(DailyCctvSetup::class, $fromDate, $toDate);
+        $cctvInputs = $odcName
+            ? collect()
+            : $this->groupInputs(DailyCctvSetup::class, $fromDate, $toDate);
 
         $ticketClears = ReportTicket::query()
             ->select('cleared_by', DB::raw('COUNT(*) as total'))
@@ -229,13 +267,18 @@ class DashboardController extends Controller
                             ->whereBetween('closed_at', [$fromDate, $toDate]);
                     });
             })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
             ->groupBy('cleared_by')
             ->get()
             ->keyBy('cleared_by');
 
-        $activationInputs = $this->groupInputs(DailyActivation::class, $fromDate, $toDate);
-        $complaintInputs = $this->groupInputs(DailyComplaint::class, $fromDate, $toDate);
-        $dismantleInputs = $this->groupInputs(DailyDismantle::class, $fromDate, $toDate);
+        $activationInputs = $odcName
+            ? collect()
+            : $this->groupInputs(DailyActivation::class, $fromDate, $toDate);
+        $complaintInputs = $this->groupInputs(DailyComplaint::class, $fromDate, $toDate, $odcName);
+        $dismantleInputs = $odcName
+            ? collect()
+            : $this->groupInputs(DailyDismantle::class, $fromDate, $toDate);
 
         $userIds = collect([
             $activationClears, $complaintClears, $dismantleClears, $ticketClears, $cctvClears, $cctvInputs,
@@ -301,25 +344,27 @@ class DashboardController extends Controller
     }
 
     /** @param  class-string  $model */
-    protected function groupClears(string $model, string $fromDate, string $toDate)
+    protected function groupClears(string $model, string $fromDate, string $toDate, ?string $odcName = null)
     {
         return $model::query()
             ->select('cleared_by', DB::raw('COUNT(*) as total'))
             ->whereBetween('report_date', [$fromDate, $toDate])
             ->where('status', ReportStatus::CLEAR)
             ->whereNotNull('cleared_by')
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
             ->groupBy('cleared_by')
             ->get()
             ->keyBy('cleared_by');
     }
 
     /** @param  class-string  $model */
-    protected function groupInputs(string $model, string $fromDate, string $toDate)
+    protected function groupInputs(string $model, string $fromDate, string $toDate, ?string $odcName = null)
     {
         return $model::query()
             ->select('created_by', DB::raw('COUNT(*) as total'))
             ->whereBetween('report_date', [$fromDate, $toDate])
             ->whereNotNull('created_by')
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
             ->groupBy('created_by')
             ->get()
             ->keyBy('created_by');
@@ -516,7 +561,7 @@ class DashboardController extends Controller
      *
      * @return array{days: list<string>, rows: list<array{user_id: int, name: string, values: list<int>}>}
      */
-    protected function weeklyHeatmap(Carbon $to, ?int $userId): array
+    protected function weeklyHeatmap(Carbon $to, ?int $userId, ?string $odcName = null): array
     {
         $weekEnd = $to->copy()->endOfDay();
         $weekStart = $to->copy()->subDays(6)->startOfDay();
@@ -532,13 +577,18 @@ class DashboardController extends Controller
 
         $totals = [];
 
-        foreach ([DailyActivation::class, DailyComplaint::class, DailyDismantle::class, DailyCctvSetup::class] as $model) {
+        $models = $odcName
+            ? [DailyComplaint::class, DailyNocUpdate::class]
+            : [DailyActivation::class, DailyComplaint::class, DailyDismantle::class, DailyCctvSetup::class, DailyNocUpdate::class];
+
+        foreach ($models as $model) {
             $rows = $model::query()
                 ->select('cleared_by', 'report_date', DB::raw('COUNT(*) as total'))
                 ->whereBetween('report_date', [$weekStart->toDateString(), $weekEnd->toDateString()])
                 ->where('status', ReportStatus::CLEAR)
                 ->whereNotNull('cleared_by')
                 ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
+                ->when($odcName && in_array($model, [DailyComplaint::class, DailyNocUpdate::class], true), fn ($q) => $q->where('odc_name', $odcName))
                 ->groupBy('cleared_by', 'report_date')
                 ->get();
 
@@ -561,6 +611,7 @@ class DashboardController extends Controller
                     });
             })
             ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
             ->groupBy('cleared_by', DB::raw('DATE(COALESCE(cleared_at, closed_at))'))
             ->get();
 

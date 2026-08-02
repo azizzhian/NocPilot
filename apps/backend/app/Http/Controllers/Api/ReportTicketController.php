@@ -24,6 +24,7 @@ class ReportTicketController extends Controller
                 $q->where('customer_name', 'like', "%{$search}%")
                     ->orWhere('customer_code', 'like', "%{$search}%")
                     ->orWhere('location', 'like', "%{$search}%")
+                    ->orWhere('odc_name', 'like', "%{$search}%")
                     ->orWhere('problem', 'like', "%{$search}%");
             });
         }
@@ -32,6 +33,19 @@ class ReportTicketController extends Controller
             if ($status !== 'all') {
                 $query->where('status', $status);
             }
+        }
+
+        $from = $request->string('from')->toString();
+        $to = $request->string('to')->toString();
+        if ($from !== '') {
+            $query->whereDate('opened_at', '>=', $from);
+        }
+        if ($to !== '') {
+            $query->whereDate('opened_at', '<=', $to);
+        }
+
+        if ($odc = trim($request->string('odc_name')->toString())) {
+            $query->where('odc_name', $odc);
         }
 
         return ReportTicketResource::collection($query->paginate(20));
@@ -107,11 +121,60 @@ class ReportTicketController extends Controller
         ]);
     }
 
+    public function export(Request $request)
+    {
+        $query = ReportTicket::query()
+            ->with(['creator:id,name', 'clearer:id,name'])
+            ->orderBy('opened_at')
+            ->orderBy('id');
+
+        $from = $request->string('from')->toString();
+        $to = $request->string('to')->toString();
+        if ($from !== '') {
+            $query->whereDate('opened_at', '>=', $from);
+        }
+        if ($to !== '') {
+            $query->whereDate('opened_at', '<=', $to);
+        }
+        if ($odc = trim($request->string('odc_name')->toString())) {
+            $query->where('odc_name', $odc);
+        }
+        if ($status = $request->string('status')->toString()) {
+            if ($status !== '' && $status !== 'all') {
+                $query->where('status', $status);
+            }
+        }
+
+        $rows = $query->get()->map(fn (ReportTicket $r) => [
+            $r->opened_at?->toDateString(),
+            $r->closed_at?->toDateString(),
+            $r->odc_name,
+            $r->location,
+            $r->customer_code,
+            $r->customer_name,
+            $r->problem,
+            $r->action,
+            $r->status,
+            $r->creator?->name,
+            $r->clearer?->name,
+        ]);
+
+        $labelFrom = $from !== '' ? $from : 'all';
+        $labelTo = $to !== '' ? $to : 'all';
+
+        return \App\Support\ExcelExport::download(
+            'report-ticket-'.$labelFrom.'-'.$labelTo.'.xlsx',
+            ['Opened', 'Closed', 'ODC/Site', 'Lokasi', 'Kode', 'Nama', 'Problem', 'Action', 'Status', 'Input oleh', 'Close oleh'],
+            $rows,
+        );
+    }
+
     /** @return array<string, mixed> */
     private function validated(Request $request, bool $updating = false): array
     {
         return $request->validate([
             'location' => 'nullable|string|max:255',
+            'odc_name' => 'nullable|string|max:255',
             'customer_code' => 'nullable|string|max:100',
             'customer_name' => ($updating ? 'sometimes' : 'required').'|string|max:255',
             'problem' => 'nullable|string|max:255',

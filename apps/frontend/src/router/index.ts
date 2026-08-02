@@ -26,9 +26,20 @@ const router = createRouter({
       name: 'aktivasi',
       component: () => import('@/views/InputHarianView.vue'),
       meta: {
-        dailyTabs: ['activation', 'cctv', 'noc'],
+        dailyTabs: ['activation', 'cctv'],
         title: 'Aktivasi',
-        subtitle: 'Aktivasi, setup CCTV, dan update NOC harian',
+        subtitle: 'Aktivasi dan setup CCTV harian',
+        permission: 'activation.view',
+      },
+    },
+    {
+      path: '/update-noc',
+      name: 'update-noc',
+      component: () => import('@/views/InputHarianView.vue'),
+      meta: {
+        dailyTab: 'noc',
+        title: 'Update NOC',
+        subtitle: 'Input dan pantau update NOC harian',
         permission: 'activation.view',
       },
     },

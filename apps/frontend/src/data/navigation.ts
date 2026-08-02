@@ -21,6 +21,7 @@ import {
   UserCog,
   AlertTriangle,
   Ticket,
+  ClipboardList,
   type LucideIcon,
 } from 'lucide-vue-next'
 
@@ -56,6 +57,7 @@ export const navigation: NavSection[] = [
     items: [
       { label: 'Komplain', to: '/komplain', icon: AlertTriangle, favorite: true, permission: 'complaint.view' },
       { label: 'Aktivasi', to: '/aktivasi', icon: Zap, favorite: true, permission: 'activation.view' },
+      { label: 'Update NOC', to: '/update-noc', icon: ClipboardList, favorite: true, permission: 'activation.view' },
     ],
   },
   {

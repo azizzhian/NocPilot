@@ -9,8 +9,8 @@ import SearchInput from '@/components/ui/SearchInput.vue'
 import Select from '@/components/ui/Select.vue'
 import Modal from '@/components/ui/Modal.vue'
 import Textarea from '@/components/ui/Textarea.vue'
-import { reportTicketApi, type ReportTicketItem } from '@/services/api'
-import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
+import { reportTicketApi, odcApi, type ReportTicketItem } from '@/services/api'
+import { Plus, Pencil, Trash2, Download } from 'lucide-vue-next'
 
 function todayInput() {
   const d = new Date()
@@ -19,9 +19,14 @@ function todayInput() {
 
 const search = ref('')
 const statusFilter = ref('all')
+const fromDate = ref('')
+const toDate = ref('')
+const odcName = ref('')
+const odcs = ref<{ id: number; name: string }[]>([])
 const items = ref<ReportTicketItem[]>([])
 const stats = ref<Record<string, number>>({})
 const loading = ref(true)
+const exporting = ref(false)
 const showModal = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
@@ -31,6 +36,7 @@ const deleting = ref(false)
 
 const form = ref({
   location: '',
+  odc_name: '',
   customer_code: '',
   customer_name: '',
   problem: '',
@@ -54,15 +60,31 @@ function statusVariant(status: string) {
   return 'warning'
 }
 
+function listParams() {
+  return {
+    search: search.value || undefined,
+    status: statusFilter.value,
+    from: fromDate.value || undefined,
+    to: toDate.value || undefined,
+    odc_name: odcName.value || undefined,
+  }
+}
+
+async function loadOdcs() {
+  try {
+    const res = await odcApi.list({ per_page: 200 })
+    odcs.value = res.data.data.map((o) => ({ id: o.id as number, name: String(o.name ?? '') }))
+  } catch {
+    odcs.value = []
+  }
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
     const [listRes, statsRes] = await Promise.all([
-      reportTicketApi.list({
-        search: search.value || undefined,
-        status: statusFilter.value,
-      }),
+      reportTicketApi.list(listParams()),
       reportTicketApi.stats(),
     ])
     items.value = listRes.data.data
@@ -74,10 +96,23 @@ async function load() {
   }
 }
 
+async function exportExcel() {
+  exporting.value = true
+  error.value = ''
+  try {
+    await reportTicketApi.exportExcel(listParams())
+  } catch {
+    error.value = 'Gagal export Excel.'
+  } finally {
+    exporting.value = false
+  }
+}
+
 function openCreate() {
   editingId.value = null
   form.value = {
     location: '',
+    odc_name: '',
     customer_code: '',
     customer_name: '',
     problem: '',
@@ -94,6 +129,7 @@ function openEdit(item: ReportTicketItem) {
   editingId.value = item.id
   form.value = {
     location: item.location ?? '',
+    odc_name: item.odc_name ?? '',
     customer_code: item.customer_code ?? '',
     customer_name: item.customer_name,
     problem: item.problem ?? '',
@@ -153,12 +189,15 @@ async function confirmDelete() {
 }
 
 let searchTimeout: ReturnType<typeof setTimeout>
-watch([search, statusFilter], () => {
+watch([search, statusFilter, fromDate, toDate, odcName], () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(load, 400)
 })
 
-onMounted(load)
+onMounted(async () => {
+  await loadOdcs()
+  await load()
+})
 </script>
 
 <template>
@@ -183,29 +222,48 @@ onMounted(load)
       {{ error }}
     </div>
 
-    <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
-      <div class="flex flex-wrap items-center gap-2">
-        <SearchInput v-model="search" placeholder="Cari nama / ID / lokasi..." class="max-w-sm" />
-        <div class="flex gap-1 overflow-x-auto">
-          <button
-            v-for="tab in statusTabs"
-            :key="tab.key"
-            type="button"
-            class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition"
-            :class="statusFilter === tab.key ? 'bg-primary text-white' : 'border border-border text-muted hover:bg-muted'"
-            @click="statusFilter = tab.key"
-          >
-            {{ tab.label }}
-          </button>
-        </div>
+    <div class="mb-4 flex flex-wrap items-end gap-3">
+      <SearchInput v-model="search" placeholder="Cari nama / ID / lokasi..." class="max-w-sm" />
+      <div>
+        <label class="mb-1 block text-[11px] text-muted">Dari</label>
+        <Input v-model="fromDate" type="date" class="w-36" />
       </div>
-      <Button @click="openCreate"><Plus class="h-4 w-4" /> Tambah Ticket</Button>
+      <div>
+        <label class="mb-1 block text-[11px] text-muted">Sampai</label>
+        <Input v-model="toDate" type="date" class="w-36" />
+      </div>
+      <div>
+        <label class="mb-1 block text-[11px] text-muted">ODC / Site</label>
+        <Select v-model="odcName" class="w-44">
+          <option value="">Semua ODC</option>
+          <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
+        </Select>
+      </div>
+      <div class="flex gap-1 overflow-x-auto">
+        <button
+          v-for="tab in statusTabs"
+          :key="tab.key"
+          type="button"
+          class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition"
+          :class="statusFilter === tab.key ? 'bg-primary text-white' : 'border border-border text-muted hover:bg-muted'"
+          @click="statusFilter = tab.key"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
+      <div class="ml-auto flex gap-2">
+        <Button variant="outline" :disabled="exporting" @click="exportExcel">
+          <Download class="h-4 w-4" /> {{ exporting ? 'Export...' : 'Excel' }}
+        </Button>
+        <Button @click="openCreate"><Plus class="h-4 w-4" /> Tambah Ticket</Button>
+      </div>
     </div>
 
     <Card class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-muted">
+            <th class="pb-3 pr-3 font-medium">ODC/Site</th>
             <th class="pb-3 pr-3 font-medium">Lokasi</th>
             <th class="pb-3 pr-3 font-medium">ID Pel</th>
             <th class="pb-3 pr-3 font-medium">Nama</th>
@@ -220,16 +278,17 @@ onMounted(load)
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="10" class="py-10 text-center text-muted">Memuat...</td>
+            <td colspan="11" class="py-10 text-center text-muted">Memuat...</td>
           </tr>
           <tr v-else-if="!items.length">
-            <td colspan="10" class="py-10 text-center text-muted">Belum ada ticket.</td>
+            <td colspan="11" class="py-10 text-center text-muted">Belum ada ticket.</td>
           </tr>
           <tr
             v-for="item in items"
             :key="item.id"
             class="border-b border-border/50 hover:bg-muted/30"
           >
+            <td class="py-3 pr-3 text-xs">{{ item.odc_name || '—' }}</td>
             <td class="py-3 pr-3">{{ item.location || '—' }}</td>
             <td class="py-3 pr-3 font-mono text-xs">{{ item.customer_code || '—' }}</td>
             <td class="py-3 pr-3 font-medium">{{ item.customer_name }}</td>
@@ -260,55 +319,56 @@ onMounted(load)
       size="lg"
       @close="showModal = false"
     >
-      <div class="space-y-4">
-        <div v-if="error" class="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
-          {{ error }}
-        </div>
-        <div class="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label class="mb-1.5 block text-sm font-medium">Lokasi</label>
-            <Input v-model="form.location" placeholder="POP / Area / ODC" />
-          </div>
-          <div>
-            <label class="mb-1.5 block text-sm font-medium">ID Pelanggan</label>
-            <Input v-model="form.customer_code" placeholder="Kode / ID" />
-          </div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label class="mb-1.5 block text-sm font-medium">ODC / Site</label>
+          <Select v-model="form.odc_name">
+            <option value="">— Pilih ODC —</option>
+            <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
+          </Select>
         </div>
         <div>
-          <label class="mb-1.5 block text-sm font-medium">Nama</label>
+          <label class="mb-1.5 block text-sm font-medium">Lokasi</label>
+          <Input v-model="form.location" />
+        </div>
+        <div>
+          <label class="mb-1.5 block text-sm font-medium">ID Pelanggan</label>
+          <Input v-model="form.customer_code" />
+        </div>
+        <div>
+          <label class="mb-1.5 block text-sm font-medium">Nama Pelanggan</label>
           <Input v-model="form.customer_name" required />
         </div>
-        <div>
+        <div class="sm:col-span-2">
           <label class="mb-1.5 block text-sm font-medium">Problem</label>
           <Input v-model="form.problem" />
         </div>
-        <div>
+        <div class="sm:col-span-2">
           <label class="mb-1.5 block text-sm font-medium">Action</label>
-          <Textarea v-model="form.action" :rows="2" />
-        </div>
-        <div class="grid gap-3 sm:grid-cols-3">
-          <div>
-            <label class="mb-1.5 block text-sm font-medium">Status</label>
-            <Select v-model="form.status" class="w-full">
-              <option value="On-Progress">On-Progress</option>
-              <option value="Clear">Clear</option>
-              <option value="Closed">Closed</option>
-            </Select>
-          </div>
-          <div>
-            <label class="mb-1.5 block text-sm font-medium">Tgl Open</label>
-            <Input v-model="form.opened_at" type="date" />
-          </div>
-          <div>
-            <label class="mb-1.5 block text-sm font-medium">Tgl Close</label>
-            <Input v-model="form.closed_at" type="date" />
-          </div>
+          <Textarea v-model="form.action" :rows="3" />
         </div>
         <div>
-          <label class="mb-1.5 block text-sm font-medium">Keterangan</label>
+          <label class="mb-1.5 block text-sm font-medium">Status</label>
+          <Select v-model="form.status">
+            <option value="On-Progress">On-Progress</option>
+            <option value="Clear">Clear</option>
+            <option value="Closed">Closed</option>
+          </Select>
+        </div>
+        <div>
+          <label class="mb-1.5 block text-sm font-medium">Tgl Open</label>
+          <Input v-model="form.opened_at" type="date" />
+        </div>
+        <div>
+          <label class="mb-1.5 block text-sm font-medium">Tgl Close</label>
+          <Input v-model="form.closed_at" type="date" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="mb-1.5 block text-sm font-medium">Notes</label>
           <Textarea v-model="form.notes" :rows="2" />
         </div>
       </div>
+      <p v-if="error && showModal" class="mt-3 text-sm text-danger">{{ error }}</p>
       <template #footer>
         <Button variant="outline" @click="showModal = false">Batal</Button>
         <Button :disabled="saving" @click="submit">{{ saving ? 'Menyimpan...' : 'Simpan' }}</Button>
@@ -317,7 +377,7 @@ onMounted(load)
 
     <Modal
       :open="!!deleteTarget"
-      title="Hapus ticket?"
+      title="Hapus Ticket"
       :subtitle="deleteTarget ? `Yakin ingin menghapus ${deleteTarget.customer_name}? Tindakan ini tidak bisa dibatalkan.` : undefined"
       size="sm"
       @close="deleteTarget = null"

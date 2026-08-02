@@ -759,9 +759,152 @@ class DailyEntryController extends Controller
         return $request->validate([
             'report_date' => 'required|date',
             'description' => 'required|string',
+            'odc_name' => 'nullable|string|max:255',
             'status' => 'required|in:On-Progress,Clear',
             'sort_order' => 'nullable|integer',
         ]);
+    }
+
+    public function exportComplaints(Request $request)
+    {
+        $from = $request->string('from', now()->toDateString())->toString();
+        $to = $request->string('to', $from)->toString();
+        $odc = trim($request->string('odc_name')->toString()) ?: null;
+
+        $rows = DailyComplaint::query()
+            ->with(['creator:id,name', 'clearer:id,name'])
+            ->whereBetween('report_date', [$from, $to])
+            ->when($odc, fn ($q) => $q->where('odc_name', $odc))
+            ->orderBy('report_date')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (DailyComplaint $r) => [
+                $r->report_date?->toDateString(),
+                $r->complaint_type,
+                $r->customer_code,
+                $r->customer_name,
+                $r->odc_name,
+                $r->location_label,
+                $r->problem,
+                $r->action,
+                $r->shift,
+                $r->status,
+                $r->start_problem?->toDateString(),
+                $r->end_problem?->toDateString(),
+                $r->creator?->name,
+                $r->clearer?->name,
+            ]);
+
+        return \App\Support\ExcelExport::download(
+            'komplain-'.$from.'-'.$to.'.xlsx',
+            ['Tanggal', 'Tipe', 'Kode', 'Nama', 'ODC/Site', 'Lokasi', 'Problem', 'Action', 'Shift', 'Status', 'Start Problem', 'End Problem', 'Input oleh', 'Clear oleh'],
+            $rows,
+        );
+    }
+
+    public function listComplaints(Request $request): JsonResponse
+    {
+        $from = $request->string('from', now()->toDateString())->toString();
+        $to = $request->string('to', $from)->toString();
+        $odc = trim($request->string('odc_name')->toString()) ?: null;
+
+        $items = DailyComplaint::query()
+            ->with(['creator:id,name', 'clearer:id,name', 'customer:id,name,customer_code,odc_id'])
+            ->whereBetween('report_date', [$from, $to])
+            ->when($odc, fn ($q) => $q->where('odc_name', $odc))
+            ->orderByDesc('report_date')
+            ->orderByDesc('id')
+            ->limit(500)
+            ->get()
+            ->map(fn (DailyComplaint $c) => $this->complaintSerializer->serialize($c));
+
+        return response()->json(['data' => $items]);
+    }
+
+    public function listNocUpdates(Request $request): JsonResponse
+    {
+        $from = $request->string('from', now()->toDateString())->toString();
+        $to = $request->string('to', $from)->toString();
+        $odc = trim($request->string('odc_name')->toString()) ?: null;
+
+        $items = DailyNocUpdate::query()
+            ->with(['creator:id,name', 'clearer:id,name'])
+            ->whereBetween('report_date', [$from, $to])
+            ->when($odc, fn ($q) => $q->where('odc_name', $odc))
+            ->orderByDesc('report_date')
+            ->orderByDesc('id')
+            ->limit(500)
+            ->get()
+            ->map(fn (DailyNocUpdate $n) => $this->entrySerializer->serialize($n));
+
+        return response()->json(['data' => $items]);
+    }
+
+    public function listActivations(Request $request): JsonResponse
+    {
+        $from = $request->string('from', now()->toDateString())->toString();
+        $to = $request->string('to', $from)->toString();
+        $search = trim($request->string('search')->toString());
+
+        $items = DailyActivation::query()
+            ->with(['creator:id,name', 'clearer:id,name'])
+            ->whereBetween('report_date', [$from, $to])
+            ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
+            ->orderByDesc('report_date')
+            ->orderByDesc('id')
+            ->limit(500)
+            ->get()
+            ->map(fn (DailyActivation $a) => $this->entrySerializer->serialize($a));
+
+        return response()->json(['data' => $items]);
+    }
+
+    public function listCctvSetups(Request $request): JsonResponse
+    {
+        $from = $request->string('from', now()->toDateString())->toString();
+        $to = $request->string('to', $from)->toString();
+        $search = trim($request->string('search')->toString());
+
+        $items = DailyCctvSetup::query()
+            ->with(['creator:id,name', 'clearer:id,name'])
+            ->whereBetween('report_date', [$from, $to])
+            ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
+            ->orderByDesc('report_date')
+            ->orderByDesc('id')
+            ->limit(500)
+            ->get()
+            ->map(fn (DailyCctvSetup $c) => $this->entrySerializer->serialize($c));
+
+        return response()->json(['data' => $items]);
+    }
+
+    public function exportNocUpdates(Request $request)
+    {
+        $from = $request->string('from', now()->toDateString())->toString();
+        $to = $request->string('to', $from)->toString();
+        $odc = trim($request->string('odc_name')->toString()) ?: null;
+
+        $rows = DailyNocUpdate::query()
+            ->with(['creator:id,name', 'clearer:id,name'])
+            ->whereBetween('report_date', [$from, $to])
+            ->when($odc, fn ($q) => $q->where('odc_name', $odc))
+            ->orderBy('report_date')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (DailyNocUpdate $r) => [
+                $r->report_date?->toDateString(),
+                $r->odc_name,
+                $r->description,
+                $r->status,
+                $r->creator?->name,
+                $r->clearer?->name,
+            ]);
+
+        return \App\Support\ExcelExport::download(
+            'update-noc-'.$from.'-'.$to.'.xlsx',
+            ['Tanggal', 'ODC/Site', 'Deskripsi', 'Status', 'Input oleh', 'Clear oleh'],
+            $rows,
+        );
     }
 
     protected function assertComplaintActionForClear(?string $action): void

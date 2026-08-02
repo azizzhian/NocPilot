@@ -63,8 +63,13 @@ function isActive(path: string) {
 <template>
   <aside
     :class="cn(
-      'fixed left-0 top-0 z-40 flex h-screen flex-col bg-sidebar text-sidebar-foreground transition-all duration-300 sidebar-shadow',
-      appStore.sidebarCollapsed ? 'w-[72px]' : 'w-[260px]',
+      'fixed left-0 top-0 z-50 flex h-screen flex-col bg-sidebar text-sidebar-foreground transition-all duration-300 sidebar-shadow',
+      // Desktop width
+      appStore.isDesktop
+        ? (appStore.sidebarCollapsed ? 'w-[72px]' : 'w-[260px]')
+        : 'w-[260px]',
+      // Mobile slide
+      !appStore.isDesktop && (appStore.sidebarMobileOpen ? 'translate-x-0' : '-translate-x-full'),
     )"
   >
     <!-- Logo -->
@@ -72,7 +77,7 @@ function isActive(path: string) {
       <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary">
         <Zap class="h-5 w-5 text-white" />
       </div>
-      <div v-if="!appStore.sidebarCollapsed" class="animate-fade-in overflow-hidden">
+      <div v-if="!appStore.sidebarCollapsed || !appStore.isDesktop" class="animate-fade-in overflow-hidden">
         <h1 class="text-sm font-bold text-white tracking-tight">NocPilot</h1>
         <p class="text-[10px] text-slate-400">Aplikasi Untuk Report NOC</p>
       </div>
@@ -80,7 +85,7 @@ function isActive(path: string) {
 
     <!-- Search trigger -->
     <button
-      v-if="!appStore.sidebarCollapsed"
+      v-if="(!appStore.sidebarCollapsed || !appStore.isDesktop)"
       class="mx-3 mt-4 flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
       @click="appStore.openCommand()"
     >
@@ -90,7 +95,7 @@ function isActive(path: string) {
     </button>
 
     <!-- Favorites -->
-    <div v-if="!appStore.sidebarCollapsed && favorites.length" class="mt-4 px-3">
+    <div v-if="(!appStore.sidebarCollapsed || !appStore.isDesktop) && favorites.length" class="mt-4 px-3">
       <p class="mb-2 flex items-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
         <Star class="h-3 w-3" /> Favorit
       </p>
@@ -117,7 +122,7 @@ function isActive(path: string) {
     <nav class="sidebar-scroll flex-1 overflow-y-auto overflow-x-hidden px-3 py-4">
       <div v-for="section in filteredNav" :key="section.title" class="mb-5">
         <p
-          v-if="!appStore.sidebarCollapsed"
+          v-if="!appStore.sidebarCollapsed || !appStore.isDesktop"
           class="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500"
         >
           {{ section.title }}
@@ -127,26 +132,27 @@ function isActive(path: string) {
             v-for="item in section.items"
             :key="item.to"
             :to="item.to"
-            :title="appStore.sidebarCollapsed ? item.label : undefined"
+            :title="appStore.sidebarCollapsed && appStore.isDesktop ? item.label : undefined"
             :class="cn(
               'group relative flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm transition-all duration-200',
               isActive(item.to)
                 ? 'bg-primary text-white font-medium shadow-lg shadow-primary/25'
                 : 'text-slate-400 hover:bg-white/5 hover:text-slate-200',
-              appStore.sidebarCollapsed && 'justify-center px-0',
+              appStore.sidebarCollapsed && appStore.isDesktop && 'justify-center px-0',
             )"
+            @click="appStore.closeMobileSidebar()"
           >
             <component :is="item.icon" class="h-4 w-4 shrink-0" />
-            <span v-if="!appStore.sidebarCollapsed" class="truncate">{{ item.label }}</span>
+            <span v-if="!appStore.sidebarCollapsed || !appStore.isDesktop" class="truncate">{{ item.label }}</span>
             <Badge
-              v-if="badgeForItem(item.to) && !appStore.sidebarCollapsed"
+              v-if="badgeForItem(item.to) && (!appStore.sidebarCollapsed || !appStore.isDesktop)"
               :variant="isActive(item.to) ? 'secondary' : 'danger'"
               class="ml-auto text-[10px]"
             >
               {{ badgeForItem(item.to) }}
             </Badge>
             <span
-              v-if="badgeForItem(item.to) && appStore.sidebarCollapsed"
+              v-if="badgeForItem(item.to) && appStore.sidebarCollapsed && appStore.isDesktop"
               class="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[9px] font-bold text-white"
             >
               {{ (badgeForItem(item.to) ?? 0) > 9 ? '9+' : badgeForItem(item.to) }}
@@ -156,13 +162,21 @@ function isActive(path: string) {
       </div>
     </nav>
 
-    <!-- Collapse toggle -->
+    <!-- Collapse toggle (desktop only) -->
     <button
+      v-if="appStore.isDesktop"
       class="flex h-12 items-center justify-center border-t border-white/10 text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
       @click="appStore.toggleSidebar()"
     >
       <ChevronLeft v-if="!appStore.sidebarCollapsed" class="h-4 w-4" />
       <ChevronRight v-else class="h-4 w-4" />
+    </button>
+    <button
+      v-else
+      class="flex h-12 items-center justify-center border-t border-white/10 text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
+      @click="appStore.closeMobileSidebar()"
+    >
+      Tutup
     </button>
   </aside>
 </template>
