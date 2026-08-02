@@ -11,6 +11,7 @@ use App\Models\DailyNocUpdate;
 use App\Models\ReportTemplate;
 use App\Support\ReportStatus;
 use App\Support\SimpleTemplateEngine;
+use App\Support\AppSetting;
 use Carbon\Carbon;
 
 class ReportGeneratorService
@@ -29,7 +30,10 @@ class ReportGeneratorService
 
         $context = [
             'responsible_name' => $responsibleName,
-            'activity_name' => config('app.activity_name', 'Report Monitoring & Aktivasi Broadband'),
+            'activity_name' => AppSetting::get(
+                'activity_name',
+                config('app.activity_name', 'Report Monitoring & Aktivasi Broadband'),
+            ),
             'activations' => $this->dailyActivations($date),
             'cctv_setups' => $this->dailyCctvSetups($date),
             'dismantles' => $this->dailyDismantles($date),

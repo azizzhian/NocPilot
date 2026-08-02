@@ -26,6 +26,7 @@ watch(() => route.fullPath, () => {
 
 onMounted(() => {
   appStore.fetchNavBadges()
+  void appStore.fetchSidebarFavorites()
 })
 </script>
 

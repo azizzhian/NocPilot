@@ -36,9 +36,12 @@ const filteredNav = computed(() =>
     .filter((section) => section.items.length > 0),
 )
 
-const favorites = computed(() =>
-  navigation.flatMap((s) => s.items).filter((i) => i.favorite && filterByAccess([i]).length),
-)
+const favorites = computed(() => {
+  const byPath = new Map(navigation.flatMap((s) => s.items).map((i) => [i.to, i]))
+  return appStore.sidebarFavoritePaths
+    .map((path) => byPath.get(path))
+    .filter((item): item is NavItem => Boolean(item && filterByAccess([item]).length))
+})
 
 function badgeForItem(to: string): number | undefined {
   const map: Record<string, 'monitoring' | 'input_harian' | 'activations' | 'dismantles'> = {

@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { useDark, useToggle, useMediaQuery } from '@vueuse/core'
-import { dashboardApi } from '@/services/api'
+import { dashboardApi, settingsApi } from '@/services/api'
+import { defaultFavoritePaths } from '@/data/navigation'
 
 export const useAppStore = defineStore('app', () => {
   const sidebarCollapsed = ref(false)
@@ -10,6 +11,8 @@ export const useAppStore = defineStore('app', () => {
   const commandOpen = ref(false)
   const navBadges = ref<Record<string, number>>({})
   const navBadgesLoaded = ref(false)
+  const sidebarFavoritePaths = ref<string[]>(defaultFavoritePaths())
+  const sidebarFavoritesLoaded = ref(false)
 
   const isDark = useDark({
     selector: 'html',
@@ -67,12 +70,32 @@ export const useAppStore = defineStore('app', () => {
     } catch { /* silent */ }
   }
 
+  async function fetchSidebarFavorites(force = false) {
+    if (sidebarFavoritesLoaded.value && !force) return
+    try {
+      const { data } = await settingsApi.get()
+      const paths = data.sidebar_favorites
+      sidebarFavoritePaths.value = Array.isArray(paths) && paths.length
+        ? paths
+        : defaultFavoritePaths()
+      sidebarFavoritesLoaded.value = true
+    } catch {
+      sidebarFavoritePaths.value = defaultFavoritePaths()
+    }
+  }
+
+  function setSidebarFavoritePaths(paths: string[]) {
+    sidebarFavoritePaths.value = paths
+    sidebarFavoritesLoaded.value = true
+  }
+
   return {
     sidebarCollapsed,
     sidebarMobileOpen,
     isDesktop,
     commandOpen,
     navBadges,
+    sidebarFavoritePaths,
     isDark,
     toggleDark,
     toggleSidebar,
@@ -81,5 +104,7 @@ export const useAppStore = defineStore('app', () => {
     openCommand,
     closeCommand,
     fetchNavBadges,
+    fetchSidebarFavorites,
+    setSidebarFavoritePaths,
   }
 })

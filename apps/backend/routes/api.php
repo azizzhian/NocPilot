@@ -124,7 +124,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/inventory/flat', [InventoryController::class, 'flat']);
         Route::get('/master-data', [MasterDataController::class, 'index']);
         Route::get('/settings', [SettingsController::class, 'index']);
-        Route::put('/settings', [SettingsController::class, 'update']);
+        Route::put('/settings', [SettingsController::class, 'update'])->middleware('permission:settings.manage');
 
         Route::get('/roles', [RoleController::class, 'index']);
         Route::put('/roles/{role}', [RoleController::class, 'update'])->middleware('permission:role.manage');

@@ -31,7 +31,10 @@ class GenerateReportController extends Controller
             'snapshot' => $snapshot,
             'noc_users' => $nocUsers,
             'default_responsible' => $request->user()->name,
-            'activity_name' => config('app.activity_name', 'Report Monitoring & Aktivasi Broadband'),
+            'activity_name' => \App\Support\AppSetting::get(
+                'activity_name',
+                config('app.activity_name', 'Report Monitoring & Aktivasi Broadband'),
+            ),
             'templates' => $templates->all(),
         ]);
     }
@@ -69,7 +72,10 @@ class GenerateReportController extends Controller
             ], 422);
         }
 
-        $activityName = config('app.activity_name', 'Report Monitoring & Aktivasi Broadband');
+        $activityName = \App\Support\AppSetting::get(
+            'activity_name',
+            config('app.activity_name', 'Report Monitoring & Aktivasi Broadband'),
+        );
 
         $snapshot = DailyReportSnapshot::create([
             'report_date' => $date,

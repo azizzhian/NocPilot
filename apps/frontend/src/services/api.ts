@@ -305,8 +305,16 @@ export const masterDataApi = {
 }
 
 export const settingsApi = {
-  get: () => api.get<Record<string, unknown>>('/settings'),
-  update: (data: Record<string, unknown>) => api.put('/settings', data),
+  get: () => api.get<{
+    app_name?: string
+    activity_name?: string
+    timezone?: string
+    locale?: string
+    sidebar_favorites?: string[]
+    features?: Record<string, boolean>
+  }>('/settings'),
+  update: (data: Record<string, unknown>) =>
+    api.put<{ message: string; data: Record<string, unknown> }>('/settings', data),
 }
 
 export const roleApi = {
