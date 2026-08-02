@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import { cn, formatNumber } from '@/lib/utils'
 import Card from '@/components/ui/Card.vue'
 import {
@@ -15,6 +16,7 @@ const props = defineProps<{
   delay?: number
   topName?: string | null
   topCount?: number | null
+  to?: string | null
 }>()
 
 const iconMap: Record<string, typeof Router> = {
@@ -48,7 +50,44 @@ const percentage = computed(() =>
 </script>
 
 <template>
+  <RouterLink
+    v-if="to"
+    :to="to"
+    class="block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+  >
+    <Card
+      :hover="true"
+      padding="sm"
+      :class="cn('animate-slide-up cursor-pointer transition hover:ring-1 hover:ring-primary/20')"
+      :style="{ animationDelay: `${delay ?? 0}ms` }"
+    >
+      <div class="flex items-start justify-between">
+        <div :class="cn('flex h-10 w-10 items-center justify-center rounded-xl', colors.bg)">
+          <component :is="Icon" :class="cn('h-5 w-5', colors.icon)" />
+        </div>
+        <span v-if="percentage !== null" :class="cn('text-xs font-medium', colors.text)">
+          {{ percentage }}%
+        </span>
+      </div>
+      <div class="mt-3">
+        <p :class="cn('text-2xl font-bold tracking-tight', colors.text)">
+          {{ formatNumber(value) }}
+        </p>
+        <p class="mt-0.5 text-xs text-muted">{{ label }}</p>
+        <p
+          v-if="topName"
+          class="mt-2 truncate rounded-lg bg-muted/40 px-2 py-1 text-[11px] font-medium text-foreground"
+          :title="`${topName} (${topCount ?? 0})`"
+        >
+          👑 {{ topName }}
+          <span class="text-muted">({{ topCount ?? 0 }})</span>
+        </p>
+        <p v-else class="mt-2 text-[11px] text-muted/70">Belum ada top performer</p>
+      </div>
+    </Card>
+  </RouterLink>
   <Card
+    v-else
     :hover="true"
     padding="sm"
     :class="cn('animate-slide-up')"

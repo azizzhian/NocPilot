@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { RouterLink } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import KpiCard from '@/components/dashboard/KpiCard.vue'
 import ChartCard from '@/components/dashboard/ChartCard.vue'
@@ -11,7 +10,7 @@ import Input from '@/components/ui/Input.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { dashboardApi, odcApi, type DashboardStats, type DashboardSpecialist } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
-import { FileText, Zap, Activity, Trophy, Award } from 'lucide-vue-next'
+import { Activity, Trophy, Award } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const fromDate = ref(new Date().toISOString().slice(0, 10))
@@ -35,8 +34,15 @@ const showKpis = computed(() => auth.can('dashboard.widget.kpis'))
 const showClearByType = computed(() => auth.can('dashboard.widget.clear_by_type'))
 const showClearByNoc = computed(() => auth.can('dashboard.widget.clear_by_noc'))
 const showNocPerformance = computed(() => auth.can('dashboard.widget.noc_performance'))
-const showQuickActions = computed(() => auth.can('dashboard.widget.quick_actions'))
 const showRecent = computed(() => auth.can('dashboard.widget.recent'))
+
+const kpiHref: Record<string, string> = {
+  complaints: '/komplain',
+  activations: '/aktivasi',
+  cctv: '/aktivasi',
+  tickets: '/report/ticket',
+  dismantles: '/report/dismantle',
+}
 
 const emptyCharts = (): DashboardStats['charts'] => ({
   clear_by_noc: { categories: [], series: [{ name: 'Total Clear', data: [] }] },
@@ -190,6 +196,7 @@ onMounted(async () => {
         :top-name="kpi.top?.name"
         :top-count="kpi.top?.count"
         :delay="i * 40"
+        :to="kpiHref[kpi.key] ?? null"
       />
     </div>
 
@@ -401,43 +408,9 @@ onMounted(async () => {
       <p v-else class="py-8 text-center text-sm text-muted">Belum ada data performa.</p>
     </Card>
 
-    <!-- Quick actions + recent -->
-    <div
-      v-if="!loading && (showQuickActions || showRecent)"
-      class="mt-6 grid gap-6"
-      :class="showQuickActions && showRecent ? 'lg:grid-cols-2' : ''"
-    >
-      <Card v-if="showQuickActions" class="p-5">
-        <h3 class="mb-4 text-sm font-semibold text-foreground">Aksi Cepat</h3>
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <RouterLink
-            v-if="auth.can('activation.view')"
-            to="/aktivasi"
-            class="inline-flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium transition hover:bg-muted/30"
-          >
-            <Zap class="h-5 w-5 text-primary" />
-            Aktivasi
-          </RouterLink>
-          <RouterLink
-            v-if="auth.can('complaint.view')"
-            to="/komplain"
-            class="inline-flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium transition hover:bg-muted/30"
-          >
-            <Activity class="h-5 w-5 text-danger" />
-            Komplain
-          </RouterLink>
-          <RouterLink
-            v-if="auth.can('report.generate')"
-            to="/report/generate"
-            class="inline-flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium transition hover:bg-muted/30"
-          >
-            <FileText class="h-5 w-5 text-success" />
-            Generate Report
-          </RouterLink>
-        </div>
-      </Card>
-
-      <Card v-if="showRecent" class="p-5">
+    <!-- Recent activity -->
+    <div v-if="!loading && showRecent" class="mt-6">
+      <Card class="p-5">
         <div class="mb-4 flex items-center gap-2">
           <Activity class="h-4 w-4 text-primary" />
           <h3 class="text-sm font-semibold text-foreground">Aktivitas Terbaru</h3>
