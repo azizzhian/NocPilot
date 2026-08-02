@@ -4,7 +4,7 @@ import { RouterLink } from 'vue-router'
 import { cn, formatNumber } from '@/lib/utils'
 import Card from '@/components/ui/Card.vue'
 import {
-  Router, Radio, Wifi, Users, Ticket, Zap, Trash2, WifiOff, Camera,
+  Router, Radio, Wifi, Users, Ticket, Zap, Trash2, WifiOff, Camera, ClipboardList,
 } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -32,6 +32,7 @@ const iconMap: Record<string, typeof Router> = {
   activation: Zap,
   dismantle: Trash2,
   cctv: Camera,
+  noc: ClipboardList,
 }
 
 const colorMap: Record<string, { bg: string; text: string; icon: string; ring: string }> = {

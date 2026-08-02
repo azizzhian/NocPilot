@@ -42,6 +42,7 @@ const kpiHref: Record<string, string> = {
   cctv: '/aktivasi',
   tickets: '/report/ticket',
   dismantles: '/report/dismantle',
+  noc_updates: '/update-noc',
 }
 
 const emptyCharts = (): DashboardStats['charts'] => ({
@@ -182,10 +183,10 @@ onMounted(async () => {
     </div>
 
     <!-- 1. KPI Cards -->
-    <div v-if="loading && showKpis" class="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
-      <Skeleton v-for="i in 5" :key="i" class="h-32" />
+    <div v-if="loading && showKpis" class="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+      <Skeleton v-for="i in 6" :key="i" class="h-32" />
     </div>
-    <div v-else-if="showKpis" class="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+    <div v-else-if="showKpis" class="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
       <KpiCard
         v-for="(kpi, i) in kpis"
         :key="kpi.key"

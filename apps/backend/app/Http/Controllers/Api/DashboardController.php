@@ -431,6 +431,14 @@ class DashboardController extends Controller
                 'icon' => 'cctv',
                 'top' => $top('cctv_clear') ?? $top('cctv'),
             ],
+            [
+                'key' => 'noc_updates',
+                'label' => 'Update NOC',
+                'value' => (int) ($summary['noc_updates'] ?? 0),
+                'color' => 'info',
+                'icon' => 'noc',
+                'top' => null,
+            ],
         ];
     }
 

@@ -24,9 +24,14 @@ const sizeClass = {
       leave-active-class="transition duration-150" leave-from-class="opacity-100" leave-to-class="opacity-0">
       <div v-if="open" class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" @click="emit('close')" />
     </Transition>
-    <Transition enter-active-class="transition duration-300 ease-out" enter-from-class="opacity-0 scale-95 translate-y-4"
-      enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-200 ease-in"
-      leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
+    <Transition
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="opacity-0 scale-95"
+      enter-to-class="opacity-100 scale-100"
+      leave-active-class="transition duration-150 ease-in"
+      leave-from-class="opacity-100 scale-100"
+      leave-to-class="opacity-0 scale-95"
+    >
       <div v-if="open" :class="cn('fixed left-1/2 top-1/2 z-[51] w-full -translate-x-1/2 -translate-y-1/2 rounded-[18px] border border-border bg-card card-shadow-hover', sizeClass[size ?? 'md'])">
         <div class="flex items-start justify-between border-b border-border p-6">
           <div>
