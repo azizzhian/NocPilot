@@ -908,7 +908,7 @@ function handleRealtimeEvent(event: DailyEntryRealtimeEvent) {
   const isNew = !alreadyInList
   upsertComplaintLocally(complaint)
 
-  if (payload.action === 'created' && isNew && isSameDay) {
+  if (payload.action === 'created' && isNew && isInRange) {
     showToast(`Komplain baru: ${complaint.customer_name}`)
   }
 }
