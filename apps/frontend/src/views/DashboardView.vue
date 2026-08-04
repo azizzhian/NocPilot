@@ -10,11 +10,12 @@ import Input from '@/components/ui/Input.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { dashboardApi, odcApi, type DashboardStats, type DashboardSpecialist } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
+import { todayInput } from '@/lib/date-input'
 import { Activity, Trophy, Award } from 'lucide-vue-next'
 
 const auth = useAuthStore()
-const fromDate = ref(new Date().toISOString().slice(0, 10))
-const toDate = ref(new Date().toISOString().slice(0, 10))
+const fromDate = ref(todayInput())
+const toDate = ref(todayInput())
 const userId = ref<number | ''>('')
 const odcName = ref('')
 const odcs = ref<{ id: number; name: string }[]>([])

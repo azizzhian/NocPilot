@@ -9,12 +9,8 @@ import SearchInput from '@/components/ui/SearchInput.vue'
 import Select from '@/components/ui/Select.vue'
 import Modal from '@/components/ui/Modal.vue'
 import { dismantleApi, type DismantleItem } from '@/services/api'
+import { todayInput } from '@/lib/date-input'
 import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
-
-function todayInput() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 
 const search = ref('')
 const statusFilter = ref('all')

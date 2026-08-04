@@ -17,19 +17,11 @@ import Modal from '@/components/ui/Modal.vue'
 import Toast from '@/components/ui/Toast.vue'
 import { dailyEntryApi, type DailyEntryData, type DailyEntryItem } from '@/services/api'
 import { useDailyEntryPoll, type DailyEntryRealtimeEvent } from '@/composables/useDailyEntryPoll'
-import { toDateInput } from '@/lib/date-input'
+import { toDateInput, todayInput } from '@/lib/date-input'
 import { parseActivationText } from '@/lib/parse-activation-text'
 import { cn } from '@/lib/utils'
 import { Pencil, Trash2, Plus, Download } from 'lucide-vue-next'
 import SearchInput from '@/components/ui/SearchInput.vue'
-
-function todayInput() {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
 
 const route = useRoute()
 const date = ref(todayInput())

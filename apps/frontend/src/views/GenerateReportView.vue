@@ -8,6 +8,7 @@ import Select from '@/components/ui/Select.vue'
 import Textarea from '@/components/ui/Textarea.vue'
 import { generateReportApi, type GenerateReportIndexData } from '@/services/api'
 import { copyToClipboard } from '@/lib/copy'
+import { todayInput } from '@/lib/date-input'
 import { cn } from '@/lib/utils'
 
 type PreviewTab = 'daily' | 'noc' | 'monitoring'
@@ -22,7 +23,7 @@ const savingTemplate = ref(false)
 const error = ref('')
 const success = ref('')
 
-const reportDate = ref(new Date().toISOString().slice(0, 10))
+const reportDate = ref(todayInput())
 const responsibleName = ref('')
 const nocUsers = ref<{ id: number; name: string }[]>([])
 const activityName = ref('')
