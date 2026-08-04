@@ -249,6 +249,31 @@ watch([filterFrom, filterTo, filterOdc, filterSearch], () => {
 })
 
 const summary = computed(() => data.value?.summary ?? { activations: 0, complaints: 0, dismantles: 0 })
+
+const complaintTodayCount = computed(() => {
+  const from = filterFrom.value || date.value
+  const to = filterTo.value || date.value
+  return data.value?.complaints.filter((c) => {
+    const d = itemDate(c.report_date)
+    return Boolean(d && d >= from && d <= to)
+  }).length ?? summary.value.complaints
+})
+
+const complaintOnProgressCount = computed(
+  () => data.value?.complaints.filter((c) => Boolean(c.is_carryover)).length ?? 0,
+)
+
+const complaintClearCount = computed(() => {
+  const from = filterFrom.value || date.value
+  const to = filterTo.value || date.value
+  return data.value?.complaints.filter((c) => {
+    if (!isStatusClear(c.status)) return false
+    const cleared = itemDate(c.cleared_at)
+    if (cleared) return cleared >= from && cleared <= to
+    const d = itemDate(c.report_date)
+    return Boolean(d && d >= from && d <= to)
+  }).length ?? 0
+})
 const statusOptions = computed(() => data.value?.status_options ?? ['On-Progress', 'Clear'])
 const lookups = computed(() => data.value?.lookups ?? {
   olts: [],
@@ -274,15 +299,23 @@ function isStatusClear(status: string | null | undefined) {
 
 function withCarryoverFlag(item: DailyEntryItem): DailyEntryItem {
   const actual = itemDate(item.report_date)
-  const isCarryover = Boolean(actual && actual < date.value && !isStatusClear(item.status))
+  const from = filterFrom.value || date.value
+  const isCarryover = Boolean(actual && actual < from && !isStatusClear(item.status))
   return { ...item, is_carryover: isCarryover }
 }
 
 function shouldShowOnViewDate(item: DailyEntryItem) {
   const actual = itemDate(item.report_date)
+  const from = filterFrom.value || date.value
+  const to = filterTo.value || date.value
   if (!actual) return true
-  if (actual === date.value) return true
-  return actual < date.value && !isStatusClear(item.status)
+  if (actual >= from && actual <= to) return true
+  if (actual < from && !isStatusClear(item.status)) return true
+  if (isStatusClear(item.status)) {
+    const cleared = itemDate(item.cleared_at)
+    if (cleared) return cleared >= from && cleared <= to
+  }
+  return false
 }
 
 function reportDateForSave(editingId: number | null, list: DailyEntryItem[] | undefined) {
@@ -335,7 +368,13 @@ async function refreshFilteredLists() {
       const res = await dailyEntryApi.listComplaints(params)
       data.value.complaints = res.data.data
       if (data.value.summary) {
-        data.value.summary = { ...data.value.summary, complaints: res.data.data.length }
+        const from = params.from
+        const to = params.to
+        const todayCount = res.data.data.filter((c) => {
+          const d = (c.report_date ?? '').slice(0, 10)
+          return Boolean(d && d >= from && d <= to)
+        }).length
+        data.value.summary = { ...data.value.summary, complaints: todayCount }
       }
     }
     if (allowedTabKeys.value.includes('noc') && (activeTab.value === 'noc' || isNocOnlyPage.value)) {
@@ -835,23 +874,33 @@ function handleRealtimeEvent(event: DailyEntryRealtimeEvent) {
   const alreadyInList = Boolean(data.value?.complaints.some(c => c.id === payload.complaint_id))
   const payloadDate = itemDate(payload.report_date)
   const complaint = payload.complaint
-  const isSameDay = payloadDate === date.value
+  const from = filterFrom.value || date.value
+  const to = filterTo.value || date.value
+  const clearedDate = itemDate(complaint?.cleared_at)
+  const isInRange = Boolean(payloadDate && payloadDate >= from && payloadDate <= to)
   const isOpenCarryover = Boolean(
     complaint
     && payloadDate
-    && payloadDate < date.value
+    && payloadDate < from
     && !isStatusClear(complaint.status),
+  )
+  const isClearedInRange = Boolean(
+    complaint
+    && isStatusClear(complaint.status)
+    && clearedDate
+    && clearedDate >= from
+    && clearedDate <= to,
   )
 
   if (payload.action === 'deleted') {
-    if (!isSameDay && !alreadyInList) return
+    if (!isInRange && !alreadyInList) return
     removeItemLocally('complaint', payload.complaint_id)
     clearEditingIfDeleted('complaint', payload.complaint_id)
     return
   }
 
   if (!complaint) return
-  if (!isSameDay && !alreadyInList && !isOpenCarryover) return
+  if (!isInRange && !alreadyInList && !isOpenCarryover && !isClearedInRange) return
 
   // Jangan timpa data di list saat user sedang mengedit komplain yang sama.
   if (editingComplaintId.value === complaint.id) return
@@ -927,7 +976,11 @@ onUnmounted(stopPoll)
       <div v-if="error && !formModalOpen" class="mb-4 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">{{ error }}</div>
 
       <div v-if="isComplaintOnlyPage" class="mb-6">
-        <ComplaintKpiCard :value="summary.complaints" />
+        <ComplaintKpiCard
+          :today="complaintTodayCount"
+          :on-progress="complaintOnProgressCount"
+          :clear="complaintClearCount"
+        />
       </div>
       <div v-else-if="!isNocOnlyPage" class="mb-6 grid gap-4 md:grid-cols-3">
         <KpiCard v-if="allowedTabKeys.includes('activation')" label="Aktivasi" :value="summary.activations" icon="activation" color="success" />

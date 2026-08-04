@@ -192,6 +192,9 @@ onMounted(async () => {
         :key="kpi.key"
         :label="kpi.label"
         :value="kpi.value"
+        :open="kpi.open"
+        :clear="kpi.clear"
+        :split-status="Boolean(kpi.split_status)"
         :color="kpi.color"
         :icon="kpi.icon ?? 'router'"
         :top-name="kpi.top?.name"
@@ -275,20 +278,28 @@ onMounted(async () => {
             <Trophy class="h-4 w-4 text-primary" />
             <h3 class="text-sm font-semibold text-foreground">Leaderboard</h3>
           </div>
-          <p class="mt-1 text-xs text-muted">Peringkat Clear / Close per kategori</p>
+          <p class="mt-1 text-xs text-muted">On-Progress vs Clear per kategori — ranking by total clear</p>
         </div>
         <div v-if="nocPerformance.length" class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="border-b border-border text-left text-xs text-muted">
-                <th class="pb-2 pr-2">#</th>
-                <th class="pb-2 pr-3">Nama</th>
-                <th class="pb-2 pr-2 text-right text-[#EF4444]">Komplain</th>
-                <th class="pb-2 pr-2 text-right text-[#22C55E]">Aktivasi</th>
-                <th class="pb-2 pr-2 text-right text-[#3498DB]">Ticket</th>
-                <th class="pb-2 pr-2 text-right text-[#9B59B6]">CCTV</th>
-                <th class="pb-2 pr-2 text-right text-[#E67E22]">Dismantle</th>
-                <th class="pb-2 text-right">Total</th>
+                <th class="pb-2 pr-2" rowspan="2">#</th>
+                <th class="pb-2 pr-3" rowspan="2">Nama</th>
+                <th class="pb-1 pr-2 text-center text-[#EF4444]" colspan="2">Komplain</th>
+                <th class="pb-1 pr-2 text-center text-[#22C55E]" colspan="2">Aktivasi</th>
+                <th class="pb-1 pr-2 text-center text-[#3498DB]" colspan="2">Ticket</th>
+                <th class="pb-2 pr-2 text-right text-[#9B59B6]" rowspan="2">CCTV</th>
+                <th class="pb-2 pr-2 text-right text-[#E67E22]" rowspan="2">Dismantle</th>
+                <th class="pb-2 text-right" rowspan="2">Total Clear</th>
+              </tr>
+              <tr class="border-b border-border text-left text-[10px] text-muted">
+                <th class="pb-2 pr-2 text-right font-medium">OP</th>
+                <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+                <th class="pb-2 pr-2 text-right font-medium">OP</th>
+                <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+                <th class="pb-2 pr-2 text-right font-medium">OP</th>
+                <th class="pb-2 pr-2 text-right font-medium">Clear</th>
               </tr>
             </thead>
             <tbody>
@@ -299,8 +310,11 @@ onMounted(async () => {
               >
                 <td class="py-2.5 pr-2">{{ medal(idx) }}</td>
                 <td class="py-2.5 pr-3 font-medium text-foreground">{{ row.name }}</td>
+                <td class="py-2.5 pr-2 text-right text-warning">{{ row.complaints_open ?? 0 }}</td>
                 <td class="py-2.5 pr-2 text-right">{{ row.complaints_clear }}</td>
+                <td class="py-2.5 pr-2 text-right text-warning">{{ row.activations_open ?? 0 }}</td>
                 <td class="py-2.5 pr-2 text-right">{{ row.activations_clear }}</td>
+                <td class="py-2.5 pr-2 text-right text-warning">{{ row.tickets_open ?? 0 }}</td>
                 <td class="py-2.5 pr-2 text-right">{{ row.tickets_clear ?? 0 }}</td>
                 <td class="py-2.5 pr-2 text-right">{{ row.cctv_clear ?? row.cctv ?? 0 }}</td>
                 <td class="py-2.5 pr-2 text-right">{{ row.dismantles_clear }}</td>
@@ -371,21 +385,29 @@ onMounted(async () => {
       <div class="mb-4">
         <h3 class="text-sm font-semibold text-foreground">Detail Performa Seluruh NOC</h3>
         <p class="text-xs text-muted">
-          Rata-rata/hari dihitung dari {{ periodDays }} hari dalam periode
+          OP = On-Progress · Clear = selesai · Rata-rata/hari dari {{ periodDays }} hari (berdasarkan total clear)
         </p>
       </div>
       <div v-if="nocPerformance.length" class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-border text-left text-xs text-muted">
-              <th class="pb-2 pr-3">Nama</th>
-              <th class="pb-2 pr-2 text-right">Komplain</th>
-              <th class="pb-2 pr-2 text-right">Aktivasi</th>
-              <th class="pb-2 pr-2 text-right">Ticket</th>
-              <th class="pb-2 pr-2 text-right">CCTV</th>
-              <th class="pb-2 pr-2 text-right">Dismantle</th>
-              <th class="pb-2 pr-2 text-right">Total</th>
-              <th class="pb-2 text-right">Rata²/Hari</th>
+              <th class="pb-2 pr-3" rowspan="2">Nama</th>
+              <th class="pb-1 pr-2 text-center" colspan="2">Komplain</th>
+              <th class="pb-1 pr-2 text-center" colspan="2">Aktivasi</th>
+              <th class="pb-1 pr-2 text-center" colspan="2">Ticket</th>
+              <th class="pb-2 pr-2 text-right" rowspan="2">CCTV</th>
+              <th class="pb-2 pr-2 text-right" rowspan="2">Dismantle</th>
+              <th class="pb-2 pr-2 text-right" rowspan="2">Total Clear</th>
+              <th class="pb-2 text-right" rowspan="2">Rata²/Hari</th>
+            </tr>
+            <tr class="border-b border-border text-left text-[10px] text-muted">
+              <th class="pb-2 pr-2 text-right font-medium">OP</th>
+              <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+              <th class="pb-2 pr-2 text-right font-medium">OP</th>
+              <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+              <th class="pb-2 pr-2 text-right font-medium">OP</th>
+              <th class="pb-2 pr-2 text-right font-medium">Clear</th>
             </tr>
           </thead>
           <tbody>
@@ -395,8 +417,11 @@ onMounted(async () => {
               class="border-b border-border/60"
             >
               <td class="py-2.5 pr-3 font-medium text-foreground">{{ row.name }}</td>
+              <td class="py-2.5 pr-2 text-right text-warning">{{ row.complaints_open ?? 0 }}</td>
               <td class="py-2.5 pr-2 text-right">{{ row.complaints_clear }}</td>
+              <td class="py-2.5 pr-2 text-right text-warning">{{ row.activations_open ?? 0 }}</td>
               <td class="py-2.5 pr-2 text-right">{{ row.activations_clear }}</td>
+              <td class="py-2.5 pr-2 text-right text-warning">{{ row.tickets_open ?? 0 }}</td>
               <td class="py-2.5 pr-2 text-right">{{ row.tickets_clear ?? 0 }}</td>
               <td class="py-2.5 pr-2 text-right">{{ row.cctv_clear ?? row.cctv ?? 0 }}</td>
               <td class="py-2.5 pr-2 text-right">{{ row.dismantles_clear }}</td>

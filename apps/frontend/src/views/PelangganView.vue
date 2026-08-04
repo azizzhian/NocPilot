@@ -16,6 +16,10 @@ import { Download, Upload, Users, UserCheck, UserX, UserMinus, Pencil, Trash2 } 
 const search = ref('')
 const statusFilter = ref('')
 const odcFilter = ref('')
+const perPage = ref(20)
+const perPageOptions = [10, 20, 50]
+const currentPage = ref(1)
+const lastPage = ref(1)
 const customers = ref<Customer[]>([])
 const odcs = ref<{ id: number; name: string; code: string }[]>([])
 const customerStats = ref({ total: 0, active: 0, inactive: 0, suspended: 0 })
@@ -73,7 +77,7 @@ async function loadOdcs() {
   }
 }
 
-async function loadData() {
+async function loadData(page = 1) {
   loading.value = true
   error.value = ''
   try {
@@ -82,11 +86,15 @@ async function loadData() {
         search: search.value || undefined,
         status: statusFilter.value || undefined,
         odc_id: odcFilter.value ? Number(odcFilter.value) : undefined,
-        per_page: 100,
+        page,
+        per_page: Number(perPage.value) || 20,
       }),
       customerApi.stats(),
     ])
     customers.value = listRes.data.data
+    const meta = (listRes.data as { meta?: { current_page?: number; last_page?: number }; current_page?: number; last_page?: number })
+    currentPage.value = meta.meta?.current_page ?? meta.current_page ?? page
+    lastPage.value = meta.meta?.last_page ?? meta.last_page ?? 1
     customerStats.value = statsRes.data
     if (selectedCustomer.value) {
       selectedCustomer.value = customers.value.find((c) => c.id === selectedCustomer.value?.id) ?? null
@@ -159,7 +167,7 @@ async function confirmDelete() {
       selectedCustomer.value = null
     }
     deleteTarget.value = null
-    await loadData()
+    await loadData(currentPage.value)
   } catch (e: unknown) {
     const err = e as { response?: { data?: { message?: string } } }
     error.value = err.response?.data?.message ?? 'Gagal menghapus pelanggan.'
@@ -188,7 +196,7 @@ async function submitForm() {
     }
 
     modalOpen.value = false
-    await loadData()
+    await loadData(currentPage.value)
   } catch (e: unknown) {
     const err = e as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } }
     const firstFieldError = err.response?.data?.errors
@@ -245,11 +253,15 @@ async function handleImportFile(e: Event) {
 let searchTimeout: ReturnType<typeof setTimeout>
 watch([search, statusFilter, odcFilter], () => {
   clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(loadData, 400)
+  searchTimeout = setTimeout(() => loadData(1), 400)
+})
+
+watch(perPage, () => {
+  void loadData(1)
 })
 
 onMounted(async () => {
-  await Promise.all([loadOdcs(), loadData()])
+  await Promise.all([loadOdcs(), loadData(1)])
 })
 </script>
 
@@ -287,6 +299,16 @@ onMounted(async () => {
         <option value="aktif">Aktif</option>
         <option value="pending">Pending</option>
       </Select>
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-muted">Tampil</label>
+        <Select
+          class="h-10 w-24"
+          :model-value="perPage"
+          @update:model-value="(v) => { perPage = Number(v) || 20 }"
+        >
+          <option v-for="n in perPageOptions" :key="n" :value="n">{{ n }}</option>
+        </Select>
+      </div>
       <div class="flex flex-1 justify-end gap-2">
         <input ref="fileInput" type="file" accept=".csv,.txt,.xls,.xlsx" class="hidden" @change="handleImportFile" />
         <Button variant="outline" size="sm" :disabled="importing" @click="triggerImport">
@@ -361,6 +383,16 @@ onMounted(async () => {
         </tbody>
       </table>
     </Card>
+
+    <div v-if="lastPage > 1" class="mt-4 flex justify-center gap-2">
+      <Button variant="outline" size="sm" :disabled="currentPage <= 1 || loading" @click="loadData(currentPage - 1)">
+        Sebelumnya
+      </Button>
+      <span class="flex items-center px-3 text-sm text-muted">{{ currentPage }} / {{ lastPage }}</span>
+      <Button variant="outline" size="sm" :disabled="currentPage >= lastPage || loading" @click="loadData(currentPage + 1)">
+        Selanjutnya
+      </Button>
+    </div>
 
     <Modal
       :open="modalOpen"

@@ -24,7 +24,7 @@ class OdpController extends Controller
             $query->where('odc_id', $odcId);
         }
 
-        return response()->json($query->paginate(20));
+        return response()->json($query->paginate(min(max($request->integer('per_page', 20), 1), 100)));
     }
 
     public function store(Request $request): JsonResponse

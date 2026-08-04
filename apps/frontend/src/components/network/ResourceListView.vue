@@ -65,6 +65,8 @@ const props = defineProps<{
 }>()
 
 const search = ref('')
+const perPage = ref(10)
+const perPageOptions = [10, 20, 50]
 const loading = ref(true)
 const saving = ref(false)
 const rows = ref<Record<string, unknown>[]>([])
@@ -102,7 +104,11 @@ async function load(page = 1) {
   loading.value = true
   error.value = ''
   try {
-    const res = await props.list({ search: search.value || undefined, page }) as { data: { data?: Record<string, unknown>[]; current_page?: number; last_page?: number } }
+    const res = await props.list({
+      search: search.value || undefined,
+      page,
+      per_page: Number(perPage.value) || 20,
+    }) as { data: { data?: Record<string, unknown>[]; current_page?: number; last_page?: number } }
     rows.value = res.data.data ?? []
     currentPage.value = res.data.current_page ?? 1
     lastPage.value = res.data.last_page ?? 1
@@ -276,13 +282,29 @@ watch(search, () => {
   searchTimeout = setTimeout(() => load(1), 400)
 })
 
+watch(perPage, () => {
+  void load(1)
+})
+
 onMounted(() => load())
 </script>
 
 <template>
   <AppLayout :title="title" :subtitle="subtitle">
     <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-      <SearchInput v-model="search" placeholder="Cari..." class="max-w-sm" />
+      <div class="flex flex-wrap items-center gap-2">
+        <SearchInput v-model="search" placeholder="Cari..." class="max-w-sm" />
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-muted">Tampil</label>
+          <Select
+            class="w-24"
+            :model-value="perPage"
+            @update:model-value="(v) => { perPage = Number(v) || 20 }"
+          >
+            <option v-for="n in perPageOptions" :key="n" :value="n">{{ n }}</option>
+          </Select>
+        </div>
+      </div>
       <Button @click="openCreate"><Plus class="h-4 w-4" /> Tambah</Button>
     </div>
 

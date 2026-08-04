@@ -39,7 +39,8 @@ const emit = defineEmits<{
 }>()
 
 const pageSize = 8
-const page = ref(1)
+const pageToday = ref(1)
+const pageOpen = ref(1)
 const openMenuId = ref<number | null>(null)
 const menuPos = ref({ top: 0, left: 0 })
 const menuItem = computed(() => props.items.find((i) => i.id === openMenuId.value) ?? null)
@@ -79,19 +80,31 @@ const accents = [
   },
 ] as const
 
-const totalPages = computed(() => Math.max(1, Math.ceil(props.items.length / pageSize)))
+const todayItems = computed(() => props.items.filter((i) => !i.is_carryover))
+const openItems = computed(() => props.items.filter((i) => Boolean(i.is_carryover)))
+const clearTodayCount = computed(
+  () => todayItems.value.filter((i) => isClear(i.status)).length,
+)
 
-const pagedItems = computed(() => {
-  const start = (page.value - 1) * pageSize
-  return props.items.slice(start, start + pageSize)
+const totalPagesToday = computed(() => Math.max(1, Math.ceil(todayItems.value.length / pageSize)))
+const totalPagesOpen = computed(() => Math.max(1, Math.ceil(openItems.value.length / pageSize)))
+
+const pagedToday = computed(() => {
+  const start = (pageToday.value - 1) * pageSize
+  return todayItems.value.slice(start, start + pageSize)
 })
 
-const rangeLabel = computed(() => {
-  if (!props.items.length) return 'Menampilkan 0 dari 0 komplain'
-  const start = (page.value - 1) * pageSize + 1
-  const end = Math.min(page.value * pageSize, props.items.length)
-  return `Menampilkan ${start}–${end} dari ${props.items.length} komplain`
+const pagedOpen = computed(() => {
+  const start = (pageOpen.value - 1) * pageSize
+  return openItems.value.slice(start, start + pageSize)
 })
+
+function rangeLabel(list: DailyEntryItem[], page: number) {
+  if (!list.length) return 'Menampilkan 0 dari 0 komplain'
+  const start = (page - 1) * pageSize + 1
+  const end = Math.min(page * pageSize, list.length)
+  return `Menampilkan ${start}–${end} dari ${list.length} komplain`
+}
 
 function accentFor(item: DailyEntryItem, index: number) {
   return accents[(item.id + index) % accents.length]
@@ -108,6 +121,17 @@ function iconFor(problem: string | null | undefined) {
 
 function isClear(status: string) {
   return status?.toLowerCase() === 'clear'
+}
+
+function itemDate(value: string | null | undefined) {
+  return (value ?? '').slice(0, 10)
+}
+
+function isClearedFromPreviousDay(item: DailyEntryItem) {
+  if (!isClear(item.status)) return false
+  const report = itemDate(item.report_date)
+  const cleared = itemDate(item.cleared_at) || report
+  return Boolean(report && cleared && report < cleared)
 }
 
 function complaintCountBadgeClass(n: number) {
@@ -145,7 +169,7 @@ function itemTime(item: DailyEntryItem) {
 
 function metaLine(item: DailyEntryItem) {
   const input = item.creator_name?.trim() || '—'
-  const clear = item.clearer_name?.trim() || (isClear(item.status) ? '—' : '—')
+  const clear = item.clearer_name?.trim() || '—'
   return `Input: ${input} • Clear: ${clear}`
 }
 
@@ -252,14 +276,6 @@ async function openHistory(item: DailyEntryItem) {
   }
 }
 
-function prevPage() {
-  if (page.value > 1) page.value -= 1
-}
-
-function nextPage() {
-  if (page.value < totalPages.value) page.value += 1
-}
-
 function onDocClick() {
   closeMenu()
 }
@@ -268,157 +284,326 @@ onMounted(() => document.addEventListener('click', onDocClick))
 onUnmounted(() => document.removeEventListener('click', onDocClick))
 
 watch(
-  () => props.items.length,
+  () => todayItems.value.length,
   () => {
-    if (page.value > totalPages.value) page.value = totalPages.value
+    if (pageToday.value > totalPagesToday.value) pageToday.value = totalPagesToday.value
+  },
+)
+
+watch(
+  () => openItems.value.length,
+  () => {
+    if (pageOpen.value > totalPagesOpen.value) pageOpen.value = totalPagesOpen.value
   },
 )
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-[18px] border border-border bg-card card-shadow">
-    <div class="flex flex-wrap items-start justify-between gap-4 border-b border-border px-6 py-5">
-      <div class="flex items-start gap-3">
-        <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <ClipboardList class="h-5 w-5" />
-        </div>
-        <div>
-          <h2 class="text-base font-semibold text-foreground">
-            Data Komplain
-            <span class="font-medium text-muted">({{ items.length }})</span>
-          </h2>
-          <p class="mt-0.5 text-sm text-muted">Daftar komplain terbaru.</p>
-        </div>
-      </div>
-      <Button type="button" @click="emit('add')">
-        <Plus class="h-4 w-4" />
-        Tambah Komplain
-      </Button>
-    </div>
-
-    <div class="max-h-[calc(100vh-18rem)] space-y-3 overflow-y-auto p-4 sm:p-5">
-      <div
-        v-for="(item, index) in pagedItems"
-        :key="item.id"
-        class="relative flex rounded-2xl border border-border bg-white shadow-sm transition hover:shadow-md dark:bg-slate-900/40"
-      >
-        <div :class="['w-1.5 shrink-0 rounded-l-2xl', accentFor(item, index).stripe]" />
-
-        <div class="flex min-w-0 flex-1 flex-wrap items-center gap-4 px-4 py-4 sm:gap-5 sm:px-5">
-          <div
-            :class="[
-              'flex h-12 w-12 shrink-0 items-center justify-center rounded-full',
-              accentFor(item, index).iconBg,
-              accentFor(item, index).iconText,
-            ]"
-          >
-            <component :is="iconFor(item.problem)" class="h-5 w-5" />
+  <div class="space-y-6">
+    <!-- Hari ini / rentang filter -->
+    <div class="overflow-hidden rounded-[18px] border border-border bg-card card-shadow">
+      <div class="flex flex-wrap items-start justify-between gap-4 border-b border-border px-6 py-5">
+        <div class="flex items-start gap-3">
+          <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <ClipboardList class="h-5 w-5" />
           </div>
+          <div>
+            <h2 class="text-base font-semibold text-foreground">
+              Data Komplain
+              <span class="font-medium text-muted">({{ todayItems.length }})</span>
+            </h2>
+            <p class="mt-0.5 text-sm text-muted">
+              Komplain pada rentang tanggal
+              <span v-if="clearTodayCount" class="text-success"> · {{ clearTodayCount }} Clear</span>
+            </p>
+          </div>
+        </div>
+        <Button type="button" @click="emit('add')">
+          <Plus class="h-4 w-4" />
+          Tambah Komplain
+        </Button>
+      </div>
 
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <button
-                v-if="!isGamas(item)"
-                type="button"
-                class="truncate text-left text-base font-semibold text-foreground transition hover:text-primary hover:underline"
-                :title="'Lihat riwayat komplain'"
-                @click.stop="openHistory(item)"
-              >
-                {{ item.customer_name || '—' }}
-              </button>
-              <p v-else class="truncate text-base font-semibold text-foreground">
-                {{ item.location_label || item.customer_name || 'Gamas' }}
+      <div class="max-h-[calc(100vh-22rem)] space-y-3 overflow-y-auto p-4 sm:p-5">
+        <div
+          v-for="(item, index) in pagedToday"
+          :key="item.id"
+          class="relative flex rounded-2xl border border-border bg-white shadow-sm transition hover:shadow-md dark:bg-slate-900/40"
+        >
+          <div :class="['w-1.5 shrink-0 rounded-l-2xl', accentFor(item, index).stripe]" />
+          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-4 px-4 py-4 sm:gap-5 sm:px-5">
+            <div
+              :class="[
+                'flex h-12 w-12 shrink-0 items-center justify-center rounded-full',
+                accentFor(item, index).iconBg,
+                accentFor(item, index).iconText,
+              ]"
+            >
+              <component :is="iconFor(item.problem)" class="h-5 w-5" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  v-if="!isGamas(item)"
+                  type="button"
+                  class="truncate text-left text-base font-semibold text-foreground transition hover:text-primary hover:underline"
+                  :title="'Lihat riwayat komplain'"
+                  @click.stop="openHistory(item)"
+                >
+                  {{ item.customer_name || '—' }}
+                </button>
+                <p v-else class="truncate text-base font-semibold text-foreground">
+                  {{ item.location_label || item.customer_name || 'Gamas' }}
+                </p>
+                <span
+                  v-if="isGamas(item)"
+                  class="inline-flex items-center rounded-full bg-danger/10 px-2.5 py-0.5 text-xs font-medium text-danger"
+                >
+                  Gamas
+                </span>
+                <button
+                  v-else-if="(item.complaint_count_90d ?? 0) >= 1"
+                  type="button"
+                  class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition hover:ring-2 hover:ring-primary/20"
+                  :class="complaintCountBadgeClass(item.complaint_count_90d ?? 0)"
+                  :title="`${item.complaint_count_90d} komplain dalam 90 hari — klik untuk riwayat`"
+                  @click.stop="openHistory(item)"
+                >
+                  {{ item.complaint_count_90d }}× / 90h
+                </button>
+                <span
+                  v-if="isClear(item.status)"
+                  class="inline-flex items-center gap-1 rounded-full bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success"
+                >
+                  <Check class="h-3 w-3" />
+                  Clear
+                </span>
+                <span
+                  v-if="isClearedFromPreviousDay(item)"
+                  class="inline-flex items-center rounded-full bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success"
+                  :title="'Laporan dari ' + formatDate(item.report_date)"
+                >
+                  dari {{ formatDateShort(item.report_date) }}
+                </span>
+                <button
+                  v-else-if="!isClear(item.status)"
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning transition hover:bg-success/10 hover:text-success"
+                  @click="onMarkClear(item)"
+                >
+                  {{ item.status || 'On-Progress' }} · Tandai Clear
+                </button>
+              </div>
+              <p class="mt-0.5 text-sm text-muted">{{ locationLine(item) }}</p>
+              <p :class="['mt-1 text-sm font-medium', accentFor(item, index).problem]">
+                {{ item.problem || '—' }}
               </p>
-              <span
-                v-if="isGamas(item)"
-                class="inline-flex items-center rounded-full bg-danger/10 px-2.5 py-0.5 text-xs font-medium text-danger"
-              >
-                Gamas
+              <p class="mt-1 text-xs text-muted">{{ metaLine(item) }}</p>
+            </div>
+            <div class="flex shrink-0 flex-col gap-1.5 text-sm text-muted sm:min-w-[9.5rem]">
+              <span class="inline-flex items-center gap-1.5">
+                <Calendar class="h-3.5 w-3.5" />
+                {{ formatDate(item.start_problem || item.report_date) }}
               </span>
-              <button
-                v-else-if="(item.complaint_count_90d ?? 0) >= 1"
-                type="button"
-                class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition hover:ring-2 hover:ring-primary/20"
-                :class="complaintCountBadgeClass(item.complaint_count_90d ?? 0)"
-                :title="`${item.complaint_count_90d} komplain dalam 90 hari — klik untuk riwayat`"
-                @click.stop="openHistory(item)"
-              >
-                {{ item.complaint_count_90d }}× / 90h
-              </button>
-              <span
-                v-if="isClear(item.status)"
-                class="inline-flex items-center gap-1 rounded-full bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success"
-              >
-                <Check class="h-3 w-3" />
-                Clear
-              </span>
-              <button
-                v-else
-                type="button"
-                class="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning transition hover:bg-success/10 hover:text-success"
-                @click="onMarkClear(item)"
-              >
-                {{ item.status || 'On-Progress' }} · Tandai Clear
-              </button>
-              <span
-                v-if="item.is_carryover"
-                class="inline-flex items-center rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700/80 dark:text-slate-200"
-                :title="`Masih open sejak ${formatDate(item.report_date)}`"
-              >
-                Open dari {{ formatDateShort(item.report_date) }}
+              <span class="inline-flex items-center gap-1.5">
+                <Clock class="h-3.5 w-3.5" />
+                {{ itemTime(item) }}
               </span>
             </div>
-            <p class="mt-0.5 text-sm text-muted">{{ locationLine(item) }}</p>
-            <p :class="['mt-1 text-sm font-medium', accentFor(item, index).problem]">
-              {{ item.problem || '—' }}
-            </p>
-            <p class="mt-1 text-xs text-muted">{{ metaLine(item) }}</p>
+            <div class="shrink-0" @click.stop>
+              <button
+                type="button"
+                class="rounded-lg p-2 text-muted transition hover:bg-muted hover:text-foreground"
+                @click="toggleMenu(item.id, $event)"
+              >
+                <MoreVertical class="h-4 w-4" />
+              </button>
+            </div>
           </div>
+        </div>
+        <p v-if="!todayItems.length" class="py-10 text-center text-sm text-muted">
+          Belum ada komplain pada rentang tanggal ini.
+        </p>
+      </div>
 
-          <div class="flex shrink-0 flex-col gap-1.5 text-sm text-muted sm:min-w-[9.5rem]">
-            <span class="inline-flex items-center gap-1.5">
-              <Calendar class="h-3.5 w-3.5" />
-              {{ formatDate(item.start_problem || item.report_date) }}
-            </span>
-            <span class="inline-flex items-center gap-1.5">
-              <Clock class="h-3.5 w-3.5" />
-              {{ itemTime(item) }}
-            </span>
+      <div
+        v-if="todayItems.length"
+        class="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-4"
+      >
+        <p class="text-sm text-muted">{{ rangeLabel(todayItems, pageToday) }}</p>
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            class="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted transition hover:bg-muted disabled:opacity-40"
+            :disabled="pageToday <= 1"
+            @click="pageToday -= 1"
+          >
+            <ChevronLeft class="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            class="flex h-9 min-w-9 items-center justify-center rounded-lg bg-primary px-3 text-sm font-medium text-white"
+          >
+            {{ pageToday }}
+          </button>
+          <button
+            type="button"
+            class="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted transition hover:bg-muted disabled:opacity-40"
+            :disabled="pageToday >= totalPagesToday"
+            @click="pageToday += 1"
+          >
+            <ChevronRight class="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- On-Progress carryover -->
+    <div class="overflow-hidden rounded-[18px] border border-warning/30 bg-card card-shadow">
+      <div class="flex flex-wrap items-start justify-between gap-4 border-b border-warning/20 bg-warning/5 px-6 py-5">
+        <div class="flex items-start gap-3">
+          <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-warning/15 text-warning">
+            <Clock class="h-5 w-5" />
           </div>
-
-          <div class="shrink-0" @click.stop>
-            <button
-              type="button"
-              class="rounded-lg p-2 text-muted transition hover:bg-muted hover:text-foreground"
-              aria-label="Menu"
-              @click="toggleMenu(item.id, $event)"
-            >
-              <MoreVertical class="h-5 w-5" />
-            </button>
+          <div>
+            <h2 class="text-base font-semibold text-foreground">
+              On-Progress
+              <span class="font-medium text-muted">({{ openItems.length }})</span>
+            </h2>
+            <p class="mt-0.5 text-sm text-muted">Belum clear dari hari sebelumnya — tetap ditampilkan sampai Clear.</p>
           </div>
         </div>
       </div>
 
-      <p v-if="!items.length" class="py-12 text-center text-sm text-muted">
-        Belum ada data komplain.
-      </p>
-    </div>
+      <div class="max-h-[calc(100vh-22rem)] space-y-3 overflow-y-auto p-4 sm:p-5">
+        <div
+          v-for="(item, index) in pagedOpen"
+          :key="item.id"
+          class="relative flex rounded-2xl border border-border bg-white shadow-sm transition hover:shadow-md dark:bg-slate-900/40"
+        >
+          <div :class="['w-1.5 shrink-0 rounded-l-2xl', accentFor(item, index).stripe]" />
+          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-4 px-4 py-4 sm:gap-5 sm:px-5">
+            <div
+              :class="[
+                'flex h-12 w-12 shrink-0 items-center justify-center rounded-full',
+                accentFor(item, index).iconBg,
+                accentFor(item, index).iconText,
+              ]"
+            >
+              <component :is="iconFor(item.problem)" class="h-5 w-5" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  v-if="!isGamas(item)"
+                  type="button"
+                  class="truncate text-left text-base font-semibold text-foreground transition hover:text-primary hover:underline"
+                  :title="'Lihat riwayat komplain'"
+                  @click.stop="openHistory(item)"
+                >
+                  {{ item.customer_name || '—' }}
+                </button>
+                <p v-else class="truncate text-base font-semibold text-foreground">
+                  {{ item.location_label || item.customer_name || 'Gamas' }}
+                </p>
+                <span
+                  v-if="isGamas(item)"
+                  class="inline-flex items-center rounded-full bg-danger/10 px-2.5 py-0.5 text-xs font-medium text-danger"
+                >
+                  Gamas
+                </span>
+                <button
+                  v-else-if="(item.complaint_count_90d ?? 0) >= 1"
+                  type="button"
+                  class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition hover:ring-2 hover:ring-primary/20"
+                  :class="complaintCountBadgeClass(item.complaint_count_90d ?? 0)"
+                  :title="`${item.complaint_count_90d} komplain dalam 90 hari — klik untuk riwayat`"
+                  @click.stop="openHistory(item)"
+                >
+                  {{ item.complaint_count_90d }}× / 90h
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning transition hover:bg-success/10 hover:text-success"
+                  @click="onMarkClear(item)"
+                >
+                  {{ item.status || 'On-Progress' }} · Tandai Clear
+                </button>
+                <span
+                  class="inline-flex items-center rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700/80 dark:text-slate-200"
+                  :title="`Masih open sejak ${formatDate(item.report_date)}`"
+                >
+                  Open dari {{ formatDateShort(item.report_date) }}
+                </span>
+              </div>
+              <p class="mt-0.5 text-sm text-muted">{{ locationLine(item) }}</p>
+              <p :class="['mt-1 text-sm font-medium', accentFor(item, index).problem]">
+                {{ item.problem || '—' }}
+              </p>
+              <p class="mt-1 text-xs text-muted">{{ metaLine(item) }}</p>
+            </div>
+            <div class="flex shrink-0 flex-col gap-1.5 text-sm text-muted sm:min-w-[9.5rem]">
+              <span class="inline-flex items-center gap-1.5">
+                <Calendar class="h-3.5 w-3.5" />
+                {{ formatDate(item.start_problem || item.report_date) }}
+              </span>
+              <span class="inline-flex items-center gap-1.5">
+                <Clock class="h-3.5 w-3.5" />
+                {{ itemTime(item) }}
+              </span>
+            </div>
+            <div class="shrink-0" @click.stop>
+              <button
+                type="button"
+                class="rounded-lg p-2 text-muted transition hover:bg-muted hover:text-foreground"
+                @click="toggleMenu(item.id, $event)"
+              >
+                <MoreVertical class="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+        <p v-if="!openItems.length" class="py-10 text-center text-sm text-muted">
+          Tidak ada komplain On-Progress dari hari sebelumnya.
+        </p>
+      </div>
 
-    <ComplaintHistoryPanel
-      v-model:open="historyOpen"
-      drawer-only
-      :title="historyTitle"
-      :total="historyTotal"
-      :days="historyDays"
-      :items="historyItems"
-      :summary="historySummary"
-      :loading="historyLoading"
-    />
+      <div
+        v-if="openItems.length"
+        class="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-4"
+      >
+        <p class="text-sm text-muted">{{ rangeLabel(openItems, pageOpen) }}</p>
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            class="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted transition hover:bg-muted disabled:opacity-40"
+            :disabled="pageOpen <= 1"
+            @click="pageOpen -= 1"
+          >
+            <ChevronLeft class="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            class="flex h-9 min-w-9 items-center justify-center rounded-lg bg-warning px-3 text-sm font-medium text-white"
+          >
+            {{ pageOpen }}
+          </button>
+          <button
+            type="button"
+            class="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted transition hover:bg-muted disabled:opacity-40"
+            :disabled="pageOpen >= totalPagesOpen"
+            @click="pageOpen += 1"
+          >
+            <ChevronRight class="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
 
     <Teleport to="body">
       <div
         v-if="menuItem"
-        class="fixed z-[80] w-48 rounded-xl border border-border bg-card py-1 shadow-lg"
+        class="fixed z-[80] w-48 overflow-hidden rounded-xl border border-border bg-card py-1 shadow-lg"
         :style="{ top: `${menuPos.top}px`, left: `${menuPos.left}px` }"
         @click.stop
       >
@@ -441,35 +626,15 @@ watch(
       </div>
     </Teleport>
 
-    <div
-      v-if="items.length"
-      class="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-4"
-    >
-      <p class="text-sm text-muted">{{ rangeLabel }}</p>
-      <div class="flex items-center gap-1">
-        <button
-          type="button"
-          class="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted transition hover:bg-muted disabled:opacity-40"
-          :disabled="page <= 1"
-          @click="prevPage"
-        >
-          <ChevronLeft class="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          class="flex h-9 min-w-9 items-center justify-center rounded-lg bg-primary px-3 text-sm font-medium text-white"
-        >
-          {{ page }}
-        </button>
-        <button
-          type="button"
-          class="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted transition hover:bg-muted disabled:opacity-40"
-          :disabled="page >= totalPages"
-          @click="nextPage"
-        >
-          <ChevronRight class="h-4 w-4" />
-        </button>
-      </div>
-    </div>
+    <ComplaintHistoryPanel
+      :open="historyOpen"
+      :title="historyTitle"
+      :loading="historyLoading"
+      :items="historyItems"
+      :total="historyTotal"
+      :summary="historySummary"
+      :days="historyDays"
+      @close="historyOpen = false"
+    />
   </div>
 </template>

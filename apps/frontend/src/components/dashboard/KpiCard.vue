@@ -11,6 +11,9 @@ const props = defineProps<{
   label: string
   value: number
   total?: number
+  open?: number | null
+  clear?: number | null
+  splitStatus?: boolean
   color: string
   icon: string
   delay?: number
@@ -45,21 +48,22 @@ const colorMap: Record<string, { bg: string; text: string; icon: string; ring: s
 
 const colors = computed(() => colorMap[props.color] ?? colorMap.primary)
 const Icon = computed(() => iconMap[props.icon] ?? Router)
+const showSplit = computed(() => Boolean(props.splitStatus))
 const percentage = computed(() =>
   props.total ? Math.round((props.value / props.total) * 100) : null,
 )
 </script>
 
 <template>
-  <RouterLink
-    v-if="to"
-    :to="to"
-    class="block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+  <component
+    :is="to ? RouterLink : 'div'"
+    :to="to || undefined"
+    :class="to ? 'block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40' : undefined"
   >
     <Card
       :hover="true"
       padding="sm"
-      :class="cn('animate-slide-up cursor-pointer transition hover:ring-1 hover:ring-primary/20')"
+      :class="cn('animate-slide-up', to && 'cursor-pointer transition hover:ring-1 hover:ring-primary/20')"
       :style="{ animationDelay: `${delay ?? 0}ms` }"
     >
       <div class="flex items-start justify-between">
@@ -70,11 +74,24 @@ const percentage = computed(() =>
           {{ percentage }}%
         </span>
       </div>
+
       <div class="mt-3">
-        <p :class="cn('text-2xl font-bold tracking-tight', colors.text)">
+        <p class="text-xs font-medium text-muted">{{ label }}</p>
+
+        <div v-if="showSplit" class="mt-2 grid grid-cols-2 gap-2">
+          <div class="rounded-lg bg-warning/10 px-2 py-1.5">
+            <p class="text-[10px] font-medium uppercase tracking-wide text-warning">On Progress</p>
+            <p class="text-xl font-bold tracking-tight text-warning">{{ formatNumber(open ?? 0) }}</p>
+          </div>
+          <div class="rounded-lg bg-success/10 px-2 py-1.5">
+            <p class="text-[10px] font-medium uppercase tracking-wide text-success">Clear</p>
+            <p class="text-xl font-bold tracking-tight text-success">{{ formatNumber(clear ?? 0) }}</p>
+          </div>
+        </div>
+        <p v-else :class="cn('mt-1 text-2xl font-bold tracking-tight', colors.text)">
           {{ formatNumber(value) }}
         </p>
-        <p class="mt-0.5 text-xs text-muted">{{ label }}</p>
+
         <p
           v-if="topName"
           class="mt-2 truncate rounded-lg bg-muted/40 px-2 py-1 text-[11px] font-medium text-foreground"
@@ -86,36 +103,5 @@ const percentage = computed(() =>
         <p v-else class="mt-2 text-[11px] text-muted/70">Belum ada top performer</p>
       </div>
     </Card>
-  </RouterLink>
-  <Card
-    v-else
-    :hover="true"
-    padding="sm"
-    :class="cn('animate-slide-up')"
-    :style="{ animationDelay: `${delay ?? 0}ms` }"
-  >
-    <div class="flex items-start justify-between">
-      <div :class="cn('flex h-10 w-10 items-center justify-center rounded-xl', colors.bg)">
-        <component :is="Icon" :class="cn('h-5 w-5', colors.icon)" />
-      </div>
-      <span v-if="percentage !== null" :class="cn('text-xs font-medium', colors.text)">
-        {{ percentage }}%
-      </span>
-    </div>
-    <div class="mt-3">
-      <p :class="cn('text-2xl font-bold tracking-tight', colors.text)">
-        {{ formatNumber(value) }}
-      </p>
-      <p class="mt-0.5 text-xs text-muted">{{ label }}</p>
-      <p
-        v-if="topName"
-        class="mt-2 truncate rounded-lg bg-muted/40 px-2 py-1 text-[11px] font-medium text-foreground"
-        :title="`${topName} (${topCount ?? 0})`"
-      >
-        👑 {{ topName }}
-        <span class="text-muted">({{ topCount ?? 0 }})</span>
-      </p>
-      <p v-else class="mt-2 text-[11px] text-muted/70">Belum ada top performer</p>
-    </div>
-  </Card>
+  </component>
 </template>

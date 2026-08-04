@@ -104,20 +104,57 @@ class DailyEntryController extends Controller
     }
 
     /**
-     * Item tanggal terpilih + item open dari tanggal sebelumnya (belum Clear).
+     * Item tanggal terpilih + item open dari tanggal sebelumnya (belum Clear)
+     * + item yang di-clear pada tanggal terpilih (meski report_date lebih lama).
      *
      * @param  \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>  $query
      */
     protected function forSelectedDateOrStillOpen($query, Carbon $date): void
     {
-        $query->where(function ($q) use ($date) {
+        $day = $date->toDateString();
+
+        $query->where(function ($q) use ($date, $day) {
             $q->whereDate('report_date', $date)
-                ->orWhere(function ($q2) use ($date) {
-                    $q2->whereDate('report_date', '<', $date->toDateString())
+                ->orWhere(function ($q2) use ($day) {
+                    $q2->whereDate('report_date', '<', $day)
                         ->where(function ($q3) {
                             $q3->whereNull('status')
                                 ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
                         });
+                })
+                ->orWhere(function ($q2) use ($date) {
+                    $q2->whereNotNull('cleared_at')
+                        ->whereBetween('cleared_at', [
+                            $date->copy()->startOfDay(),
+                            $date->copy()->endOfDay(),
+                        ]);
+                });
+        });
+    }
+
+    /**
+     * Item dalam rentang tanggal + item open dari sebelum rentang (belum Clear)
+     * + item yang di-clear dalam rentang (meski report_date lebih lama).
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>  $query
+     */
+    protected function forDateRangeOrStillOpen($query, string $from, string $to): void
+    {
+        $fromStart = Carbon::parse($from)->startOfDay();
+        $toEnd = Carbon::parse($to)->endOfDay();
+
+        $query->where(function ($q) use ($from, $to, $fromStart, $toEnd) {
+            $q->whereBetween('report_date', [$from, $to])
+                ->orWhere(function ($q2) use ($from) {
+                    $q2->whereDate('report_date', '<', $from)
+                        ->where(function ($q3) {
+                            $q3->whereNull('status')
+                                ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+                        });
+                })
+                ->orWhere(function ($q2) use ($fromStart, $toEnd) {
+                    $q2->whereNotNull('cleared_at')
+                        ->whereBetween('cleared_at', [$fromStart, $toEnd]);
                 });
         });
     }
@@ -810,13 +847,13 @@ class DailyEntryController extends Controller
 
         $items = DailyComplaint::query()
             ->with(['creator:id,name', 'clearer:id,name', 'customer:id,name,customer_code,odc_id'])
-            ->whereBetween('report_date', [$from, $to])
+            ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
             ->when($odc, fn ($q) => $q->where('odc_name', $odc))
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->limit(500)
             ->get()
-            ->map(fn (DailyComplaint $c) => $this->complaintSerializer->serialize($c));
+            ->map(fn (DailyComplaint $c) => $this->complaintSerializer->serialize($c, $from));
 
         return response()->json(['data' => $items]);
     }
@@ -829,13 +866,13 @@ class DailyEntryController extends Controller
 
         $items = DailyNocUpdate::query()
             ->with(['creator:id,name', 'clearer:id,name'])
-            ->whereBetween('report_date', [$from, $to])
+            ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
             ->when($odc, fn ($q) => $q->where('odc_name', $odc))
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->limit(500)
             ->get()
-            ->map(fn (DailyNocUpdate $n) => $this->entrySerializer->serialize($n));
+            ->map(fn (DailyNocUpdate $n) => $this->entrySerializer->serialize($n, $to));
 
         return response()->json(['data' => $items]);
     }
@@ -848,13 +885,13 @@ class DailyEntryController extends Controller
 
         $items = DailyActivation::query()
             ->with(['creator:id,name', 'clearer:id,name'])
-            ->whereBetween('report_date', [$from, $to])
+            ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
             ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->limit(500)
             ->get()
-            ->map(fn (DailyActivation $a) => $this->entrySerializer->serialize($a));
+            ->map(fn (DailyActivation $a) => $this->entrySerializer->serialize($a, $to));
 
         return response()->json(['data' => $items]);
     }
@@ -867,13 +904,13 @@ class DailyEntryController extends Controller
 
         $items = DailyCctvSetup::query()
             ->with(['creator:id,name', 'clearer:id,name'])
-            ->whereBetween('report_date', [$from, $to])
+            ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
             ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->limit(500)
             ->get()
-            ->map(fn (DailyCctvSetup $c) => $this->entrySerializer->serialize($c));
+            ->map(fn (DailyCctvSetup $c) => $this->entrySerializer->serialize($c, $to));
 
         return response()->json(['data' => $items]);
     }

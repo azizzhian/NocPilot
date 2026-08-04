@@ -189,32 +189,54 @@ class DashboardController extends Controller
             'activations' => (clone $activations)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
-            'activations_clear' => (clone $activations)
-                ->where('status', ReportStatus::CLEAR)
-                ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
-                ->count(),
+            'activations_open' => $odcName
+                ? 0
+                : DailyActivation::query()
+                    ->whereDate('report_date', '<=', $toDate)
+                    ->where(function ($q) {
+                        $q->whereNull('status')
+                            ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+                    })
+                    ->when($userId, fn ($q) => $q->where('created_by', $userId))
+                    ->count(),
+            'activations_clear' => $odcName
+                ? 0
+                : $this->countClearsInRange(DailyActivation::class, $from, $to, $userId),
             'complaints' => (clone $complaints)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
-            'complaints_clear' => (clone $complaints)
-                ->where('status', ReportStatus::CLEAR)
-                ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
+            'complaints_open' => DailyComplaint::query()
+                ->whereDate('report_date', '<=', $toDate)
+                ->where(function ($q) {
+                    $q->whereNull('status')
+                        ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+                })
+                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+                ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
+            'complaints_clear' => $this->countClearsInRange(DailyComplaint::class, $from, $to, $userId, $odcName),
             'dismantles' => (clone $dismantles)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
-            'dismantles_clear' => (clone $dismantles)
-                ->where('status', ReportStatus::CLEAR)
-                ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
-                ->count(),
+            'dismantles_clear' => $odcName
+                ? 0
+                : $this->countClearsInRange(DailyDismantle::class, $from, $to, $userId),
             'cctv' => (clone $cctv)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
-            'cctv_clear' => (clone $cctv)
-                ->where('status', ReportStatus::CLEAR)
-                ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
-                ->count(),
+            'cctv_clear' => $odcName
+                ? 0
+                : $this->countClearsInRange(DailyCctvSetup::class, $from, $to, $userId),
             'tickets' => (clone $tickets)
+                ->when($userId, fn ($q) => $q->where('created_by', $userId))
+                ->count(),
+            'tickets_open' => ReportTicket::query()
+                ->where('status', 'On-Progress')
+                ->where(function ($q) use ($to, $toDate) {
+                    $q->whereDate('opened_at', '<=', $toDate)
+                        ->orWhere('created_at', '<=', $to->copy()->endOfDay());
+                })
+                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
             'tickets_clear' => ReportTicket::query()
@@ -256,6 +278,11 @@ class DashboardController extends Controller
             ? collect()
             : $this->groupInputs(DailyCctvSetup::class, $fromDate, $toDate);
 
+        $activationOpens = $odcName
+            ? collect()
+            : $this->groupOpens(DailyActivation::class, $fromDate, $toDate);
+        $complaintOpens = $this->groupOpens(DailyComplaint::class, $fromDate, $toDate, $odcName);
+
         $ticketClears = ReportTicket::query()
             ->select('cleared_by', DB::raw('COUNT(*) as total'))
             ->whereNotNull('cleared_by')
@@ -272,6 +299,19 @@ class DashboardController extends Controller
             ->get()
             ->keyBy('cleared_by');
 
+        $ticketOpens = ReportTicket::query()
+            ->select('created_by', DB::raw('COUNT(*) as total'))
+            ->whereNotNull('created_by')
+            ->where('status', 'On-Progress')
+            ->where(function ($q) use ($to, $toDate) {
+                $q->whereDate('opened_at', '<=', $toDate)
+                    ->orWhere('created_at', '<=', $to->copy()->endOfDay());
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->groupBy('created_by')
+            ->get()
+            ->keyBy('created_by');
+
         $activationInputs = $odcName
             ? collect()
             : $this->groupInputs(DailyActivation::class, $fromDate, $toDate);
@@ -283,6 +323,7 @@ class DashboardController extends Controller
         $userIds = collect([
             $activationClears, $complaintClears, $dismantleClears, $ticketClears, $cctvClears, $cctvInputs,
             $activationInputs, $complaintInputs, $dismantleInputs,
+            $activationOpens, $complaintOpens, $ticketOpens,
         ])
             ->flatMap(fn ($rows) => $rows->keys())
             ->unique()
@@ -298,17 +339,23 @@ class DashboardController extends Controller
                 $complaintClears,
                 $dismantleClears,
                 $ticketClears,
+                $ticketOpens,
                 $cctvClears,
                 $cctvInputs,
                 $activationInputs,
                 $complaintInputs,
                 $dismantleInputs,
+                $activationOpens,
+                $complaintOpens,
                 $periodDays,
             ) {
                 $activationsClear = (int) ($activationClears->get($id)?->total ?? 0);
                 $complaintsClear = (int) ($complaintClears->get($id)?->total ?? 0);
                 $dismantlesClear = (int) ($dismantleClears->get($id)?->total ?? 0);
                 $ticketsClear = (int) ($ticketClears->get($id)?->total ?? 0);
+                $activationsOpen = (int) ($activationOpens->get($id)?->total ?? 0);
+                $complaintsOpen = (int) ($complaintOpens->get($id)?->total ?? 0);
+                $ticketsOpen = (int) ($ticketOpens->get($id)?->total ?? 0);
                 $cctvClear = (int) ($cctvClears->get($id)?->total ?? 0);
                 $cctv = max($cctvClear, (int) ($cctvInputs->get($id)?->total ?? 0));
                 $total = $activationsClear + $complaintsClear + $dismantlesClear + $ticketsClear + $cctvClear;
@@ -317,11 +364,14 @@ class DashboardController extends Controller
                     'user_id' => (int) $id,
                     'name' => $users->get($id)?->name ?? 'User #'.$id,
                     'activations' => (int) ($activationInputs->get($id)?->total ?? 0),
+                    'activations_open' => $activationsOpen,
                     'activations_clear' => $activationsClear,
                     'complaints' => (int) ($complaintInputs->get($id)?->total ?? 0),
+                    'complaints_open' => $complaintsOpen,
                     'complaints_clear' => $complaintsClear,
                     'dismantles' => (int) ($dismantleInputs->get($id)?->total ?? 0),
                     'dismantles_clear' => $dismantlesClear,
+                    'tickets_open' => $ticketsOpen,
                     'tickets_clear' => $ticketsClear,
                     'cctv' => $cctv,
                     'cctv_clear' => $cctvClear,
@@ -343,18 +393,77 @@ class DashboardController extends Controller
             ->all();
     }
 
+    /**
+     * Clear dihitung dari tanggal penyelesaian (cleared_at), bukan report_date.
+     * Fallback: data lama tanpa cleared_at tetap pakai report_date.
+     *
+     * @param  class-string  $model
+     */
+    protected function countClearsInRange(
+        string $model,
+        Carbon $from,
+        Carbon $to,
+        ?int $userId = null,
+        ?string $odcName = null,
+    ): int {
+        $fromDate = $from->toDateString();
+        $toDate = $to->toDateString();
+
+        return $model::query()
+            ->where('status', ReportStatus::CLEAR)
+            ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
+                $q->whereBetween('cleared_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()])
+                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('report_date', [$fromDate, $toDate]);
+                    });
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
+            ->count();
+    }
+
     /** @param  class-string  $model */
     protected function groupClears(string $model, string $fromDate, string $toDate, ?string $odcName = null)
     {
+        $from = Carbon::parse($fromDate)->startOfDay();
+        $to = Carbon::parse($toDate)->endOfDay();
+
         return $model::query()
             ->select('cleared_by', DB::raw('COUNT(*) as total'))
-            ->whereBetween('report_date', [$fromDate, $toDate])
             ->where('status', ReportStatus::CLEAR)
             ->whereNotNull('cleared_by')
+            ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
+                $q->whereBetween('cleared_at', [$from, $to])
+                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('report_date', [$fromDate, $toDate]);
+                    });
+            })
             ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
             ->groupBy('cleared_by')
             ->get()
             ->keyBy('cleared_by');
+    }
+
+    /** Item masih On-Progress (termasuk dari hari sebelumnya), diatribusikan ke yang input.
+     *
+     * @param  class-string  $model
+     */
+    protected function groupOpens(string $model, string $fromDate, string $toDate, ?string $odcName = null)
+    {
+        return $model::query()
+            ->select('created_by', DB::raw('COUNT(*) as total'))
+            ->whereDate('report_date', '<=', $toDate)
+            ->whereNotNull('created_by')
+            ->where(function ($q) {
+                $q->whereNull('status')
+                    ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->groupBy('created_by')
+            ->get()
+            ->keyBy('created_by');
     }
 
     /** @param  class-string  $model */
@@ -395,6 +504,9 @@ class DashboardController extends Controller
                 'key' => 'complaints',
                 'label' => 'Komplain',
                 'value' => (int) $summary['complaints'],
+                'open' => (int) ($summary['complaints_open'] ?? 0),
+                'clear' => (int) $summary['complaints_clear'],
+                'split_status' => true,
                 'color' => 'danger',
                 'icon' => 'ticket',
                 'top' => $top('complaints_clear'),
@@ -403,6 +515,9 @@ class DashboardController extends Controller
                 'key' => 'activations',
                 'label' => 'Aktivasi',
                 'value' => (int) $summary['activations'],
+                'open' => (int) ($summary['activations_open'] ?? 0),
+                'clear' => (int) $summary['activations_clear'],
+                'split_status' => true,
                 'color' => 'success',
                 'icon' => 'activation',
                 'top' => $top('activations_clear'),
@@ -411,6 +526,9 @@ class DashboardController extends Controller
                 'key' => 'tickets',
                 'label' => 'Ticket',
                 'value' => (int) ($summary['tickets'] ?? 0),
+                'open' => (int) ($summary['tickets_open'] ?? 0),
+                'clear' => (int) ($summary['tickets_clear'] ?? 0),
+                'split_status' => true,
                 'color' => 'info',
                 'icon' => 'ticket',
                 'top' => $top('tickets_clear'),
@@ -591,18 +709,31 @@ class DashboardController extends Controller
 
         foreach ($models as $model) {
             $rows = $model::query()
-                ->select('cleared_by', 'report_date', DB::raw('COUNT(*) as total'))
-                ->whereBetween('report_date', [$weekStart->toDateString(), $weekEnd->toDateString()])
+                ->select(
+                    'cleared_by',
+                    DB::raw('DATE(COALESCE(cleared_at, report_date)) as clear_date'),
+                    DB::raw('COUNT(*) as total'),
+                )
                 ->where('status', ReportStatus::CLEAR)
                 ->whereNotNull('cleared_by')
+                ->where(function ($q) use ($weekStart, $weekEnd) {
+                    $q->whereBetween('cleared_at', [$weekStart, $weekEnd])
+                        ->orWhere(function ($q2) use ($weekStart, $weekEnd) {
+                            $q2->whereNull('cleared_at')
+                                ->whereBetween('report_date', [$weekStart->toDateString(), $weekEnd->toDateString()]);
+                        });
+                })
                 ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
                 ->when($odcName && in_array($model, [DailyComplaint::class, DailyNocUpdate::class], true), fn ($q) => $q->where('odc_name', $odcName))
-                ->groupBy('cleared_by', 'report_date')
+                ->groupBy('cleared_by', DB::raw('DATE(COALESCE(cleared_at, report_date))'))
                 ->get();
 
             foreach ($rows as $row) {
+                if (! $row->clear_date) {
+                    continue;
+                }
                 $uid = (int) $row->cleared_by;
-                $date = Carbon::parse($row->report_date)->toDateString();
+                $date = Carbon::parse($row->clear_date)->toDateString();
                 $totals[$uid][$date] = ($totals[$uid][$date] ?? 0) + (int) $row->total;
             }
         }

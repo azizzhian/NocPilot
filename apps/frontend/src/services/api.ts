@@ -89,6 +89,9 @@ export interface DashboardStats {
     key: string
     label: string
     value: number
+    open?: number
+    clear?: number
+    split_status?: boolean
     total?: number
     color: string
     icon?: string
@@ -98,6 +101,9 @@ export interface DashboardStats {
     key: string
     label: string
     value: number
+    open?: number
+    clear?: number
+    split_status?: boolean
     total?: number
     color: string
     icon?: string
@@ -108,11 +114,14 @@ export interface DashboardStats {
     user_id: number
     name: string
     activations: number
+    activations_open?: number
     activations_clear: number
     complaints: number
+    complaints_open?: number
     complaints_clear: number
     dismantles: number
     dismantles_clear: number
+    tickets_open?: number
     tickets_clear: number
     cctv?: number
     cctv_clear?: number

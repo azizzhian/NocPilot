@@ -30,7 +30,7 @@ class RouterController extends Controller
             $query->where('status', $status);
         }
 
-        return RouterResource::collection($query->paginate(20));
+        return RouterResource::collection($query->paginate(min(max($request->integer('per_page', 20), 1), 100)));
     }
 
     public function store(Request $request): JsonResponse
