@@ -79,9 +79,9 @@ const percentage = computed(() =>
         <p class="text-xs font-medium text-muted">{{ label }}</p>
 
         <div v-if="showSplit" class="mt-2 grid grid-cols-2 gap-2">
-          <div class="rounded-lg bg-warning/10 px-2 py-1.5">
-            <p class="text-[10px] font-medium uppercase tracking-wide text-warning">On Progress</p>
-            <p class="text-xl font-bold tracking-tight text-warning">{{ formatNumber(open ?? 0) }}</p>
+          <div class="rounded-lg bg-danger/20 px-2 py-1.5">
+            <p class="text-[10px] font-medium uppercase tracking-wide text-danger">On Progress</p>
+            <p class="text-xl font-bold tracking-tight text-danger">{{ formatNumber(open ?? 0) }}</p>
           </div>
           <div class="rounded-lg bg-success/10 px-2 py-1.5">
             <p class="text-[10px] font-medium uppercase tracking-wide text-success">Clear</p>

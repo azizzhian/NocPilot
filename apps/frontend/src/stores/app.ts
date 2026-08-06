@@ -13,6 +13,8 @@ export const useAppStore = defineStore('app', () => {
   const navBadgesLoaded = ref(false)
   const sidebarFavoritePaths = ref<string[]>(defaultFavoritePaths())
   const sidebarFavoritesLoaded = ref(false)
+  const appName = ref('NocPilot')
+  const appTagline = ref('Aplikasi Untuk Report NOC')
 
   const isDark = useDark({
     selector: 'html',
@@ -22,6 +24,20 @@ export const useAppStore = defineStore('app', () => {
     storageKey: 'nocpilot-theme',
   })
   const toggleDark = useToggle(isDark)
+
+  function applyDocumentTitle(name: string) {
+    document.title = `${name} — ISP NOC Enterprise`
+  }
+
+  function setAppName(name: string) {
+    const next = name.trim() || 'NocPilot'
+    appName.value = next
+    applyDocumentTitle(next)
+  }
+
+  function setAppTagline(tagline: string) {
+    appTagline.value = tagline.trim() || 'Aplikasi Untuk Report NOC'
+  }
 
   function toggleSidebar() {
     if (isDesktop.value) {
@@ -78,6 +94,12 @@ export const useAppStore = defineStore('app', () => {
       sidebarFavoritePaths.value = Array.isArray(paths) && paths.length
         ? paths
         : defaultFavoritePaths()
+      if (typeof data.app_name === 'string' && data.app_name.trim()) {
+        setAppName(data.app_name)
+      }
+      if (typeof data.app_tagline === 'string' && data.app_tagline.trim()) {
+        setAppTagline(data.app_tagline)
+      }
       sidebarFavoritesLoaded.value = true
     } catch {
       sidebarFavoritePaths.value = defaultFavoritePaths()
@@ -96,6 +118,8 @@ export const useAppStore = defineStore('app', () => {
     commandOpen,
     navBadges,
     sidebarFavoritePaths,
+    appName,
+    appTagline,
     isDark,
     toggleDark,
     toggleSidebar,
@@ -106,5 +130,7 @@ export const useAppStore = defineStore('app', () => {
     fetchNavBadges,
     fetchSidebarFavorites,
     setSidebarFavoritePaths,
+    setAppName,
+    setAppTagline,
   }
 })

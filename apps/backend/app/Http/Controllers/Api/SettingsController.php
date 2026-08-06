@@ -29,10 +29,25 @@ class SettingsController extends Controller
     public function update(Request $request): JsonResponse
     {
         $data = $request->validate([
+            'app_name' => 'sometimes|string|max:80',
+            'app_tagline' => 'sometimes|string|max:120',
             'activity_name' => 'sometimes|string|max:255',
             'sidebar_favorites' => 'sometimes|array|max:20',
             'sidebar_favorites.*' => 'string|max:100',
         ]);
+
+        if (array_key_exists('app_name', $data)) {
+            $name = trim($data['app_name']);
+            AppSetting::set('app_name', $name !== '' ? $name : 'NocPilot');
+        }
+
+        if (array_key_exists('app_tagline', $data)) {
+            $tagline = trim($data['app_tagline']);
+            AppSetting::set(
+                'app_tagline',
+                $tagline !== '' ? $tagline : 'Aplikasi Untuk Report NOC',
+            );
+        }
 
         if (array_key_exists('activity_name', $data)) {
             AppSetting::set('activity_name', trim($data['activity_name']));
@@ -70,7 +85,8 @@ class SettingsController extends Controller
         ));
 
         return [
-            'app_name' => config('app.name', 'NocPilot'),
+            'app_name' => $this->resolvedAppName(),
+            'app_tagline' => $this->resolvedAppTagline(),
             'activity_name' => (string) AppSetting::get(
                 'activity_name',
                 config('app.activity_name', 'Report Monitoring & Aktivasi Broadband'),
@@ -85,5 +101,25 @@ class SettingsController extends Controller
                 'csv_export' => true,
             ],
         ];
+    }
+
+    protected function resolvedAppName(): string
+    {
+        $name = AppSetting::get('app_name');
+        if (is_string($name) && trim($name) !== '') {
+            return trim($name);
+        }
+
+        return (string) config('app.name', 'NocPilot');
+    }
+
+    protected function resolvedAppTagline(): string
+    {
+        $tagline = AppSetting::get('app_tagline');
+        if (is_string($tagline) && trim($tagline) !== '') {
+            return trim($tagline);
+        }
+
+        return 'Aplikasi Untuk Report NOC';
     }
 }

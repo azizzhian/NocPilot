@@ -316,6 +316,7 @@ export const masterDataApi = {
 export const settingsApi = {
   get: () => api.get<{
     app_name?: string
+    app_tagline?: string
     activity_name?: string
     timezone?: string
     locale?: string

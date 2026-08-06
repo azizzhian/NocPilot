@@ -81,8 +81,8 @@ function isActive(path: string) {
         <Zap class="h-5 w-5 text-white" />
       </div>
       <div v-if="!appStore.sidebarCollapsed || !appStore.isDesktop" class="animate-fade-in overflow-hidden">
-        <h1 class="text-sm font-bold text-white tracking-tight">NocPilot</h1>
-        <p class="text-[10px] text-slate-400">Aplikasi Untuk Report NOC</p>
+        <h1 class="text-sm font-bold text-white tracking-tight">{{ appStore.appName }}</h1>
+        <p class="text-[10px] text-slate-400">{{ appStore.appTagline }}</p>
       </div>
     </div>
 

@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import AppLayout from '@/layouts/AppLayout.vue'
 import Card from '@/components/ui/Card.vue'
 import Button from '@/components/ui/Button.vue'
+import Input from '@/components/ui/Input.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { settingsApi } from '@/services/api'
 import { allNavItems, defaultFavoritePaths, navigation } from '@/data/navigation'
@@ -14,6 +15,8 @@ const loading = ref(true)
 const saving = ref(false)
 const success = ref('')
 const error = ref('')
+const appName = ref(appStore.appName || 'NocPilot')
+const appTagline = ref(appStore.appTagline || 'Aplikasi Untuk Report NOC')
 const favoritePaths = ref<string[]>(defaultFavoritePaths())
 
 function sectionTitle(to: string): string {
@@ -57,6 +60,14 @@ function moveFavorite(index: number, dir: -1 | 1) {
 onMounted(async () => {
   try {
     const { data } = await settingsApi.get()
+    if (typeof data.app_name === 'string' && data.app_name.trim()) {
+      appName.value = data.app_name.trim()
+      appStore.setAppName(data.app_name)
+    }
+    if (typeof data.app_tagline === 'string' && data.app_tagline.trim()) {
+      appTagline.value = data.app_tagline.trim()
+      appStore.setAppTagline(data.app_tagline)
+    }
     favoritePaths.value = Array.isArray(data.sidebar_favorites) && data.sidebar_favorites.length
       ? data.sidebar_favorites
       : defaultFavoritePaths()
@@ -71,9 +82,23 @@ async function save() {
   error.value = ''
   try {
     const { data } = await settingsApi.update({
+      app_name: appName.value.trim() || 'NocPilot',
+      app_tagline: appTagline.value.trim() || 'Aplikasi Untuk Report NOC',
       sidebar_favorites: favoritePaths.value,
     })
-    const payload = (data.data ?? data) as { sidebar_favorites?: string[] }
+    const payload = (data.data ?? data) as {
+      sidebar_favorites?: string[]
+      app_name?: string
+      app_tagline?: string
+    }
+    if (typeof payload.app_name === 'string') {
+      appName.value = payload.app_name
+      appStore.setAppName(payload.app_name)
+    }
+    if (typeof payload.app_tagline === 'string') {
+      appTagline.value = payload.app_tagline
+      appStore.setAppTagline(payload.app_tagline)
+    }
     if (Array.isArray(payload.sidebar_favorites)) {
       favoritePaths.value = payload.sidebar_favorites
       appStore.setSidebarFavoritePaths(payload.sidebar_favorites)
@@ -88,7 +113,7 @@ async function save() {
 </script>
 
 <template>
-  <AppLayout title="Pengaturan" subtitle="Konfigurasi aplikasi NocPilot">
+  <AppLayout title="Pengaturan" :subtitle="`Konfigurasi aplikasi ${appStore.appName}`">
     <div v-if="loading" class="space-y-4">
       <Skeleton class="h-40 w-full" />
       <Skeleton class="h-40 w-full" />
@@ -97,6 +122,33 @@ async function save() {
     <div v-else class="mx-auto max-w-2xl space-y-6">
       <div v-if="success" class="rounded-xl border border-success/30 bg-success/5 px-4 py-3 text-sm text-success">{{ success }}</div>
       <div v-if="error" class="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">{{ error }}</div>
+
+      <Card class="space-y-4 p-6">
+        <div>
+          <h3 class="text-sm font-semibold text-foreground">Identitas Aplikasi</h3>
+          <p class="mt-1 text-sm text-muted">
+            Nama dan keterangan yang tampil di sidebar.
+          </p>
+        </div>
+        <div>
+          <label class="mb-1.5 block text-xs font-medium text-muted">Nama</label>
+          <Input
+            v-model="appName"
+            maxlength="80"
+            placeholder="NocPilot"
+            class="max-w-md"
+          />
+        </div>
+        <div>
+          <label class="mb-1.5 block text-xs font-medium text-muted">Keterangan</label>
+          <Input
+            v-model="appTagline"
+            maxlength="120"
+            placeholder="Aplikasi Untuk Report NOC"
+            class="max-w-md"
+          />
+        </div>
+      </Card>
 
       <Card class="space-y-4 p-6">
         <div>
