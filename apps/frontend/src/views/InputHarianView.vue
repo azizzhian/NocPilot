@@ -919,7 +919,7 @@ onUnmounted(stopPoll)
 
 <template>
   <AppLayout :title="pageTitle" :subtitle="pageSubtitle">
-    <div class="mb-6 flex flex-wrap items-end justify-between gap-4">
+    <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <p class="text-sm text-muted">
           Operasional NOC · {{ pageTitle }}
           <span
@@ -931,29 +931,29 @@ onUnmounted(stopPoll)
             Live
           </span>
         </p>
-        <div class="flex flex-wrap items-end gap-2">
+        <div class="flex w-full flex-wrap items-end gap-2 sm:w-auto">
           <template v-if="showRangeFilter">
-            <div>
+            <div class="min-w-0 flex-1 sm:flex-none">
               <label class="mb-1 block text-[11px] text-muted">Dari</label>
-              <Input v-model="filterFrom" type="date" class="w-36" />
+              <Input v-model="filterFrom" type="date" class="w-full sm:w-36" />
             </div>
-            <div>
+            <div class="min-w-0 flex-1 sm:flex-none">
               <label class="mb-1 block text-[11px] text-muted">Sampai</label>
-              <Input v-model="filterTo" type="date" class="w-36" />
+              <Input v-model="filterTo" type="date" class="w-full sm:w-36" />
             </div>
-            <div v-if="showNameSearch" class="min-w-[12rem]">
+            <div v-if="showNameSearch" class="min-w-0 basis-full sm:basis-auto sm:min-w-[12rem]">
               <label class="mb-1 block text-[11px] text-muted">Cari nama pelanggan</label>
-              <SearchInput v-model="filterSearch" placeholder="Nama pelanggan..." class="w-48" />
+              <SearchInput v-model="filterSearch" placeholder="Nama pelanggan..." class="w-full sm:w-48" />
             </div>
             <template v-if="showOdcExportFilter">
-              <div>
+              <div class="min-w-0 flex-1 sm:flex-none">
                 <label class="mb-1 block text-[11px] text-muted">ODC / Site</label>
-                <Select v-model="filterOdc" class="w-44">
+                <Select v-model="filterOdc" class="w-full sm:w-44">
                   <option value="">Semua ODC</option>
                   <option v-for="o in lookups.odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
                 </Select>
               </div>
-              <Button variant="outline" :disabled="exporting" @click="exportCurrentTab">
+              <Button variant="outline" class="w-full sm:w-auto" :disabled="exporting" @click="exportCurrentTab">
                 <Download class="h-4 w-4" /> {{ exporting ? 'Export...' : 'Excel' }}
               </Button>
             </template>

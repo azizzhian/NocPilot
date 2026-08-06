@@ -26,7 +26,7 @@ export const useAppStore = defineStore('app', () => {
   const toggleDark = useToggle(isDark)
 
   function applyDocumentTitle(name: string) {
-    document.title = `${name} — ISP NOC Enterprise`
+    document.title = `${name} — Service Center`
   }
 
   function setAppName(name: string) {

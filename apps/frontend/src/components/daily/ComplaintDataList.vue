@@ -302,12 +302,12 @@ watch(
   <div class="space-y-6">
     <!-- Hari ini / rentang filter -->
     <div class="overflow-hidden rounded-[18px] border border-border bg-card card-shadow">
-      <div class="flex flex-wrap items-start justify-between gap-4 border-b border-border px-6 py-5">
-        <div class="flex items-start gap-3">
-          <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+      <div class="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-6 sm:py-5">
+        <div class="flex min-w-0 items-start gap-3">
+          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <ClipboardList class="h-5 w-5" />
           </div>
-          <div>
+          <div class="min-w-0">
             <h2 class="text-base font-semibold text-foreground">
               Data Komplain
               <span class="font-medium text-muted">({{ todayItems.length }})</span>
@@ -318,23 +318,23 @@ watch(
             </p>
           </div>
         </div>
-        <Button type="button" @click="emit('add')">
+        <Button type="button" class="w-full shrink-0 sm:w-auto" @click="emit('add')">
           <Plus class="h-4 w-4" />
           Tambah Komplain
         </Button>
       </div>
 
-      <div class="max-h-[calc(100vh-22rem)] space-y-3 overflow-y-auto p-4 sm:p-5">
+      <div class="max-h-[calc(100vh-22rem)] space-y-3 overflow-y-auto p-3 sm:p-5">
         <div
           v-for="(item, index) in pagedToday"
           :key="item.id"
           class="relative flex rounded-2xl border border-border bg-white shadow-sm transition hover:shadow-md dark:bg-slate-900/40"
         >
           <div :class="['w-1.5 shrink-0 rounded-l-2xl', accentFor(item, index).stripe]" />
-          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-4 px-4 py-4 sm:gap-5 sm:px-5">
+          <div class="flex min-w-0 flex-1 gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
             <div
               :class="[
-                'flex h-12 w-12 shrink-0 items-center justify-center rounded-full',
+                'hidden h-12 w-12 shrink-0 items-center justify-center rounded-full sm:flex',
                 accentFor(item, index).iconBg,
                 accentFor(item, index).iconText,
               ]"
@@ -342,82 +342,87 @@ watch(
               <component :is="iconFor(item.problem)" class="h-5 w-5" />
             </div>
             <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <button
-                  v-if="!isGamas(item)"
-                  type="button"
-                  class="truncate text-left text-base font-semibold text-foreground transition hover:text-primary hover:underline"
-                  :title="'Lihat riwayat komplain'"
-                  @click.stop="openHistory(item)"
-                >
-                  {{ item.customer_name || '—' }}
-                </button>
-                <p v-else class="truncate text-base font-semibold text-foreground">
-                  {{ item.location_label || item.customer_name || 'Gamas' }}
-                </p>
-                <span
-                  v-if="isGamas(item)"
-                  class="inline-flex items-center rounded-full bg-danger/10 px-2.5 py-0.5 text-xs font-medium text-danger"
-                >
-                  Gamas
-                </span>
-                <button
-                  v-else-if="(item.complaint_count_90d ?? 0) >= 1"
-                  type="button"
-                  class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition hover:ring-2 hover:ring-primary/20"
-                  :class="complaintCountBadgeClass(item.complaint_count_90d ?? 0)"
-                  :title="`${item.complaint_count_90d} komplain dalam 90 hari — klik untuk riwayat`"
-                  @click.stop="openHistory(item)"
-                >
-                  {{ item.complaint_count_90d }}× / 90h
-                </button>
-                <span
-                  v-if="isClear(item.status)"
-                  class="inline-flex items-center gap-1 rounded-full bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success"
-                >
-                  <Check class="h-3 w-3" />
-                  Clear
-                </span>
-                <span
-                  v-if="isClearedFromPreviousDay(item)"
-                  class="inline-flex items-center rounded-full bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success"
-                  :title="'Laporan dari ' + formatDate(item.report_date)"
-                >
-                  dari {{ formatDateShort(item.report_date) }}
-                </span>
-                <button
-                  v-else-if="!isClear(item.status)"
-                  type="button"
-                  class="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning transition hover:bg-success/10 hover:text-success"
-                  @click="onMarkClear(item)"
-                >
-                  {{ item.status || 'On-Progress' }} · Tandai Clear
-                </button>
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0 flex-1 space-y-1.5">
+                  <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+                    <button
+                      v-if="!isGamas(item)"
+                      type="button"
+                      class="max-w-full truncate text-left text-sm font-semibold text-foreground transition hover:text-primary hover:underline sm:text-base"
+                      :title="'Lihat riwayat komplain'"
+                      @click.stop="openHistory(item)"
+                    >
+                      {{ item.customer_name || '—' }}
+                    </button>
+                    <p v-else class="max-w-full truncate text-sm font-semibold text-foreground sm:text-base">
+                      {{ item.location_label || item.customer_name || 'Gamas' }}
+                    </p>
+                    <span
+                      v-if="isGamas(item)"
+                      class="inline-flex items-center rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger"
+                    >
+                      Gamas
+                    </span>
+                    <button
+                      v-else-if="(item.complaint_count_90d ?? 0) >= 1"
+                      type="button"
+                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium transition hover:ring-2 hover:ring-primary/20"
+                      :class="complaintCountBadgeClass(item.complaint_count_90d ?? 0)"
+                      :title="`${item.complaint_count_90d} komplain dalam 90 hari — klik untuk riwayat`"
+                      @click.stop="openHistory(item)"
+                    >
+                      {{ item.complaint_count_90d }}× / 90h
+                    </button>
+                    <span
+                      v-if="isClear(item.status)"
+                      class="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success"
+                    >
+                      <Check class="h-3 w-3" />
+                      Clear
+                    </span>
+                    <span
+                      v-if="isClearedFromPreviousDay(item)"
+                      class="inline-flex items-center rounded-full bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success"
+                      :title="'Laporan dari ' + formatDate(item.report_date)"
+                    >
+                      dari {{ formatDateShort(item.report_date) }}
+                    </span>
+                    <button
+                      v-else-if="!isClear(item.status)"
+                      type="button"
+                      class="inline-flex max-w-full items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning transition hover:bg-success/10 hover:text-success"
+                      @click="onMarkClear(item)"
+                    >
+                      <span class="sm:hidden">Tandai Clear</span>
+                      <span class="hidden sm:inline">{{ item.status || 'On-Progress' }} · Tandai Clear</span>
+                    </button>
+                  </div>
+                  <p class="break-words text-sm text-muted">{{ locationLine(item) }}</p>
+                  <p :class="['break-words text-sm font-medium', accentFor(item, index).problem]">
+                    {{ item.problem || '—' }}
+                  </p>
+                  <p class="break-words text-xs text-muted">{{ metaLine(item) }}</p>
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1 pt-0.5 text-xs text-muted sm:text-sm">
+                    <span class="inline-flex items-center gap-1.5">
+                      <Calendar class="h-3.5 w-3.5 shrink-0" />
+                      {{ formatDate(item.start_problem || item.report_date) }}
+                    </span>
+                    <span class="inline-flex items-center gap-1.5">
+                      <Clock class="h-3.5 w-3.5 shrink-0" />
+                      {{ itemTime(item) }}
+                    </span>
+                  </div>
+                </div>
+                <div class="shrink-0" @click.stop>
+                  <button
+                    type="button"
+                    class="rounded-lg p-2 text-muted transition hover:bg-muted hover:text-foreground"
+                    @click="toggleMenu(item.id, $event)"
+                  >
+                    <MoreVertical class="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-              <p class="mt-0.5 text-sm text-muted">{{ locationLine(item) }}</p>
-              <p :class="['mt-1 text-sm font-medium', accentFor(item, index).problem]">
-                {{ item.problem || '—' }}
-              </p>
-              <p class="mt-1 text-xs text-muted">{{ metaLine(item) }}</p>
-            </div>
-            <div class="flex shrink-0 flex-col gap-1.5 text-sm text-muted sm:min-w-[9.5rem]">
-              <span class="inline-flex items-center gap-1.5">
-                <Calendar class="h-3.5 w-3.5" />
-                {{ formatDate(item.start_problem || item.report_date) }}
-              </span>
-              <span class="inline-flex items-center gap-1.5">
-                <Clock class="h-3.5 w-3.5" />
-                {{ itemTime(item) }}
-              </span>
-            </div>
-            <div class="shrink-0" @click.stop>
-              <button
-                type="button"
-                class="rounded-lg p-2 text-muted transition hover:bg-muted hover:text-foreground"
-                @click="toggleMenu(item.id, $event)"
-              >
-                <MoreVertical class="h-4 w-4" />
-              </button>
             </div>
           </div>
         </div>
@@ -460,12 +465,12 @@ watch(
 
     <!-- On-Progress carryover -->
     <div class="overflow-hidden rounded-[18px] border border-warning/30 bg-card card-shadow">
-      <div class="flex flex-wrap items-start justify-between gap-4 border-b border-warning/20 bg-warning/5 px-6 py-5">
-        <div class="flex items-start gap-3">
-          <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-warning/15 text-warning">
+      <div class="flex flex-col gap-3 border-b border-warning/20 bg-warning/5 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-6 sm:py-5">
+        <div class="flex min-w-0 items-start gap-3">
+          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-warning/15 text-warning">
             <Clock class="h-5 w-5" />
           </div>
-          <div>
+          <div class="min-w-0">
             <h2 class="text-base font-semibold text-foreground">
               On-Progress
               <span class="font-medium text-muted">({{ openItems.length }})</span>
@@ -475,17 +480,17 @@ watch(
         </div>
       </div>
 
-      <div class="max-h-[calc(100vh-22rem)] space-y-3 overflow-y-auto p-4 sm:p-5">
+      <div class="max-h-[calc(100vh-22rem)] space-y-3 overflow-y-auto p-3 sm:p-5">
         <div
           v-for="(item, index) in pagedOpen"
           :key="item.id"
           class="relative flex rounded-2xl border border-border bg-white shadow-sm transition hover:shadow-md dark:bg-slate-900/40"
         >
           <div :class="['w-1.5 shrink-0 rounded-l-2xl', accentFor(item, index).stripe]" />
-          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-4 px-4 py-4 sm:gap-5 sm:px-5">
+          <div class="flex min-w-0 flex-1 gap-3 px-3 py-3 sm:gap-4 sm:px-5 sm:py-4">
             <div
               :class="[
-                'flex h-12 w-12 shrink-0 items-center justify-center rounded-full',
+                'hidden h-12 w-12 shrink-0 items-center justify-center rounded-full sm:flex',
                 accentFor(item, index).iconBg,
                 accentFor(item, index).iconText,
               ]"
@@ -493,73 +498,78 @@ watch(
               <component :is="iconFor(item.problem)" class="h-5 w-5" />
             </div>
             <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <button
-                  v-if="!isGamas(item)"
-                  type="button"
-                  class="truncate text-left text-base font-semibold text-foreground transition hover:text-primary hover:underline"
-                  :title="'Lihat riwayat komplain'"
-                  @click.stop="openHistory(item)"
-                >
-                  {{ item.customer_name || '—' }}
-                </button>
-                <p v-else class="truncate text-base font-semibold text-foreground">
-                  {{ item.location_label || item.customer_name || 'Gamas' }}
-                </p>
-                <span
-                  v-if="isGamas(item)"
-                  class="inline-flex items-center rounded-full bg-danger/10 px-2.5 py-0.5 text-xs font-medium text-danger"
-                >
-                  Gamas
-                </span>
-                <button
-                  v-else-if="(item.complaint_count_90d ?? 0) >= 1"
-                  type="button"
-                  class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition hover:ring-2 hover:ring-primary/20"
-                  :class="complaintCountBadgeClass(item.complaint_count_90d ?? 0)"
-                  :title="`${item.complaint_count_90d} komplain dalam 90 hari — klik untuk riwayat`"
-                  @click.stop="openHistory(item)"
-                >
-                  {{ item.complaint_count_90d }}× / 90h
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning transition hover:bg-success/10 hover:text-success"
-                  @click="onMarkClear(item)"
-                >
-                  {{ item.status || 'On-Progress' }} · Tandai Clear
-                </button>
-                <span
-                  class="inline-flex items-center rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700/80 dark:text-slate-200"
-                  :title="`Masih open sejak ${formatDate(item.report_date)}`"
-                >
-                  Open dari {{ formatDateShort(item.report_date) }}
-                </span>
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0 flex-1 space-y-1.5">
+                  <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+                    <button
+                      v-if="!isGamas(item)"
+                      type="button"
+                      class="max-w-full truncate text-left text-sm font-semibold text-foreground transition hover:text-primary hover:underline sm:text-base"
+                      :title="'Lihat riwayat komplain'"
+                      @click.stop="openHistory(item)"
+                    >
+                      {{ item.customer_name || '—' }}
+                    </button>
+                    <p v-else class="max-w-full truncate text-sm font-semibold text-foreground sm:text-base">
+                      {{ item.location_label || item.customer_name || 'Gamas' }}
+                    </p>
+                    <span
+                      v-if="isGamas(item)"
+                      class="inline-flex items-center rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger"
+                    >
+                      Gamas
+                    </span>
+                    <button
+                      v-else-if="(item.complaint_count_90d ?? 0) >= 1"
+                      type="button"
+                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium transition hover:ring-2 hover:ring-primary/20"
+                      :class="complaintCountBadgeClass(item.complaint_count_90d ?? 0)"
+                      :title="`${item.complaint_count_90d} komplain dalam 90 hari — klik untuk riwayat`"
+                      @click.stop="openHistory(item)"
+                    >
+                      {{ item.complaint_count_90d }}× / 90h
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex max-w-full items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning transition hover:bg-success/10 hover:text-success"
+                      @click="onMarkClear(item)"
+                    >
+                      <span class="sm:hidden">Tandai Clear</span>
+                      <span class="hidden sm:inline">{{ item.status || 'On-Progress' }} · Tandai Clear</span>
+                    </button>
+                    <span
+                      class="inline-flex items-center rounded-full bg-slate-200/80 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-700/80 dark:text-slate-200"
+                      :title="`Masih open sejak ${formatDate(item.report_date)}`"
+                    >
+                      Open dari {{ formatDateShort(item.report_date) }}
+                    </span>
+                  </div>
+                  <p class="break-words text-sm text-muted">{{ locationLine(item) }}</p>
+                  <p :class="['break-words text-sm font-medium', accentFor(item, index).problem]">
+                    {{ item.problem || '—' }}
+                  </p>
+                  <p class="break-words text-xs text-muted">{{ metaLine(item) }}</p>
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1 pt-0.5 text-xs text-muted sm:text-sm">
+                    <span class="inline-flex items-center gap-1.5">
+                      <Calendar class="h-3.5 w-3.5 shrink-0" />
+                      {{ formatDate(item.start_problem || item.report_date) }}
+                    </span>
+                    <span class="inline-flex items-center gap-1.5">
+                      <Clock class="h-3.5 w-3.5 shrink-0" />
+                      {{ itemTime(item) }}
+                    </span>
+                  </div>
+                </div>
+                <div class="shrink-0" @click.stop>
+                  <button
+                    type="button"
+                    class="rounded-lg p-2 text-muted transition hover:bg-muted hover:text-foreground"
+                    @click="toggleMenu(item.id, $event)"
+                  >
+                    <MoreVertical class="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-              <p class="mt-0.5 text-sm text-muted">{{ locationLine(item) }}</p>
-              <p :class="['mt-1 text-sm font-medium', accentFor(item, index).problem]">
-                {{ item.problem || '—' }}
-              </p>
-              <p class="mt-1 text-xs text-muted">{{ metaLine(item) }}</p>
-            </div>
-            <div class="flex shrink-0 flex-col gap-1.5 text-sm text-muted sm:min-w-[9.5rem]">
-              <span class="inline-flex items-center gap-1.5">
-                <Calendar class="h-3.5 w-3.5" />
-                {{ formatDate(item.start_problem || item.report_date) }}
-              </span>
-              <span class="inline-flex items-center gap-1.5">
-                <Clock class="h-3.5 w-3.5" />
-                {{ itemTime(item) }}
-              </span>
-            </div>
-            <div class="shrink-0" @click.stop>
-              <button
-                type="button"
-                class="rounded-lg p-2 text-muted transition hover:bg-muted hover:text-foreground"
-                @click="toggleMenu(item.id, $event)"
-              >
-                <MoreVertical class="h-4 w-4" />
-              </button>
             </div>
           </div>
         </div>
