@@ -489,8 +489,13 @@ export const activationApi = {
 }
 
 export const dismantleApi = {
-  list: (params?: { search?: string; status?: string }) =>
-    api.get<PaginatedResponse<DismantleItem>>('/dismantles', { params }),
+  list: (params?: {
+    search?: string
+    status?: string
+    from?: string
+    to?: string
+    page?: number
+  }) => api.get<PaginatedResponse<DismantleItem>>('/dismantles', { params }),
   stats: () => api.get<Record<string, number>>('/dismantles/stats'),
   create: (data: Record<string, unknown>) => api.post('/dismantles', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/dismantles/${id}`, data),
