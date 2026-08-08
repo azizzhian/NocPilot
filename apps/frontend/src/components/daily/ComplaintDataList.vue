@@ -637,14 +637,13 @@ watch(
     </Teleport>
 
     <ComplaintHistoryPanel
-      :open="historyOpen"
+      v-model:open="historyOpen"
       :title="historyTitle"
       :loading="historyLoading"
       :items="historyItems"
       :total="historyTotal"
       :summary="historySummary"
       :days="historyDays"
-      @close="historyOpen = false"
     />
   </div>
 </template>
