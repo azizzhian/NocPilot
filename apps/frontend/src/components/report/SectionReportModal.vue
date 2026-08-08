@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import Modal from '@/components/ui/Modal.vue'
 import Button from '@/components/ui/Button.vue'
-import Input from '@/components/ui/Input.vue'
+import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 import { generateReportApi, type ReportSection } from '@/services/api'
 import { copyToClipboard } from '@/lib/copy'
 import { todayInput } from '@/lib/date-input'
@@ -13,18 +13,24 @@ const props = withDefaults(
     open: boolean
     section: ReportSection
     title?: string
-    /** Prefill tanggal (YYYY-MM-DD) */
+    /** Prefill tanggal tunggal (YYYY-MM-DD) */
     date?: string
+    /** Prefill rentang */
+    from?: string
+    to?: string
   }>(),
   {
     title: '',
     date: '',
+    from: '',
+    to: '',
   },
 )
 
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 
-const reportDate = ref(todayInput())
+const fromDate = ref(todayInput())
+const toDate = ref(todayInput())
 const text = ref('')
 const generating = ref(false)
 const copying = ref(false)
@@ -49,7 +55,10 @@ watch(
   () => props.open,
   (open) => {
     if (!open) return
-    reportDate.value = props.date || todayInput()
+    const start = props.from || props.date || todayInput()
+    const end = props.to || props.from || props.date || start
+    fromDate.value = start
+    toDate.value = end
     text.value = ''
     error.value = ''
     success.value = ''
@@ -68,13 +77,18 @@ function flash(msg: string) {
 }
 
 async function generate() {
+  if (!fromDate.value || !toDate.value) {
+    error.value = 'Pilih periode terlebih dahulu.'
+    return
+  }
   generating.value = true
   error.value = ''
   success.value = ''
   try {
     const { data } = await generateReportApi.generateSection({
       section: props.section,
-      report_date: reportDate.value,
+      from: fromDate.value,
+      to: toDate.value,
     })
     text.value = data.text ?? ''
     flash(data.message || 'Berhasil di-generate.')
@@ -115,10 +129,11 @@ async function copy() {
       </div>
 
       <div class="flex flex-wrap items-end gap-3">
-        <div class="min-w-[10rem] flex-1">
-          <label class="mb-1.5 block text-sm font-medium">Tanggal</label>
-          <Input v-model="reportDate" type="date" />
-        </div>
+        <DateRangePicker
+          v-model:from="fromDate"
+          v-model:to="toDate"
+          class="min-w-[16rem] flex-1"
+        />
         <Button :disabled="generating" @click="generate">
           <FileText class="h-4 w-4" />
           {{ generating ? 'Generating...' : 'Generate' }}

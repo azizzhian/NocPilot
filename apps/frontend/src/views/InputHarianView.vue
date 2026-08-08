@@ -1491,7 +1491,8 @@ onUnmounted(stopPoll)
       v-if="reportSection"
       v-model:open="reportModalOpen"
       :section="reportSection"
-      :date="date"
+      :from="filterFrom || date"
+      :to="filterTo || filterFrom || date"
     />
 
     <Toast

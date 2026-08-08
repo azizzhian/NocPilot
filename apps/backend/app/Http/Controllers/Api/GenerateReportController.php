@@ -109,11 +109,19 @@ class GenerateReportController extends Controller
     ): JsonResponse {
         $data = $request->validate([
             'section' => 'required|in:complaint,activation,cctv,noc,dismantle,ticket,monitoring',
-            'report_date' => 'required|date',
+            'from' => 'nullable|date',
+            'to' => 'nullable|date',
+            'report_date' => 'nullable|date',
         ]);
 
-        $date = Carbon::parse($data['report_date']);
         $section = $data['section'];
+        $fromRaw = $data['from'] ?? $data['report_date'] ?? now()->toDateString();
+        $toRaw = $data['to'] ?? $data['from'] ?? $data['report_date'] ?? $fromRaw;
+        $from = Carbon::parse($fromRaw)->startOfDay();
+        $to = Carbon::parse($toRaw)->endOfDay();
+        if ($from->gt($to)) {
+            [$from, $to] = [$to->copy()->startOfDay(), $from->copy()->endOfDay()];
+        }
 
         try {
             if ($section === 'monitoring') {
@@ -124,7 +132,7 @@ class GenerateReportController extends Controller
                 }
                 $text = $monitorReport->generate();
             } else {
-                $text = $generator->generateSection($section, $date);
+                $text = $generator->generateSection($section, $from, $to);
             }
         } catch (\Throwable $e) {
             report($e);
@@ -147,7 +155,9 @@ class GenerateReportController extends Controller
         return response()->json([
             'message' => 'Report '.($labels[$section] ?? $section).' berhasil di-generate.',
             'section' => $section,
-            'report_date' => $date->toDateString(),
+            'from' => $from->toDateString(),
+            'to' => $to->toDateString(),
+            'report_date' => $from->toDateString(),
             'text' => $text,
         ]);
     }

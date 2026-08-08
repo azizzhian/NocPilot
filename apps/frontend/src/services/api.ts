@@ -802,6 +802,8 @@ export type ReportSection =
 export interface SectionReportResult {
   message: string
   section: ReportSection
+  from?: string
+  to?: string
   report_date: string
   text: string
 }
@@ -818,7 +820,7 @@ export const generateReportApi = {
   index: (date?: string) => api.get<GenerateReportIndexData>('/reports/generate', { params: { date } }),
   generate: (data: { report_date: string; responsible_name: string }) =>
     api.post<GenerateReportResult>('/reports/generate', data, { timeout: 180_000 }),
-  generateSection: (data: { section: ReportSection; report_date: string }) =>
+  generateSection: (data: { section: ReportSection; from: string; to: string; report_date?: string }) =>
     api.post<SectionReportResult>('/reports/generate/section', data, { timeout: 180_000 }),
   history: (page = 1) =>
     api.get<{ data: ReportSnapshotListItem[]; current_page: number; last_page: number }>(

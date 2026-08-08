@@ -340,7 +340,8 @@ onMounted(() => load(1))
     <SectionReportModal
       v-model:open="reportModalOpen"
       section="dismantle"
-      :date="toDate || fromDate || todayInput()"
+      :from="fromDate || todayInput()"
+      :to="toDate || fromDate || todayInput()"
     />
   </AppLayout>
 </template>

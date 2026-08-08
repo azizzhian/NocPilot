@@ -406,7 +406,8 @@ onMounted(async () => {
     <SectionReportModal
       v-model:open="reportModalOpen"
       section="ticket"
-      :date="toDate || fromDate || todayInput()"
+      :from="fromDate || todayInput()"
+      :to="toDate || fromDate || todayInput()"
     />
   </AppLayout>
 </template>

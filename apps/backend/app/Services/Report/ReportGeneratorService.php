@@ -35,10 +35,10 @@ class ReportGeneratorService
                 'activity_name',
                 config('app.activity_name', 'Report Monitoring & Aktivasi Broadband'),
             ),
-            'activations' => $this->dailyActivations($date),
-            'cctv_setups' => $this->dailyCctvSetups($date),
-            'dismantles' => $this->dailyDismantles($date),
-            'complaints_by_odc' => $this->dailyComplaintsByOdc($date),
+            'activations' => $this->dailyActivations($date, $date),
+            'cctv_setups' => $this->dailyCctvSetups($date, $date),
+            'dismantles' => $this->dailyDismantles($date, $date),
+            'complaints_by_odc' => $this->dailyComplaintsByOdc($date, $date),
         ];
 
         $body = $this->templates->bodyFor(ReportTemplate::TYPE_DAILY);
@@ -61,9 +61,16 @@ class ReportGeneratorService
      *
      * @param  'complaint'|'activation'|'cctv'|'noc'|'dismantle'|'ticket'|'monitoring'  $section
      */
-    public function generateSection(string $section, Carbon $date): string
+    public function generateSection(string $section, Carbon $from, ?Carbon $to = null): string
     {
         $this->pppoeByName = [];
+        $to ??= $from->copy();
+        if ($from->gt($to)) {
+            [$from, $to] = [$to->copy()->startOfDay(), $from->copy()->endOfDay()];
+        } else {
+            $from = $from->copy()->startOfDay();
+            $to = $to->copy()->endOfDay();
+        }
 
         if ($section === 'monitoring') {
             throw new \InvalidArgumentException('Section monitoring ditangani oleh NetworkMonitorReportService.');
@@ -75,12 +82,12 @@ class ReportGeneratorService
         }
 
         $context = match ($section) {
-            'complaint' => ['complaints_by_odc' => $this->dailyComplaintsByOdc($date)],
-            'activation' => ['activations' => $this->dailyActivations($date)],
-            'cctv' => ['cctv_setups' => $this->dailyCctvSetups($date)],
-            'noc' => $this->nocUpdateOnlyContext($date),
-            'dismantle' => ['dismantles' => $this->moduleDismantles($date)],
-            'ticket' => ['tickets' => $this->reportTickets($date)],
+            'complaint' => ['complaints_by_odc' => $this->dailyComplaintsByOdc($from, $to)],
+            'activation' => ['activations' => $this->dailyActivations($from, $to)],
+            'cctv' => ['cctv_setups' => $this->dailyCctvSetups($from, $to)],
+            'noc' => $this->nocUpdateOnlyContext($from, $to),
+            'dismantle' => ['dismantles' => $this->moduleDismantles($from, $to)],
+            'ticket' => ['tickets' => $this->reportTickets($from, $to)],
             default => [],
         };
 
@@ -90,11 +97,24 @@ class ReportGeneratorService
     /** @return array<string, mixed> */
     private function nocContext(Carbon $date): array
     {
-        $updates = DailyNocUpdate::whereDate('report_date', $date)->orderBy('sort_order')->get();
+        return $this->nocContextRange($date, $date);
+    }
+
+    /** @return array<string, mixed> */
+    private function nocContextRange(Carbon $from, Carbon $to): array
+    {
+        $updates = DailyNocUpdate::query()
+            ->whereDate('report_date', '>=', $from->toDateString())
+            ->whereDate('report_date', '<=', $to->toDateString())
+            ->orderBy('sort_order')
+            ->get();
         $onProgress = $updates->filter(fn ($u) => ! ReportStatus::isClear($u->status))->values();
         $cleared = $updates->filter(fn ($u) => ReportStatus::isClear($u->status))->values();
 
-        $dismantles = DailyDismantle::whereDate('report_date', $date)->get();
+        $dismantles = DailyDismantle::query()
+            ->whereDate('report_date', '>=', $from->toDateString())
+            ->whereDate('report_date', '<=', $to->toDateString())
+            ->get();
 
         $openBySite = $dismantles->filter(fn ($d) => ! ReportStatus::isClear($d->status))
             ->groupBy(fn ($d) => $d->site_name ?: 'Tanpa Site');
@@ -102,13 +122,16 @@ class ReportGeneratorService
         $clearedBySite = $dismantles->filter(fn ($d) => ReportStatus::isClear($d->status))
             ->groupBy(fn ($d) => $d->site_name ?: 'Tanpa Site');
 
-        $activationCount = DailyActivation::whereDate('report_date', $date)->count();
+        $activationCount = DailyActivation::query()
+            ->whereDate('report_date', '>=', $from->toDateString())
+            ->whereDate('report_date', '<=', $to->toDateString())
+            ->count();
 
         return [
             'noc_on_progress' => $onProgress->map(fn ($u) => ['description' => $u->description])->all(),
             'has_noc_cleared' => $cleared->isNotEmpty(),
             'noc_cleared' => $cleared->map(fn ($u) => ['description' => $u->description])->all(),
-            'activation_line' => $activationCount > 0 ? "{$activationCount} aktivasi hari ini" : '-',
+            'activation_line' => $activationCount > 0 ? "{$activationCount} aktivasi" : '-',
             'dismantle_open' => $openBySite->map(fn ($items, $siteName) => [
                 'site' => $siteName,
                 'count' => $items->count(),
@@ -118,14 +141,18 @@ class ReportGeneratorService
                 'site' => $siteName,
                 'count' => $items->count(),
             ])->values()->all(),
-            'odc_complaints' => $this->nocComplaintsByOdc($date),
+            'odc_complaints' => $this->nocComplaintsByOdc($from, $to),
         ];
     }
 
     /** @return array<string, mixed> */
-    private function nocUpdateOnlyContext(Carbon $date): array
+    private function nocUpdateOnlyContext(Carbon $from, Carbon $to): array
     {
-        $updates = DailyNocUpdate::whereDate('report_date', $date)->orderBy('sort_order')->get();
+        $updates = DailyNocUpdate::query()
+            ->whereDate('report_date', '>=', $from->toDateString())
+            ->whereDate('report_date', '<=', $to->toDateString())
+            ->orderBy('sort_order')
+            ->get();
         $onProgress = $updates->filter(fn ($u) => ! ReportStatus::isClear($u->status))->values();
         $cleared = $updates->filter(fn ($u) => ReportStatus::isClear($u->status))->values();
 
@@ -137,10 +164,11 @@ class ReportGeneratorService
     }
 
     /** @return array<int, array<string, string>> */
-    private function moduleDismantles(Carbon $date): array
+    private function moduleDismantles(Carbon $from, Carbon $to): array
     {
         return \App\Models\Dismantle::query()
-            ->whereDate('opened_at', $date)
+            ->whereDate('opened_at', '>=', $from->toDateString())
+            ->whereDate('opened_at', '<=', $to->toDateString())
             ->orderByRaw("CASE WHEN status = 'Clear' THEN 1 ELSE 0 END")
             ->orderBy('opened_at')
             ->get()
@@ -161,10 +189,11 @@ class ReportGeneratorService
     }
 
     /** @return array<int, array<string, string>> */
-    private function reportTickets(Carbon $date): array
+    private function reportTickets(Carbon $from, Carbon $to): array
     {
         return \App\Models\ReportTicket::query()
-            ->whereDate('opened_at', $date)
+            ->whereDate('opened_at', '>=', $from->toDateString())
+            ->whereDate('opened_at', '<=', $to->toDateString())
             ->orderByRaw("CASE WHEN status = 'Clear' OR status = 'Closed' THEN 1 ELSE 0 END")
             ->orderBy('opened_at')
             ->get()
@@ -183,9 +212,11 @@ class ReportGeneratorService
     }
 
     /** @return array<int, array<string, string>> */
-    private function dailyActivations(Carbon $date): array
+    private function dailyActivations(Carbon $from, Carbon $to): array
     {
-        return DailyActivation::whereDate('report_date', $date)
+        return DailyActivation::query()
+            ->whereDate('report_date', '>=', $from->toDateString())
+            ->whereDate('report_date', '<=', $to->toDateString())
             ->orderBy('customer_name')
             ->get()
             ->map(fn ($item) => [
@@ -198,9 +229,11 @@ class ReportGeneratorService
     }
 
     /** @return array<int, array<string, string>> */
-    private function dailyCctvSetups(Carbon $date): array
+    private function dailyCctvSetups(Carbon $from, Carbon $to): array
     {
-        return DailyCctvSetup::whereDate('report_date', $date)
+        return DailyCctvSetup::query()
+            ->whereDate('report_date', '>=', $from->toDateString())
+            ->whereDate('report_date', '<=', $to->toDateString())
             ->get()
             ->map(fn ($cctv) => [
                 'customer_name' => $this->formatCustomerName($cctv->customer_name ?: '-'),
@@ -211,9 +244,11 @@ class ReportGeneratorService
     }
 
     /** @return array<int, array<string, string>> */
-    private function dailyDismantles(Carbon $date): array
+    private function dailyDismantles(Carbon $from, Carbon $to): array
     {
-        return DailyDismantle::whereDate('report_date', $date)
+        return DailyDismantle::query()
+            ->whereDate('report_date', '>=', $from->toDateString())
+            ->whereDate('report_date', '<=', $to->toDateString())
             ->orderByRaw("CASE WHEN status = 'Clear' THEN 1 ELSE 0 END")
             ->orderBy('start_ticket')
             ->get()
@@ -234,9 +269,11 @@ class ReportGeneratorService
     }
 
     /** @return array<int, array{odc_name: string, items: array<int, array<string, string>>}> */
-    private function dailyComplaintsByOdc(Carbon $date): array
+    private function dailyComplaintsByOdc(Carbon $from, Carbon $to): array
     {
-        $complaints = DailyComplaint::whereDate('report_date', $date)
+        $complaints = DailyComplaint::query()
+            ->whereDate('report_date', '>=', $from->toDateString())
+            ->whereDate('report_date', '<=', $to->toDateString())
             ->orderByRaw("CASE WHEN status = 'Clear' THEN 1 ELSE 0 END")
             ->orderBy('start_problem')
             ->get();
@@ -260,9 +297,12 @@ class ReportGeneratorService
     }
 
     /** @return array<int, array<string, mixed>> */
-    private function nocComplaintsByOdc(Carbon $date): array
+    private function nocComplaintsByOdc(Carbon $from, Carbon $to): array
     {
-        $complaints = DailyComplaint::whereDate('report_date', $date)->get();
+        $complaints = DailyComplaint::query()
+            ->whereDate('report_date', '>=', $from->toDateString())
+            ->whereDate('report_date', '<=', $to->toDateString())
+            ->get();
 
         return $complaints->groupBy(fn ($c) => $c->odc_name ?: 'Tanpa ODC')
             ->map(function ($items, $odcName) {
