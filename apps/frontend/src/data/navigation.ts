@@ -92,8 +92,8 @@ export const navigation: NavSection[] = [
   {
     title: 'LAPORAN',
     items: [
-      { label: 'Generate Report', to: '/report/generate', icon: FileText, permission: 'report.generate' },
       { label: 'History Report', to: '/report/history', icon: History, permission: 'report.view' },
+      { label: 'Template Report', to: '/report/generate', icon: FileText, permission: 'report.generate' },
     ],
   },
   {

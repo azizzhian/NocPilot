@@ -15,13 +15,16 @@ import DailyStatusBadge from '@/components/daily/DailyStatusBadge.vue'
 import DailyNocAttribution from '@/components/daily/DailyNocAttribution.vue'
 import Modal from '@/components/ui/Modal.vue'
 import Toast from '@/components/ui/Toast.vue'
+import SearchInput from '@/components/ui/SearchInput.vue'
+import DateRangePicker from '@/components/ui/DateRangePicker.vue'
+import SectionReportModal from '@/components/report/SectionReportModal.vue'
 import { dailyEntryApi, type DailyEntryData, type DailyEntryItem } from '@/services/api'
+import type { ReportSection } from '@/services/api'
 import { useDailyEntryPoll, type DailyEntryRealtimeEvent } from '@/composables/useDailyEntryPoll'
 import { toDateInput, todayInput } from '@/lib/date-input'
 import { parseActivationText } from '@/lib/parse-activation-text'
 import { cn } from '@/lib/utils'
-import { Pencil, Trash2, Plus, Download } from 'lucide-vue-next'
-import SearchInput from '@/components/ui/SearchInput.vue'
+import { Pencil, Trash2, Plus, Download, FileText } from 'lucide-vue-next'
 
 const route = useRoute()
 const date = ref(todayInput())
@@ -30,6 +33,7 @@ const filterTo = ref(todayInput())
 const filterOdc = ref('')
 const filterSearch = ref('')
 const exporting = ref(false)
+const reportModalOpen = ref(false)
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
@@ -216,6 +220,18 @@ const showOdcExportFilter = computed(
 const showNameSearch = computed(
   () => activeTab.value === 'activation' || activeTab.value === 'cctv',
 )
+
+const reportSection = computed((): ReportSection | null => {
+  const map: Record<string, ReportSection> = {
+    complaint: 'complaint',
+    activation: 'activation',
+    cctv: 'cctv',
+    noc: 'noc',
+  }
+  return map[activeTab.value] ?? null
+})
+
+const canGenerateSection = computed(() => reportSection.value !== null)
 
 watch(
   () => [route.meta.dailyTab, route.meta.dailyTabs, route.path] as const,
@@ -933,13 +949,8 @@ onUnmounted(stopPoll)
         </p>
         <div class="flex w-full flex-wrap items-end gap-2 sm:w-auto">
           <template v-if="showRangeFilter">
-            <div class="min-w-0 flex-1 sm:flex-none">
-              <label class="mb-1 block text-[11px] text-muted">Dari</label>
-              <Input v-model="filterFrom" type="date" class="w-full sm:w-36" />
-            </div>
-            <div class="min-w-0 flex-1 sm:flex-none">
-              <label class="mb-1 block text-[11px] text-muted">Sampai</label>
-              <Input v-model="filterTo" type="date" class="w-full sm:w-36" />
+            <div class="min-w-0 flex-1 sm:flex-none sm:w-64">
+              <DateRangePicker v-model:from="filterFrom" v-model:to="filterTo" class="w-full" />
             </div>
             <div v-if="showNameSearch" class="min-w-0 basis-full sm:basis-auto sm:min-w-[12rem]">
               <label class="mb-1 block text-[11px] text-muted">Cari nama pelanggan</label>
@@ -958,6 +969,14 @@ onUnmounted(stopPoll)
               </Button>
             </template>
           </template>
+          <Button
+            v-if="canGenerateSection"
+            variant="outline"
+            class="w-full sm:w-auto"
+            @click="reportModalOpen = true"
+          >
+            <FileText class="h-4 w-4" /> Generate
+          </Button>
           <div>
             <label class="mb-1 block text-[11px] text-muted">{{ showRangeFilter ? 'Hari input' : 'Tanggal' }}</label>
             <input type="date" :value="date" class="form-control h-10 w-auto px-4" @change="changeDate" />
@@ -1467,6 +1486,13 @@ onUnmounted(stopPoll)
         </Button>
       </template>
     </Modal>
+
+    <SectionReportModal
+      v-if="reportSection"
+      v-model:open="reportModalOpen"
+      :section="reportSection"
+      :date="date"
+    />
 
     <Toast
       v-if="toast"

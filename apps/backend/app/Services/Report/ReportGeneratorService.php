@@ -12,6 +12,7 @@ use App\Models\ReportTemplate;
 use App\Support\ReportStatus;
 use App\Support\SimpleTemplateEngine;
 use App\Support\AppSetting;
+use App\Support\ReportTemplateDefaults;
 use Carbon\Carbon;
 
 class ReportGeneratorService
@@ -49,6 +50,46 @@ class ReportGeneratorService
     {
         $this->pppoeByName = [];
 
+        $context = $this->nocContext($date);
+        $body = $this->templates->bodyFor(ReportTemplate::TYPE_NOC);
+
+        return $this->normalizeReportText($this->engine->render($body, $context));
+    }
+
+    /**
+     * Generate teks report hanya untuk satu bagian (komplain, aktivasi, dll).
+     *
+     * @param  'complaint'|'activation'|'cctv'|'noc'|'dismantle'|'ticket'|'monitoring'  $section
+     */
+    public function generateSection(string $section, Carbon $date): string
+    {
+        $this->pppoeByName = [];
+
+        if ($section === 'monitoring') {
+            throw new \InvalidArgumentException('Section monitoring ditangani oleh NetworkMonitorReportService.');
+        }
+
+        $body = ReportTemplateDefaults::sectionBody($section);
+        if ($body === '') {
+            throw new \InvalidArgumentException("Section report tidak dikenal: {$section}");
+        }
+
+        $context = match ($section) {
+            'complaint' => ['complaints_by_odc' => $this->dailyComplaintsByOdc($date)],
+            'activation' => ['activations' => $this->dailyActivations($date)],
+            'cctv' => ['cctv_setups' => $this->dailyCctvSetups($date)],
+            'noc' => $this->nocUpdateOnlyContext($date),
+            'dismantle' => ['dismantles' => $this->moduleDismantles($date)],
+            'ticket' => ['tickets' => $this->reportTickets($date)],
+            default => [],
+        };
+
+        return $this->normalizeReportText($this->engine->render($body, $context));
+    }
+
+    /** @return array<string, mixed> */
+    private function nocContext(Carbon $date): array
+    {
         $updates = DailyNocUpdate::whereDate('report_date', $date)->orderBy('sort_order')->get();
         $onProgress = $updates->filter(fn ($u) => ! ReportStatus::isClear($u->status))->values();
         $cleared = $updates->filter(fn ($u) => ReportStatus::isClear($u->status))->values();
@@ -63,7 +104,7 @@ class ReportGeneratorService
 
         $activationCount = DailyActivation::whereDate('report_date', $date)->count();
 
-        $context = [
+        return [
             'noc_on_progress' => $onProgress->map(fn ($u) => ['description' => $u->description])->all(),
             'has_noc_cleared' => $cleared->isNotEmpty(),
             'noc_cleared' => $cleared->map(fn ($u) => ['description' => $u->description])->all(),
@@ -79,10 +120,66 @@ class ReportGeneratorService
             ])->values()->all(),
             'odc_complaints' => $this->nocComplaintsByOdc($date),
         ];
+    }
 
-        $body = $this->templates->bodyFor(ReportTemplate::TYPE_NOC);
+    /** @return array<string, mixed> */
+    private function nocUpdateOnlyContext(Carbon $date): array
+    {
+        $updates = DailyNocUpdate::whereDate('report_date', $date)->orderBy('sort_order')->get();
+        $onProgress = $updates->filter(fn ($u) => ! ReportStatus::isClear($u->status))->values();
+        $cleared = $updates->filter(fn ($u) => ReportStatus::isClear($u->status))->values();
 
-        return $this->normalizeReportText($this->engine->render($body, $context));
+        return [
+            'noc_on_progress' => $onProgress->map(fn ($u) => ['description' => $u->description])->all(),
+            'has_noc_cleared' => $cleared->isNotEmpty(),
+            'noc_cleared' => $cleared->map(fn ($u) => ['description' => $u->description])->all(),
+        ];
+    }
+
+    /** @return array<int, array<string, string>> */
+    private function moduleDismantles(Carbon $date): array
+    {
+        return \App\Models\Dismantle::query()
+            ->whereDate('opened_at', $date)
+            ->orderByRaw("CASE WHEN status = 'Clear' THEN 1 ELSE 0 END")
+            ->orderBy('opened_at')
+            ->get()
+            ->map(function ($d) {
+                $name = $this->formatCustomerName($d->customer_name);
+                if ($d->location) {
+                    $name .= ' ('.$d->location.')';
+                }
+
+                return [
+                    'customer_name' => $name,
+                    'start_ticket' => $this->formatDate($d->opened_at),
+                    'close_ticket' => $this->formatDate($d->closed_at, true),
+                    'status' => $d->status,
+                ];
+            })
+            ->all();
+    }
+
+    /** @return array<int, array<string, string>> */
+    private function reportTickets(Carbon $date): array
+    {
+        return \App\Models\ReportTicket::query()
+            ->whereDate('opened_at', $date)
+            ->orderByRaw("CASE WHEN status = 'Clear' OR status = 'Closed' THEN 1 ELSE 0 END")
+            ->orderBy('opened_at')
+            ->get()
+            ->map(fn ($t) => [
+                'odc_name' => $t->odc_name ?: '-',
+                'location' => $t->location ?: '-',
+                'customer_code' => $t->customer_code ?: '-',
+                'customer_name' => $t->customer_name ?: '-',
+                'problem' => $t->problem ?: '-',
+                'action' => $t->action ?: '-',
+                'status' => $t->status ?: '-',
+                'opened_at' => $this->formatDate($t->opened_at),
+                'closed_at' => $this->formatDate($t->closed_at, true),
+            ])
+            ->all();
     }
 
     /** @return array<int, array<string, string>> */

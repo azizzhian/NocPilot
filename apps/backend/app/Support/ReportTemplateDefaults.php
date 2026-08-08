@@ -51,6 +51,97 @@ class ReportTemplateDefaults
         };
     }
 
+    /** Template teks untuk generate per bagian (bukan full daily). */
+    public static function sectionBody(string $section): string
+    {
+        return match ($section) {
+            'complaint' => <<<'TPL'
+Komplain Pelanggan:
+
+{{#complaints_by_odc}}
+ODC {{odc_name}}:
+
+{{#items}}
+Nama Pelanggan: {{customer_name}}
+Start Problem: {{start_problem}}
+End Problem: {{end_problem}}
+Problem: {{problem}}
+Action: {{action}}
+Status: {{status}}
+
+{{/items}}
+{{/complaints_by_odc}}
+TPL,
+            'activation' => <<<'TPL'
+Aktivasi Pelanggan:
+
+{{#activations}}
+{{customer_name}}
+OLT: {{olt}}
+Port | ONU: {{port_onu}}
+Status: {{status}}
+
+{{/activations}}
+TPL,
+            'cctv' => <<<'TPL'
+SETUP CCTV
+
+{{#cctv_setups}}
+Nama Pelanggan: {{customer_name}}
+Router: {{router}}
+Status: {{status}}
+
+{{/cctv_setups}}
+{{^cctv_setups}}
+Nama Pelanggan: -
+Router: -
+Status: -
+
+{{/cctv_setups}}
+TPL,
+            'noc' => <<<'TPL'
+Update NOC
+{{#noc_on_progress}}
+* {{description}}
+{{/noc_on_progress}}
+{{#has_noc_cleared}}
+Clear
+{{#noc_cleared}}
+* {{description}}
+{{/noc_cleared}}
+{{/has_noc_cleared}}
+TPL,
+            'dismantle' => <<<'TPL'
+Dismantle:
+
+{{#dismantles}}
+Nama Pelanggan: {{customer_name}}
+Start Ticket: {{start_ticket}}
+Close Ticket: {{close_ticket}}
+Status: {{status}}
+
+{{/dismantles}}
+TPL,
+            'ticket' => <<<'TPL'
+Report Ticket:
+
+{{#tickets}}
+ODC/Site: {{odc_name}}
+Lokasi: {{location}}
+ID Pel: {{customer_code}}
+Nama: {{customer_name}}
+Problem: {{problem}}
+Action: {{action}}
+Status: {{status}}
+Tgl Open: {{opened_at}}
+Tgl Close: {{closed_at}}
+
+{{/tickets}}
+TPL,
+            default => '',
+        };
+    }
+
     private static function daily(): string
     {
         return <<<'TPL'

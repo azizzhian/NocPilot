@@ -6,7 +6,7 @@ import ChartCard from '@/components/dashboard/ChartCard.vue'
 import Card from '@/components/ui/Card.vue'
 import Button from '@/components/ui/Button.vue'
 import Select from '@/components/ui/Select.vue'
-import Input from '@/components/ui/Input.vue'
+import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { dashboardApi, odcApi, type DashboardStats, type DashboardSpecialist } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
@@ -158,14 +158,7 @@ onMounted(async () => {
 <template>
   <AppLayout title="Dashboard Kinerja NOC" :subtitle="subtitle">
     <div class="mb-6 flex flex-wrap items-end gap-3">
-      <div>
-        <label class="mb-1.5 block text-xs font-medium text-muted">Dari</label>
-        <Input v-model="fromDate" type="date" class="w-40" />
-      </div>
-      <div>
-        <label class="mb-1.5 block text-xs font-medium text-muted">Sampai</label>
-        <Input v-model="toDate" type="date" class="w-40" />
-      </div>
+      <DateRangePicker v-model:from="fromDate" v-model:to="toDate" class="w-64" />
       <div>
         <label class="mb-1.5 block text-xs font-medium text-muted">ODC / Site</label>
         <Select v-model="odcName" class="w-48">

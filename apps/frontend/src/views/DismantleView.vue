@@ -7,10 +7,12 @@ import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import SearchInput from '@/components/ui/SearchInput.vue'
 import Select from '@/components/ui/Select.vue'
+import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 import Modal from '@/components/ui/Modal.vue'
+import SectionReportModal from '@/components/report/SectionReportModal.vue'
 import { dismantleApi, type DismantleItem } from '@/services/api'
 import { todayInput } from '@/lib/date-input'
-import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, FileText } from 'lucide-vue-next'
 
 const search = ref('')
 const statusFilter = ref('all')
@@ -27,6 +29,7 @@ const editingId = ref<number | null>(null)
 const error = ref('')
 const deleteTarget = ref<DismantleItem | null>(null)
 const deleting = ref(false)
+const reportModalOpen = ref(false)
 
 const form = ref({
   location: '',
@@ -183,14 +186,11 @@ onMounted(() => load(1))
 
     <div class="mb-4 flex flex-wrap items-end gap-3">
       <SearchInput v-model="search" placeholder="Cari lokasi / ID pel / nama..." class="max-w-sm" />
-      <div>
-        <label class="mb-1 block text-[11px] text-muted">Dari</label>
-        <Input v-model="fromDate" type="date" class="w-36" />
-      </div>
-      <div>
-        <label class="mb-1 block text-[11px] text-muted">Sampai</label>
-        <Input v-model="toDate" type="date" class="w-36" />
-      </div>
+      <DateRangePicker
+        v-model:from="fromDate"
+        v-model:to="toDate"
+        class="w-64"
+      />
       <div class="flex flex-wrap gap-1 rounded-xl border border-border p-1">
         <button
           v-for="tab in statusTabs"
@@ -205,7 +205,10 @@ onMounted(() => load(1))
           {{ tab.label }}
         </button>
       </div>
-      <div class="ml-auto">
+      <div class="ml-auto flex gap-2">
+        <Button variant="outline" @click="reportModalOpen = true">
+          <FileText class="h-4 w-4" /> Generate
+        </Button>
         <Button @click="openCreate"><Plus class="h-4 w-4" /> Tambah Dismantle</Button>
       </div>
     </div>
@@ -333,5 +336,11 @@ onMounted(() => load(1))
         </Button>
       </template>
     </Modal>
+
+    <SectionReportModal
+      v-model:open="reportModalOpen"
+      section="dismantle"
+      :date="toDate || fromDate || todayInput()"
+    />
   </AppLayout>
 </template>

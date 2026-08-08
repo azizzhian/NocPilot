@@ -101,6 +101,57 @@ class GenerateReportController extends Controller
         ]);
     }
 
+    public function generateSection(
+        Request $request,
+        ReportGeneratorService $generator,
+        NetworkMonitorReportService $monitorReport,
+        RouterMonitor $monitor,
+    ): JsonResponse {
+        $data = $request->validate([
+            'section' => 'required|in:complaint,activation,cctv,noc,dismantle,ticket,monitoring',
+            'report_date' => 'required|date',
+        ]);
+
+        $date = Carbon::parse($data['report_date']);
+        $section = $data['section'];
+
+        try {
+            if ($section === 'monitoring') {
+                try {
+                    $monitor->syncAll();
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+                $text = $monitorReport->generate();
+            } else {
+                $text = $generator->generateSection($section, $date);
+            }
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Gagal generate report: '.$e->getMessage(),
+            ], 422);
+        }
+
+        $labels = [
+            'complaint' => 'Komplain',
+            'activation' => 'Aktivasi',
+            'cctv' => 'CCTV',
+            'noc' => 'Update NOC',
+            'dismantle' => 'Dismantle',
+            'ticket' => 'Ticket',
+            'monitoring' => 'Monitoring',
+        ];
+
+        return response()->json([
+            'message' => 'Report '.($labels[$section] ?? $section).' berhasil di-generate.',
+            'section' => $section,
+            'report_date' => $date->toDateString(),
+            'text' => $text,
+        ]);
+    }
+
     public function history(): JsonResponse
     {
         $snapshots = DailyReportSnapshot::with('generator:id,name')

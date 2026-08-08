@@ -7,17 +7,21 @@ import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import SearchInput from '@/components/ui/SearchInput.vue'
 import Select from '@/components/ui/Select.vue'
+import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 import Modal from '@/components/ui/Modal.vue'
 import Textarea from '@/components/ui/Textarea.vue'
+import SectionReportModal from '@/components/report/SectionReportModal.vue'
 import { reportTicketApi, odcApi, type ReportTicketItem } from '@/services/api'
 import { todayInput } from '@/lib/date-input'
-import { Plus, Pencil, Trash2, Download } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Download, FileText } from 'lucide-vue-next'
 
 const search = ref('')
 const statusFilter = ref('all')
 const fromDate = ref('')
 const toDate = ref('')
 const odcName = ref('')
+const currentPage = ref(1)
+const lastPage = ref(1)
 const odcs = ref<{ id: number; name: string }[]>([])
 const items = ref<ReportTicketItem[]>([])
 const stats = ref<Record<string, number>>({})
@@ -29,6 +33,7 @@ const editingId = ref<number | null>(null)
 const error = ref('')
 const deleteTarget = ref<ReportTicketItem | null>(null)
 const deleting = ref(false)
+const reportModalOpen = ref(false)
 
 const form = ref({
   location: '',
@@ -75,15 +80,18 @@ async function loadOdcs() {
   }
 }
 
-async function load() {
+async function load(page = currentPage.value) {
   loading.value = true
   error.value = ''
   try {
     const [listRes, statsRes] = await Promise.all([
-      reportTicketApi.list(listParams()),
+      reportTicketApi.list({ ...listParams(), page }),
       reportTicketApi.stats(),
     ])
     items.value = listRes.data.data
+    const meta = listRes.data.meta
+    currentPage.value = meta?.current_page ?? page
+    lastPage.value = meta?.last_page ?? 1
     stats.value = statsRes.data
   } catch {
     error.value = 'Gagal memuat ticket.'
@@ -187,12 +195,12 @@ async function confirmDelete() {
 let searchTimeout: ReturnType<typeof setTimeout>
 watch([search, statusFilter, fromDate, toDate, odcName], () => {
   clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(load, 400)
+  searchTimeout = setTimeout(() => load(1), 400)
 })
 
 onMounted(async () => {
   await loadOdcs()
-  await load()
+  await load(1)
 })
 </script>
 
@@ -220,14 +228,7 @@ onMounted(async () => {
 
     <div class="mb-4 flex flex-wrap items-end gap-3">
       <SearchInput v-model="search" placeholder="Cari nama / ID / lokasi..." class="max-w-sm" />
-      <div>
-        <label class="mb-1 block text-[11px] text-muted">Dari</label>
-        <Input v-model="fromDate" type="date" class="w-36" />
-      </div>
-      <div>
-        <label class="mb-1 block text-[11px] text-muted">Sampai</label>
-        <Input v-model="toDate" type="date" class="w-36" />
-      </div>
+      <DateRangePicker v-model:from="fromDate" v-model:to="toDate" class="w-64" />
       <div>
         <label class="mb-1 block text-[11px] text-muted">ODC / Site</label>
         <Select v-model="odcName" class="w-44">
@@ -248,6 +249,9 @@ onMounted(async () => {
         </button>
       </div>
       <div class="ml-auto flex gap-2">
+        <Button variant="outline" @click="reportModalOpen = true">
+          <FileText class="h-4 w-4" /> Generate
+        </Button>
         <Button variant="outline" :disabled="exporting" @click="exportExcel">
           <Download class="h-4 w-4" /> {{ exporting ? 'Export...' : 'Excel' }}
         </Button>
@@ -308,6 +312,16 @@ onMounted(async () => {
         </tbody>
       </table>
     </Card>
+
+    <div v-if="lastPage > 1" class="mt-4 flex justify-center gap-2">
+      <Button variant="outline" size="sm" :disabled="currentPage <= 1 || loading" @click="load(currentPage - 1)">
+        Sebelumnya
+      </Button>
+      <span class="flex items-center px-3 text-sm text-muted">{{ currentPage }} / {{ lastPage }}</span>
+      <Button variant="outline" size="sm" :disabled="currentPage >= lastPage || loading" @click="load(currentPage + 1)">
+        Selanjutnya
+      </Button>
+    </div>
 
     <Modal
       :open="showModal"
@@ -388,5 +402,11 @@ onMounted(async () => {
         </Button>
       </template>
     </Modal>
+
+    <SectionReportModal
+      v-model:open="reportModalOpen"
+      section="ticket"
+      :date="toDate || fromDate || todayInput()"
+    />
   </AppLayout>
 </template>

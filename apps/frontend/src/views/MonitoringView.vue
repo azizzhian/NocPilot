@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button.vue'
 import SearchInput from '@/components/ui/SearchInput.vue'
 import Select from '@/components/ui/Select.vue'
 import Modal from '@/components/ui/Modal.vue'
+import SectionReportModal from '@/components/report/SectionReportModal.vue'
 import {
   monitoringApi,
   type RouterDevice,
@@ -15,7 +16,7 @@ import {
   type InterfaceTrafficLive,
 } from '@/services/api'
 import { cn } from '@/lib/utils'
-import { Router, RefreshCw, Network, Settings2 } from 'lucide-vue-next'
+import { Router, RefreshCw, Network, Settings2, FileText } from 'lucide-vue-next'
 
 const search = ref('')
 const selectedPop = ref('all')
@@ -36,6 +37,7 @@ const interfaceMessage = ref('')
 const lastRefreshedAt = ref<Date | null>(null)
 const lastSnapshotAt = ref<Date | null>(null)
 const interfaceModalOpen = ref(false)
+const reportModalOpen = ref(false)
 
 /** Status/CPU dari DB. */
 const DASHBOARD_REFRESH_MS = 30_000
@@ -326,10 +328,15 @@ onUnmounted(() => {
         <span v-if="lastRefreshedAt"> · status {{ formatRefreshTime(lastRefreshedAt) }}</span>
         <span v-if="lastSnapshotAt"> · traffic {{ formatRefreshTime(lastSnapshotAt) }}</span>
       </p>
-      <Button variant="outline" size="sm" :disabled="syncing || autoRefreshing" @click="handleSyncAll">
-        <RefreshCw :class="cn('h-4 w-4', (syncing || autoRefreshing) && 'animate-spin')" />
-        {{ syncing ? 'Memperbarui...' : 'Sync Semua Sekarang' }}
-      </Button>
+      <div class="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" @click="reportModalOpen = true">
+          <FileText class="h-4 w-4" /> Generate
+        </Button>
+        <Button variant="outline" size="sm" :disabled="syncing || autoRefreshing" @click="handleSyncAll">
+          <RefreshCw :class="cn('h-4 w-4', (syncing || autoRefreshing) && 'animate-spin')" />
+          {{ syncing ? 'Memperbarui...' : 'Sync Semua Sekarang' }}
+        </Button>
+      </div>
     </div>
 
     <div v-if="summary" class="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3">
@@ -498,5 +505,10 @@ onUnmounted(() => {
         <Button variant="outline" @click="closeInterfaceModal">Tutup</Button>
       </template>
     </Modal>
+
+    <SectionReportModal
+      v-model:open="reportModalOpen"
+      section="monitoring"
+    />
   </AppLayout>
 </template>

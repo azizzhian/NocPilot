@@ -108,6 +108,7 @@ Route::prefix('v1')->group(function () {
         Route::prefix('reports/generate')->group(function () {
             Route::get('/', [GenerateReportController::class, 'index']);
             Route::post('/', [GenerateReportController::class, 'generate']);
+            Route::post('/section', [GenerateReportController::class, 'generateSection']);
             Route::get('/history', [GenerateReportController::class, 'history']);
             Route::get('/history/{snapshot}', [GenerateReportController::class, 'show']);
             Route::put('/templates', [GenerateReportController::class, 'updateTemplate']);

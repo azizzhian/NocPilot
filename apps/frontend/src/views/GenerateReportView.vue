@@ -202,7 +202,7 @@ onMounted(load)
 </script>
 
 <template>
-  <AppLayout title="Generate Report" subtitle="Daily Report, Update NOC & Monitoring">
+  <AppLayout title="Template Report" subtitle="Kelola template & generate full Daily + NOC + Monitoring (opsional)">
     <div v-if="error" class="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
       {{ error }}
     </div>
