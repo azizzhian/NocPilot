@@ -14,6 +14,10 @@ import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
 
 const search = ref('')
 const statusFilter = ref('all')
+const fromDate = ref('')
+const toDate = ref('')
+const currentPage = ref(1)
+const lastPage = ref(1)
 const items = ref<DismantleItem[]>([])
 const stats = ref<Record<string, number>>({})
 const loading = ref(true)
@@ -46,15 +50,24 @@ function statusVariant(status: string) {
   return 'warning'
 }
 
-async function load() {
+async function load(page = currentPage.value) {
   loading.value = true
   error.value = ''
   try {
     const [listRes, statsRes] = await Promise.all([
-      dismantleApi.list({ search: search.value || undefined, status: statusFilter.value }),
+      dismantleApi.list({
+        search: search.value || undefined,
+        status: statusFilter.value,
+        from: fromDate.value || undefined,
+        to: toDate.value || undefined,
+        page,
+      }),
       dismantleApi.stats(),
     ])
     items.value = listRes.data.data
+    const meta = listRes.data.meta
+    currentPage.value = meta?.current_page ?? page
+    lastPage.value = meta?.last_page ?? 1
     stats.value = statsRes.data
   } catch {
     error.value = 'Gagal memuat dismantle.'
@@ -138,12 +151,12 @@ async function confirmDelete() {
 }
 
 let searchTimeout: ReturnType<typeof setTimeout>
-watch([search, statusFilter], () => {
+watch([search, statusFilter, fromDate, toDate], () => {
   clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(load, 400)
+  searchTimeout = setTimeout(() => load(1), 400)
 })
 
-onMounted(load)
+onMounted(() => load(1))
 </script>
 
 <template>
@@ -168,23 +181,31 @@ onMounted(load)
       {{ error }}
     </div>
 
-    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <div class="mb-4 flex flex-wrap items-end gap-3">
       <SearchInput v-model="search" placeholder="Cari lokasi / ID pel / nama..." class="max-w-sm" />
-      <div class="flex flex-wrap items-center gap-2">
-        <div class="flex flex-wrap gap-1 rounded-xl border border-border p-1">
-          <button
-            v-for="tab in statusTabs"
-            :key="tab.key"
-            type="button"
-            :class="[
-              'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-              statusFilter === tab.key ? 'bg-primary text-white' : 'text-muted',
-            ]"
-            @click="statusFilter = tab.key"
-          >
-            {{ tab.label }}
-          </button>
-        </div>
+      <div>
+        <label class="mb-1 block text-[11px] text-muted">Dari</label>
+        <Input v-model="fromDate" type="date" class="w-36" />
+      </div>
+      <div>
+        <label class="mb-1 block text-[11px] text-muted">Sampai</label>
+        <Input v-model="toDate" type="date" class="w-36" />
+      </div>
+      <div class="flex flex-wrap gap-1 rounded-xl border border-border p-1">
+        <button
+          v-for="tab in statusTabs"
+          :key="tab.key"
+          type="button"
+          :class="[
+            'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+            statusFilter === tab.key ? 'bg-primary text-white' : 'text-muted',
+          ]"
+          @click="statusFilter = tab.key"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
+      <div class="ml-auto">
         <Button @click="openCreate"><Plus class="h-4 w-4" /> Tambah Dismantle</Button>
       </div>
     </div>
@@ -235,6 +256,16 @@ onMounted(load)
         </tbody>
       </table>
     </Card>
+
+    <div v-if="lastPage > 1" class="mt-4 flex justify-center gap-2">
+      <Button variant="outline" size="sm" :disabled="currentPage <= 1 || loading" @click="load(currentPage - 1)">
+        Sebelumnya
+      </Button>
+      <span class="flex items-center px-3 text-sm text-muted">{{ currentPage }} / {{ lastPage }}</span>
+      <Button variant="outline" size="sm" :disabled="currentPage >= lastPage || loading" @click="load(currentPage + 1)">
+        Selanjutnya
+      </Button>
+    </div>
 
     <Modal
       :open="showModal"

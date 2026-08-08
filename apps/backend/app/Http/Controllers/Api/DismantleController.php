@@ -35,6 +35,15 @@ class DismantleController extends Controller
             }
         }
 
+        $from = $request->string('from')->toString();
+        $to = $request->string('to')->toString();
+        if ($from !== '') {
+            $query->whereDate('opened_at', '>=', $from);
+        }
+        if ($to !== '') {
+            $query->whereDate('opened_at', '<=', $to);
+        }
+
         return DismantleResource::collection($query->paginate(15));
     }
 
