@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\DailyReportSnapshot;
 use App\Models\User;
-use App\Services\Monitoring\RouterMonitor;
 use App\Services\Report\NetworkMonitorReportService;
 use App\Services\Report\ReportGeneratorService;
 use App\Services\Report\ReportTemplateService;
@@ -43,7 +42,6 @@ class GenerateReportController extends Controller
         Request $request,
         ReportGeneratorService $generator,
         NetworkMonitorReportService $monitorReport,
-        RouterMonitor $monitor,
     ): JsonResponse {
         $data = $request->validate([
             'report_date' => 'required|date',
@@ -52,14 +50,7 @@ class GenerateReportController extends Controller
 
         $date = Carbon::parse($data['report_date']);
 
-        // Sinkronkan router dulu agar teks monitoring memakai data terbaru.
-        $sync = ['success' => 0, 'failed' => 0];
-        try {
-            $sync = $monitor->syncAll();
-        } catch (\Throwable $e) {
-            report($e);
-        }
-
+        // Monitoring memakai snapshot DB terakhir (di-update job/scheduler), tanpa syncAll.
         try {
             $daily = $generator->generateDailyReport($date, $data['responsible_name']);
             $noc = $generator->generateNocUpdate($date);
@@ -87,17 +78,12 @@ class GenerateReportController extends Controller
             'monitoring_report_text' => $monitoring,
         ]);
 
-        $syncNote = $sync['failed'] > 0
-            ? " Router tersinkron {$sync['success']}, gagal {$sync['failed']}."
-            : ($sync['success'] > 0 ? " {$sync['success']} router tersinkron." : '');
-
         return response()->json([
-            'message' => 'Report berhasil di-generate.'.$syncNote,
+            'message' => 'Report berhasil di-generate.',
             'snapshot' => $snapshot->load('generator:id,name'),
             'daily_report_text' => $daily,
             'noc_update_text' => $noc,
             'monitoring_report_text' => $monitoring,
-            'router_sync' => $sync,
         ]);
     }
 
@@ -105,7 +91,6 @@ class GenerateReportController extends Controller
         Request $request,
         ReportGeneratorService $generator,
         NetworkMonitorReportService $monitorReport,
-        RouterMonitor $monitor,
     ): JsonResponse {
         $data = $request->validate([
             'section' => 'required|in:complaint,activation,cctv,noc,dismantle,ticket,monitoring',
@@ -124,16 +109,10 @@ class GenerateReportController extends Controller
         }
 
         try {
-            if ($section === 'monitoring') {
-                try {
-                    $monitor->syncAll();
-                } catch (\Throwable $e) {
-                    report($e);
-                }
-                $text = $monitorReport->generate();
-            } else {
-                $text = $generator->generateSection($section, $from, $to);
-            }
+            // Monitoring: pakai data DB terakhir (job/scheduler), tanpa syncAll agar tidak timeout.
+            $text = $section === 'monitoring'
+                ? $monitorReport->generate()
+                : $generator->generateSection($section, $from, $to);
         } catch (\Throwable $e) {
             report($e);
 
