@@ -28,6 +28,8 @@ const search = ref('')
 const logs = ref<ActivityLogItem[]>([])
 const loading = ref(true)
 const exporting = ref(false)
+const currentPage = ref(1)
+const lastPage = ref(1)
 
 const scope = computed<'audit' | 'activity'>(() =>
   route.meta.logScope === 'audit' ? 'audit' : 'activity',
@@ -84,15 +86,19 @@ function formatTime(iso: string | null) {
   return new Date(iso).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })
 }
 
-async function fetchLogs() {
+async function fetchLogs(page = currentPage.value) {
   loading.value = true
   try {
     const { data } = await activityApi.list({
       scope: scope.value,
       search: search.value || undefined,
+      page,
       per_page: 50,
     })
     logs.value = data.data
+    const meta = data.meta
+    currentPage.value = meta?.current_page ?? page
+    lastPage.value = meta?.last_page ?? 1
   } finally {
     loading.value = false
   }
@@ -110,15 +116,16 @@ async function handleExport() {
 let debounce: ReturnType<typeof setTimeout>
 watch(search, () => {
   clearTimeout(debounce)
-  debounce = setTimeout(fetchLogs, 300)
+  debounce = setTimeout(() => fetchLogs(1), 300)
 })
 
 watch(scope, () => {
   search.value = ''
-  void fetchLogs()
+  currentPage.value = 1
+  void fetchLogs(1)
 })
 
-onMounted(fetchLogs)
+onMounted(() => fetchLogs(1))
 </script>
 
 <template>
@@ -183,5 +190,15 @@ onMounted(fetchLogs)
         </tbody>
       </table>
     </Card>
+
+    <div v-if="lastPage > 1" class="mt-4 flex justify-center gap-2">
+      <Button variant="outline" size="sm" :disabled="currentPage <= 1 || loading" @click="fetchLogs(currentPage - 1)">
+        Sebelumnya
+      </Button>
+      <span class="flex items-center px-3 text-sm text-muted">{{ currentPage }} / {{ lastPage }}</span>
+      <Button variant="outline" size="sm" :disabled="currentPage >= lastPage || loading" @click="fetchLogs(currentPage + 1)">
+        Selanjutnya
+      </Button>
+    </div>
   </AppLayout>
 </template>
