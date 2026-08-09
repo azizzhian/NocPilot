@@ -80,6 +80,7 @@ class DashboardController extends Controller
         $categoryKpis = $this->categoryKpis($summary, $nocPerformance);
         $specialists = $this->specialistBadges($nocPerformance);
         $charts = $this->buildCharts($summary, $nocPerformance);
+        $odcStats = $this->odcPerformance($from, $to, $periodDays, $odcName);
 
         return response()->json([
             'period' => [
@@ -96,6 +97,7 @@ class DashboardController extends Controller
             'kpis' => $categoryKpis,
             'specialists' => $specialists,
             'noc_performance' => $nocPerformance,
+            'odc_stats' => $odcStats,
             'charts' => $charts,
             'heatmap' => $this->weeklyHeatmap($to, $userId, $odcName),
             'recent_activities' => $this->recentActivities(),
@@ -379,6 +381,194 @@ class DashboardController extends Controller
                     'cctv' => $cctv,
                     'cctv_open' => $cctvOpen,
                     'cctv_clear' => $cctvClear,
+                    'noc_updates_open' => $nocOpen,
+                    'noc_updates_clear' => $nocClear,
+                    'total' => $total,
+                    'avg_per_day' => round($total / max(1, $periodDays), 2),
+                ];
+            })
+            ->sortByDesc('total')
+            ->values();
+
+        $grandTotal = max(1, (int) $rows->sum('total'));
+
+        return $rows
+            ->map(function (array $row) use ($grandTotal) {
+                $row['contribution_pct'] = round(($row['total'] / $grandTotal) * 100, 1);
+
+                return $row;
+            })
+            ->all();
+    }
+
+    /**
+     * Statistik per ODC (Komplain, Ticket, Update NOC, Dismantle).
+     * Aktivasi/CCTV belum punya odc_name → selalu 0.
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function odcPerformance(Carbon $from, Carbon $to, int $periodDays = 1, ?string $odcName = null): array
+    {
+        $fromDate = $from->toDateString();
+        $toDate = $to->toDateString();
+        $fromStart = $from->copy()->startOfDay();
+        $toEnd = $to->copy()->endOfDay();
+        $odcExpr = "COALESCE(NULLIF(TRIM(odc_name), ''), 'Tanpa ODC')";
+        $locationExpr = "COALESCE(NULLIF(TRIM(location), ''), 'Tanpa ODC')";
+
+        $complaintClears = DailyComplaint::query()
+            ->selectRaw("{$odcExpr} as odc_key, COUNT(*) as total")
+            ->where('status', ReportStatus::CLEAR)
+            ->where(function ($q) use ($fromStart, $toEnd, $fromDate, $toDate) {
+                $q->whereBetween('cleared_at', [$fromStart, $toEnd])
+                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('report_date', [$fromDate, $toDate]);
+                    });
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->groupByRaw($odcExpr)
+            ->get()
+            ->keyBy('odc_key');
+
+        $complaintOpens = DailyComplaint::query()
+            ->selectRaw("{$odcExpr} as odc_key, COUNT(*) as total")
+            ->whereDate('report_date', '<=', $toDate)
+            ->where(function ($q) {
+                $q->whereNull('status')
+                    ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->groupByRaw($odcExpr)
+            ->get()
+            ->keyBy('odc_key');
+
+        $ticketClears = ReportTicket::query()
+            ->selectRaw("{$odcExpr} as odc_key, COUNT(*) as total")
+            ->whereIn('status', ['Clear', 'Closed'])
+            ->where(function ($q) use ($fromStart, $toEnd, $fromDate, $toDate) {
+                $q->whereBetween('cleared_at', [$fromStart, $toEnd])
+                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('closed_at', [$fromDate, $toDate]);
+                    });
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->groupByRaw($odcExpr)
+            ->get()
+            ->keyBy('odc_key');
+
+        $ticketOpens = ReportTicket::query()
+            ->selectRaw("{$odcExpr} as odc_key, COUNT(*) as total")
+            ->where('status', 'On-Progress')
+            ->where(function ($q) use ($to, $toDate) {
+                $q->whereDate('opened_at', '<=', $toDate)
+                    ->orWhere('created_at', '<=', $to->copy()->endOfDay());
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->groupByRaw($odcExpr)
+            ->get()
+            ->keyBy('odc_key');
+
+        $nocClears = DailyNocUpdate::query()
+            ->selectRaw("{$odcExpr} as odc_key, COUNT(*) as total")
+            ->where('status', ReportStatus::CLEAR)
+            ->where(function ($q) use ($fromStart, $toEnd, $fromDate, $toDate) {
+                $q->whereBetween('cleared_at', [$fromStart, $toEnd])
+                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('report_date', [$fromDate, $toDate]);
+                    });
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->groupByRaw($odcExpr)
+            ->get()
+            ->keyBy('odc_key');
+
+        $nocOpens = DailyNocUpdate::query()
+            ->selectRaw("{$odcExpr} as odc_key, COUNT(*) as total")
+            ->whereDate('report_date', '<=', $toDate)
+            ->where(function ($q) {
+                $q->whereNull('status')
+                    ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->groupByRaw($odcExpr)
+            ->get()
+            ->keyBy('odc_key');
+
+        $dismantleClears = Dismantle::query()
+            ->selectRaw("{$locationExpr} as odc_key, COUNT(*) as total")
+            ->where('status', 'Clear')
+            ->where(function ($q) use ($fromDate, $toDate, $fromStart, $toEnd) {
+                $q->whereBetween('closed_at', [$fromDate, $toDate])
+                    ->orWhere(function ($q2) use ($fromStart, $toEnd) {
+                        $q2->whereNull('closed_at')
+                            ->whereBetween('updated_at', [$fromStart, $toEnd]);
+                    });
+            })
+            ->when($odcName, fn ($q) => $this->scopeDismantleByOdc($q, $odcName))
+            ->groupByRaw($locationExpr)
+            ->get()
+            ->keyBy('odc_key');
+
+        $dismantleOpens = Dismantle::query()
+            ->selectRaw("{$locationExpr} as odc_key, COUNT(*) as total")
+            ->whereIn('status', ['Pending', 'On-Progress'])
+            ->where(function ($q) use ($toDate) {
+                $q->whereDate('opened_at', '<=', $toDate)
+                    ->orWhere(function ($q2) use ($toDate) {
+                        $q2->whereNull('opened_at')
+                            ->whereDate('created_at', '<=', $toDate);
+                    });
+            })
+            ->when($odcName, fn ($q) => $this->scopeDismantleByOdc($q, $odcName))
+            ->groupByRaw($locationExpr)
+            ->get()
+            ->keyBy('odc_key');
+
+        $odcKeys = collect([
+            $complaintClears, $complaintOpens, $ticketClears, $ticketOpens,
+            $nocClears, $nocOpens, $dismantleClears, $dismantleOpens,
+        ])
+            ->flatMap(fn ($rows) => $rows->keys())
+            ->unique()
+            ->filter()
+            ->values();
+
+        $rows = $odcKeys
+            ->map(function ($key) use (
+                $complaintClears,
+                $complaintOpens,
+                $ticketClears,
+                $ticketOpens,
+                $nocClears,
+                $nocOpens,
+                $dismantleClears,
+                $dismantleOpens,
+                $periodDays,
+            ) {
+                $complaintsClear = (int) ($complaintClears->get($key)?->total ?? 0);
+                $complaintsOpen = (int) ($complaintOpens->get($key)?->total ?? 0);
+                $ticketsClear = (int) ($ticketClears->get($key)?->total ?? 0);
+                $ticketsOpen = (int) ($ticketOpens->get($key)?->total ?? 0);
+                $nocClear = (int) ($nocClears->get($key)?->total ?? 0);
+                $nocOpen = (int) ($nocOpens->get($key)?->total ?? 0);
+                $dismantlesClear = (int) ($dismantleClears->get($key)?->total ?? 0);
+                $dismantlesOpen = (int) ($dismantleOpens->get($key)?->total ?? 0);
+                $total = $complaintsClear + $ticketsClear + $nocClear + $dismantlesClear;
+
+                return [
+                    'odc_name' => (string) $key,
+                    'complaints_open' => $complaintsOpen,
+                    'complaints_clear' => $complaintsClear,
+                    'activations_open' => 0,
+                    'activations_clear' => 0,
+                    'tickets_open' => $ticketsOpen,
+                    'tickets_clear' => $ticketsClear,
+                    'cctv_clear' => 0,
+                    'dismantles_open' => $dismantlesOpen,
+                    'dismantles_clear' => $dismantlesClear,
                     'noc_updates_open' => $nocOpen,
                     'noc_updates_clear' => $nocClear,
                     'total' => $total,

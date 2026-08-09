@@ -11,7 +11,7 @@ import Skeleton from '@/components/ui/Skeleton.vue'
 import { dashboardApi, odcApi, type DashboardStats, type DashboardSpecialist } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { todayInput } from '@/lib/date-input'
-import { Activity, Trophy, Award } from 'lucide-vue-next'
+import { Activity, Trophy, Award, Cable } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const fromDate = ref(todayInput())
@@ -26,6 +26,7 @@ const periodDays = ref(1)
 const kpis = ref<DashboardStats['kpis']>([])
 const specialists = ref<DashboardSpecialist[]>([])
 const nocPerformance = ref<DashboardStats['noc_performance']>([])
+const odcStats = ref<NonNullable<DashboardStats['odc_stats']>>([])
 const charts = ref<DashboardStats['charts'] | null>(null)
 const heatmap = ref<DashboardStats['heatmap']>({ days: [], rows: [] })
 const recentActivities = ref<DashboardStats['recent_activities']>([])
@@ -127,6 +128,7 @@ async function load() {
     kpis.value = data.category_kpis ?? data.kpis
     specialists.value = data.specialists ?? []
     nocPerformance.value = data.noc_performance
+    odcStats.value = data.odc_stats ?? []
     charts.value = data.charts ?? emptyCharts()
     heatmap.value = data.heatmap ?? { days: [], rows: [] }
     recentActivities.value = data.recent_activities
@@ -137,6 +139,7 @@ async function load() {
     kpis.value = []
     specialists.value = []
     nocPerformance.value = []
+    odcStats.value = []
     charts.value = emptyCharts()
     heatmap.value = { days: [], rows: [] }
     recentActivities.value = []
@@ -331,6 +334,64 @@ onMounted(async () => {
         :height="260"
       />
     </div>
+
+    <!-- 4b. Statistik ODC -->
+    <Card v-if="!loading && showNocPerformance" class="mt-6 p-5">
+      <div class="mb-4">
+        <div class="flex items-center gap-2">
+          <Cable class="h-4 w-4 text-primary" />
+          <h3 class="text-sm font-semibold text-foreground">Statistik ODC</h3>
+        </div>
+        <p class="mt-1 text-xs text-muted">
+          On-Progress vs Clear per ODC — diurutkan dari total clear terbanyak (Komplain, Ticket, Update NOC, Dismantle)
+        </p>
+      </div>
+      <div v-if="odcStats.length" class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-border text-left text-xs text-muted">
+              <th class="pb-2 pr-2" rowspan="2">#</th>
+              <th class="pb-2 pr-3" rowspan="2">ODC</th>
+              <th class="pb-1 pr-2 text-center text-[#EF4444]" colspan="2">Komplain</th>
+              <th class="pb-1 pr-2 text-center text-[#3498DB]" colspan="2">Ticket</th>
+              <th class="pb-1 pr-2 text-center text-[#64748B]" colspan="2">Update NOC</th>
+              <th class="pb-1 pr-2 text-center text-[#E67E22]" colspan="2">Dismantle</th>
+              <th class="pb-2 text-right" rowspan="2">Total Clear</th>
+            </tr>
+            <tr class="border-b border-border text-left text-[10px] text-muted">
+              <th class="pb-2 pr-2 text-right font-medium">OP</th>
+              <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+              <th class="pb-2 pr-2 text-right font-medium">OP</th>
+              <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+              <th class="pb-2 pr-2 text-right font-medium">OP</th>
+              <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+              <th class="pb-2 pr-2 text-right font-medium">OP</th>
+              <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="(row, idx) in odcStats"
+              :key="row.odc_name"
+              class="border-b border-border/60"
+            >
+              <td class="py-2.5 pr-2">{{ medal(idx) }}</td>
+              <td class="py-2.5 pr-3 font-medium text-foreground">{{ row.odc_name }}</td>
+              <td class="py-2.5 pr-2 text-right text-warning">{{ row.complaints_open }}</td>
+              <td class="py-2.5 pr-2 text-right">{{ row.complaints_clear }}</td>
+              <td class="py-2.5 pr-2 text-right text-warning">{{ row.tickets_open }}</td>
+              <td class="py-2.5 pr-2 text-right">{{ row.tickets_clear }}</td>
+              <td class="py-2.5 pr-2 text-right text-warning">{{ row.noc_updates_open }}</td>
+              <td class="py-2.5 pr-2 text-right">{{ row.noc_updates_clear }}</td>
+              <td class="py-2.5 pr-2 text-right text-warning">{{ row.dismantles_open }}</td>
+              <td class="py-2.5 pr-2 text-right">{{ row.dismantles_clear }}</td>
+              <td class="py-2.5 text-right font-semibold">{{ row.total }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-else class="py-8 text-center text-sm text-muted">Belum ada data ODC di periode ini.</p>
+    </Card>
 
     <!-- 5. Heatmap -->
     <Card v-if="!loading && showNocPerformance" class="mt-6 p-5">

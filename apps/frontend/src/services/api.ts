@@ -129,6 +129,23 @@ export interface DashboardStats {
     avg_per_day?: number
     contribution_pct?: number
   }>
+  odc_stats?: Array<{
+    odc_name: string
+    complaints_open: number
+    complaints_clear: number
+    activations_open: number
+    activations_clear: number
+    tickets_open: number
+    tickets_clear: number
+    cctv_clear: number
+    dismantles_open: number
+    dismantles_clear: number
+    noc_updates_open: number
+    noc_updates_clear: number
+    total: number
+    avg_per_day?: number
+    contribution_pct?: number
+  }>
   charts: {
     clear_by_noc: {
       categories: string[]
