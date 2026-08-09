@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\DismantleResource;
 use App\Models\Customer;
 use App\Models\Dismantle;
+use App\Services\Audit\ActivityLogger;
 use App\Services\Notification\NotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,7 +15,10 @@ use Illuminate\Validation\Rule;
 
 class DismantleController extends Controller
 {
-    public function __construct(private NotificationService $notifications) {}
+    public function __construct(
+        private NotificationService $notifications,
+        private ActivityLogger $activity,
+    ) {}
 
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -85,6 +89,15 @@ class DismantleController extends Controller
 
         $this->notifications->dismantleCreated($dismantle);
 
+        $label = $dismantle->customer_name ?: ($dismantle->reference ?: '#'.$dismantle->id);
+        $this->activity->log(
+            'dismantle',
+            'Tambah dismantle '.$label,
+            $request->user(),
+            $request,
+            $dismantle,
+        );
+
         return response()->json([
             'message' => 'Dismantle berhasil dibuat.',
             'data' => new DismantleResource($dismantle->load('assignee')),
@@ -110,6 +123,15 @@ class DismantleController extends Controller
 
         $dismantle->update($data);
 
+        $label = $dismantle->customer_name ?: ($dismantle->reference ?: '#'.$dismantle->id);
+        $this->activity->log(
+            'dismantle',
+            'Edit dismantle '.$label,
+            $request->user(),
+            $request,
+            $dismantle,
+        );
+
         return response()->json([
             'message' => 'Dismantle berhasil diperbarui.',
             'data' => new DismantleResource($dismantle->fresh()->load('assignee')),
@@ -118,7 +140,15 @@ class DismantleController extends Controller
 
     public function destroy(Dismantle $dismantle): JsonResponse
     {
+        $label = $dismantle->customer_name ?: ($dismantle->reference ?: '#'.$dismantle->id);
         $dismantle->delete();
+
+        $this->activity->log(
+            'dismantle',
+            'Hapus dismantle '.$label,
+            request()->user(),
+            request(),
+        );
 
         return response()->json(['message' => 'Dismantle berhasil dihapus.']);
     }
