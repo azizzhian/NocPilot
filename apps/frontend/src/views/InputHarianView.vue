@@ -218,7 +218,7 @@ const showOdcExportFilter = computed(
 )
 
 const showNameSearch = computed(
-  () => activeTab.value === 'activation' || activeTab.value === 'cctv',
+  () => activeTab.value === 'activation' || activeTab.value === 'cctv' || activeTab.value === 'complaint',
 )
 
 const reportSection = computed((): ReportSection | null => {
@@ -953,8 +953,14 @@ onUnmounted(stopPoll)
               <DateRangePicker v-model:from="filterFrom" v-model:to="filterTo" class="w-full" />
             </div>
             <div v-if="showNameSearch" class="min-w-0 basis-full sm:basis-auto sm:min-w-[12rem]">
-              <label class="mb-1 block text-[11px] text-muted">Cari nama pelanggan</label>
-              <SearchInput v-model="filterSearch" placeholder="Nama pelanggan..." class="w-full sm:w-48" />
+              <label class="mb-1 block text-[11px] text-muted">
+                {{ activeTab === 'complaint' ? 'Cari nama / ID / problem' : 'Cari nama pelanggan' }}
+              </label>
+              <SearchInput
+                v-model="filterSearch"
+                :placeholder="activeTab === 'complaint' ? 'Nama, ID, atau problem...' : 'Nama pelanggan...'"
+                class="w-full sm:w-48"
+              />
             </div>
             <template v-if="showOdcExportFilter">
               <div class="min-w-0 flex-1 sm:flex-none">

@@ -807,11 +807,21 @@ class DailyEntryController extends Controller
         $from = $request->string('from', now()->toDateString())->toString();
         $to = $request->string('to', $from)->toString();
         $odc = trim($request->string('odc_name')->toString()) ?: null;
+        $search = trim($request->string('search')->toString());
 
         $rows = DailyComplaint::query()
             ->with(['creator:id,name', 'clearer:id,name'])
-            ->whereBetween('report_date', [$from, $to])
-            ->when($odc, fn ($q) => $q->where('odc_name', $odc))
+            ->when($search !== '', function ($q) use ($search) {
+                $q->where(function ($inner) use ($search) {
+                    $inner->where('customer_name', 'like', "%{$search}%")
+                        ->orWhere('customer_code', 'like', "%{$search}%")
+                        ->orWhere('problem', 'like', "%{$search}%")
+                        ->orWhere('location_label', 'like', "%{$search}%");
+                });
+            }, function ($q) use ($from, $to, $odc) {
+                $q->whereBetween('report_date', [$from, $to])
+                    ->when($odc, fn ($q2) => $q2->where('odc_name', $odc));
+            })
             ->orderBy('report_date')
             ->orderBy('id')
             ->get()
@@ -844,11 +854,22 @@ class DailyEntryController extends Controller
         $from = $request->string('from', now()->toDateString())->toString();
         $to = $request->string('to', $from)->toString();
         $odc = trim($request->string('odc_name')->toString()) ?: null;
+        $search = trim($request->string('search')->toString());
 
         $items = DailyComplaint::query()
             ->with(['creator:id,name', 'clearer:id,name', 'customer:id,name,customer_code,odc_id'])
-            ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
-            ->when($odc, fn ($q) => $q->where('odc_name', $odc))
+            ->when($search !== '', function ($q) use ($search) {
+                // Search global: abaikan filter periode & ODC
+                $q->where(function ($inner) use ($search) {
+                    $inner->where('customer_name', 'like', "%{$search}%")
+                        ->orWhere('customer_code', 'like', "%{$search}%")
+                        ->orWhere('problem', 'like', "%{$search}%")
+                        ->orWhere('location_label', 'like', "%{$search}%");
+                });
+            }, function ($q) use ($from, $to, $odc) {
+                $q->where(fn ($q2) => $this->forDateRangeOrStillOpen($q2, $from, $to))
+                    ->when($odc, fn ($q2) => $q2->where('odc_name', $odc));
+            })
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->limit(500)
