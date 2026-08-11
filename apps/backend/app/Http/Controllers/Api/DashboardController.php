@@ -66,6 +66,7 @@ class DashboardController extends Controller
 
         $userId = $request->integer('user_id', 0) ?: null;
         $odcName = trim($request->string('odc_name')->toString()) ?: null;
+        $complaintOdcName = trim($request->string('complaint_odc_name')->toString()) ?: null;
         $periodDays = max(1, $from->diffInDays($to) + 1);
 
         $summary = $this->summaryForRange($from, $to, $userId, $odcName);
@@ -81,6 +82,7 @@ class DashboardController extends Controller
         $specialists = $this->specialistBadges($nocPerformance);
         $charts = $this->buildCharts($summary, $nocPerformance);
         $odcStats = $this->odcPerformance($from, $to, $periodDays, $odcName);
+        $complaintClientShare = $this->complaintClientShare($from, $to, $complaintOdcName);
 
         return response()->json([
             'period' => [
@@ -98,6 +100,7 @@ class DashboardController extends Controller
             'specialists' => $specialists,
             'noc_performance' => $nocPerformance,
             'odc_stats' => $odcStats,
+            'complaint_client_share' => $complaintClientShare,
             'charts' => $charts,
             'heatmap' => $this->weeklyHeatmap($to, $userId, $odcName),
             'recent_activities' => $this->recentActivities(),
@@ -602,6 +605,89 @@ class DashboardController extends Controller
                 return $row;
             })
             ->all();
+    }
+
+    /**
+     * Persentase kontribusi komplain per client (top 10) dalam rentang tanggal.
+     * Filter ODC di sini hanya memengaruhi ranking ini, bukan statistik ODC global.
+     *
+     * @return array{total: int, rows: list<array<string, mixed>>}
+     */
+    protected function complaintClientShare(Carbon $from, Carbon $to, ?string $odcName = null): array
+    {
+        $complaints = DailyComplaint::query()
+            ->select([
+                'complaint_type',
+                'customer_id',
+                'customer_code',
+                'customer_name',
+                'location_label',
+                'odc_name',
+            ])
+            ->whereBetween('report_date', [$from->toDateString(), $to->toDateString()])
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->get();
+
+        $byClient = [];
+        foreach ($complaints as $row) {
+            $isGamas = ($row->complaint_type ?? '') === DailyComplaint::TYPE_GAMAS;
+            if ($isGamas) {
+                $label = trim((string) ($row->location_label ?: $row->customer_name ?: 'Gamas'));
+                $key = 'gamas:'.mb_strtolower($label).'|'.mb_strtolower((string) ($row->odc_name ?? ''));
+                $code = null;
+                $name = 'Gamas: '.$label;
+            } else {
+                $code = trim((string) ($row->customer_code ?? ''));
+                $name = trim((string) ($row->customer_name ?? ''));
+                if ($code === '' && $name === '' && ! $row->customer_id) {
+                    continue;
+                }
+                $key = $row->customer_id
+                    ? 'id:'.$row->customer_id
+                    : 'code:'.mb_strtolower($code !== '' ? $code : $name);
+                $name = $name !== '' ? $name : ($code !== '' ? $code : 'Pelanggan');
+            }
+
+            if (! isset($byClient[$key])) {
+                $byClient[$key] = [
+                    'key' => $key,
+                    'name' => $name,
+                    'customer_code' => $code,
+                    'odc_name' => $row->odc_name ? (string) $row->odc_name : null,
+                    'is_gamas' => $isGamas,
+                    'count' => 0,
+                ];
+            }
+
+            $byClient[$key]['count']++;
+        }
+
+        $total = max(1, (int) array_sum(array_column($byClient, 'count')));
+        $actualTotal = (int) array_sum(array_column($byClient, 'count'));
+
+        $rows = collect($byClient)
+            ->sortByDesc('count')
+            ->take(10)
+            ->values()
+            ->map(function (array $client) use ($total) {
+                $count = (int) $client['count'];
+
+                return [
+                    'key' => $client['key'],
+                    'name' => $client['name'],
+                    'customer_code' => $client['customer_code'],
+                    'odc_name' => $client['odc_name'],
+                    'is_gamas' => $client['is_gamas'],
+                    'count' => $count,
+                    'pct' => round(($count / $total) * 100, 1),
+                ];
+            })
+            ->all();
+
+        return [
+            'total' => $actualTotal,
+            'rows' => $rows,
+        ];
     }
 
     /**

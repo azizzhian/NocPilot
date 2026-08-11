@@ -35,6 +35,8 @@ const deleteTarget = ref<ReportTicketItem | null>(null)
 const deleting = ref(false)
 const reportModalOpen = ref(false)
 
+const ticketType = ref<'customer' | 'general'>('customer')
+
 const form = ref({
   location: '',
   odc_name: '',
@@ -54,6 +56,13 @@ const statusTabs = [
   { key: 'Clear', label: 'Clear' },
   { key: 'Closed', label: 'Closed' },
 ]
+
+function setTicketType(type: 'customer' | 'general') {
+  ticketType.value = type
+  if (type === 'general') {
+    form.value.customer_code = ''
+  }
+}
 
 function statusVariant(status: string) {
   if (status === 'Clear') return 'success'
@@ -114,6 +123,7 @@ async function exportExcel() {
 
 function openCreate() {
   editingId.value = null
+  ticketType.value = 'customer'
   form.value = {
     location: '',
     odc_name: '',
@@ -131,6 +141,7 @@ function openCreate() {
 
 function openEdit(item: ReportTicketItem) {
   editingId.value = item.id
+  ticketType.value = item.customer_code ? 'customer' : 'general'
   form.value = {
     location: item.location ?? '',
     odc_name: item.odc_name ?? '',
@@ -152,6 +163,7 @@ async function submit() {
   try {
     const payload = {
       ...form.value,
+      customer_code: ticketType.value === 'general' ? null : (form.value.customer_code || null),
       opened_at: form.value.opened_at || null,
       closed_at: form.value.closed_at || null,
     }
@@ -330,6 +342,31 @@ onMounted(async () => {
       @close="showModal = false"
     >
       <div class="grid gap-4 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="mb-1.5 block text-sm font-medium">Tipe Ticket</label>
+          <div class="flex gap-1 rounded-xl border border-border p-1">
+            <button
+              type="button"
+              :class="[
+                'flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                ticketType === 'customer' ? 'bg-primary text-white' : 'text-muted hover:bg-muted',
+              ]"
+              @click="setTicketType('customer')"
+            >
+              Pelanggan
+            </button>
+            <button
+              type="button"
+              :class="[
+                'flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                ticketType === 'general' ? 'bg-primary text-white' : 'text-muted hover:bg-muted',
+              ]"
+              @click="setTicketType('general')"
+            >
+              General
+            </button>
+          </div>
+        </div>
         <div>
           <label class="mb-1.5 block text-sm font-medium">ODC / Site</label>
           <Select v-model="form.odc_name">
@@ -341,13 +378,19 @@ onMounted(async () => {
           <label class="mb-1.5 block text-sm font-medium">Lokasi</label>
           <Input v-model="form.location" />
         </div>
-        <div>
+        <div v-if="ticketType === 'customer'">
           <label class="mb-1.5 block text-sm font-medium">ID Pelanggan</label>
           <Input v-model="form.customer_code" />
         </div>
-        <div>
-          <label class="mb-1.5 block text-sm font-medium">Nama Pelanggan</label>
-          <Input v-model="form.customer_name" required />
+        <div :class="ticketType === 'general' ? 'sm:col-span-2' : ''">
+          <label class="mb-1.5 block text-sm font-medium">
+            {{ ticketType === 'general' ? 'Judul / Nama' : 'Nama Pelanggan' }}
+          </label>
+          <Input
+            v-model="form.customer_name"
+            :placeholder="ticketType === 'general' ? 'Contoh: Gangguan jalur umum' : ''"
+            required
+          />
         </div>
         <div class="sm:col-span-2">
           <label class="mb-1.5 block text-sm font-medium">Problem</label>

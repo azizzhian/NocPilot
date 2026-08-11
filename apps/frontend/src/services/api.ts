@@ -146,6 +146,18 @@ export interface DashboardStats {
     avg_per_day?: number
     contribution_pct?: number
   }>
+  complaint_client_share?: {
+    total: number
+    rows: Array<{
+      key: string
+      name: string
+      customer_code?: string | null
+      odc_name?: string | null
+      is_gamas?: boolean
+      count: number
+      pct: number
+    }>
+  }
   charts: {
     clear_by_noc: {
       categories: string[]
@@ -206,6 +218,7 @@ export const dashboardApi = {
     to?: string
     user_id?: number
     odc_name?: string
+    complaint_odc_name?: string
   }) => api.get<DashboardStats>('/dashboard/stats', { params }),
   navBadges: () => api.get<{ nav_badges: DashboardStats['nav_badges'] }>('/dashboard/nav-badges'),
 }

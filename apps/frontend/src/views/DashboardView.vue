@@ -10,14 +10,18 @@ import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { dashboardApi, odcApi, type DashboardStats, type DashboardSpecialist } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 import { todayInput } from '@/lib/date-input'
 import { Activity, Trophy, Award, Cable } from 'lucide-vue-next'
 
 const auth = useAuthStore()
+const appStore = useAppStore()
 const fromDate = ref(todayInput())
 const toDate = ref(todayInput())
 const userId = ref<number | ''>('')
 const odcName = ref('')
+const complaintOdcName = ref('')
+const complaintView = ref<'pie' | 'bars'>('bars')
 const odcs = ref<{ id: number; name: string }[]>([])
 const loading = ref(true)
 
@@ -27,6 +31,10 @@ const kpis = ref<DashboardStats['kpis']>([])
 const specialists = ref<DashboardSpecialist[]>([])
 const nocPerformance = ref<DashboardStats['noc_performance']>([])
 const odcStats = ref<NonNullable<DashboardStats['odc_stats']>>([])
+const complaintClientShare = ref<NonNullable<DashboardStats['complaint_client_share']>>({
+  total: 0,
+  rows: [],
+})
 const charts = ref<DashboardStats['charts'] | null>(null)
 const heatmap = ref<DashboardStats['heatmap']>({ days: [], rows: [] })
 const recentActivities = ref<DashboardStats['recent_activities']>([])
@@ -87,7 +95,7 @@ const specialistColor: Record<string, string> = {
   warning: 'border-warning/30 bg-warning/5',
 }
 
-function heatClass(value: number, max: number) {
+function nocHeatClass(value: number, max: number) {
   if (value <= 0 || max <= 0) return 'bg-muted/30 text-muted'
   const ratio = value / max
   if (ratio >= 0.75) return 'bg-success text-white'
@@ -101,6 +109,66 @@ const heatmapMax = computed(() => {
   return Math.max(1, ...values, 0)
 })
 
+const listPerPage = 10
+const odcPage = ref(1)
+
+const odcLastPage = computed(() => Math.max(1, Math.ceil(odcStats.value.length / listPerPage)))
+const pagedOdcStats = computed(() => {
+  const start = (odcPage.value - 1) * listPerPage
+  return odcStats.value.slice(start, start + listPerPage)
+})
+
+function rankLabel(page: number, idx: number) {
+  return medal((page - 1) * listPerPage + idx)
+}
+
+const complaintPieColors = [
+  '#3B82F6', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6',
+  '#06B6D4', '#EC4899', '#84CC16', '#F97316', '#64748B',
+]
+
+const complaintPieChart = computed(() => {
+  const rows = complaintClientShare.value.rows.slice(0, 10)
+  return {
+    categories: rows.map((r) => r.name),
+    series: [{ name: 'Komplain', data: rows.map((r) => r.count) }],
+    colors: complaintPieColors.slice(0, Math.max(1, rows.length)),
+  }
+})
+
+const complaintBarRows = computed(() => complaintClientShare.value.rows.slice(0, 10))
+
+const complaintShareMaxPct = computed(() =>
+  Math.max(1, ...(complaintBarRows.value.map((r) => r.pct) || [0])),
+)
+
+const complaintPieOptions = computed(() => ({
+  chart: {
+    type: 'pie' as const,
+    toolbar: { show: false },
+    fontFamily: 'Inter, sans-serif',
+    background: 'transparent',
+    animations: { enabled: true, easing: 'easeinout', speed: 800 },
+  },
+  labels: complaintPieChart.value.categories,
+  colors: complaintPieChart.value.colors,
+  dataLabels: {
+    enabled: true,
+    formatter: (val: number) => `${Math.round(val)}%`,
+  },
+  legend: {
+    position: 'bottom' as const,
+    labels: { colors: '#94a3b8' },
+  },
+  stroke: { width: 0 },
+  tooltip: {
+    theme: (appStore.isDark ? 'dark' : 'light') as 'dark' | 'light',
+    y: {
+      formatter: (val: number) => `${val}x`,
+    },
+  },
+}))
+
 async function loadOdcs() {
   try {
     const res = await odcApi.list({ per_page: 200 })
@@ -113,8 +181,8 @@ async function loadOdcs() {
   }
 }
 
-async function load() {
-  loading.value = true
+async function load(opts?: { soft?: boolean }) {
+  if (!opts?.soft) loading.value = true
   try {
     const { data } = await dashboardApi.stats({
       period: 'custom',
@@ -122,6 +190,7 @@ async function load() {
       to: toDate.value,
       user_id: userId.value === '' ? undefined : Number(userId.value),
       odc_name: odcName.value || undefined,
+      complaint_odc_name: complaintOdcName.value || undefined,
     })
     periodLabel.value = data.period.label
     periodDays.value = data.period.days ?? 1
@@ -129,27 +198,36 @@ async function load() {
     specialists.value = data.specialists ?? []
     nocPerformance.value = data.noc_performance
     odcStats.value = data.odc_stats ?? []
+    complaintClientShare.value = data.complaint_client_share ?? { total: 0, rows: [] }
+    odcPage.value = 1
     charts.value = data.charts ?? emptyCharts()
     heatmap.value = data.heatmap ?? { days: [], rows: [] }
     recentActivities.value = data.recent_activities
     nocUsers.value = data.noc_users
   } catch {
-    periodLabel.value = ''
-    periodDays.value = 1
-    kpis.value = []
-    specialists.value = []
-    nocPerformance.value = []
-    odcStats.value = []
-    charts.value = emptyCharts()
-    heatmap.value = { days: [], rows: [] }
-    recentActivities.value = []
+    if (!opts?.soft) {
+      periodLabel.value = ''
+      periodDays.value = 1
+      kpis.value = []
+      specialists.value = []
+      nocPerformance.value = []
+      odcStats.value = []
+      charts.value = emptyCharts()
+      heatmap.value = { days: [], rows: [] }
+      recentActivities.value = []
+    }
+    complaintClientShare.value = { total: 0, rows: [] }
   } finally {
-    loading.value = false
+    if (!opts?.soft) loading.value = false
   }
 }
 
 watch([fromDate, toDate, userId, odcName], () => {
   void load()
+})
+
+watch(complaintOdcName, () => {
+  void load({ soft: true })
 })
 
 onMounted(async () => {
@@ -335,65 +413,162 @@ onMounted(async () => {
       />
     </div>
 
-    <!-- 4b. Statistik ODC -->
-    <Card v-if="!loading && showNocPerformance" class="mt-6 p-5">
-      <div class="mb-4">
-        <div class="flex items-center gap-2">
-          <Cable class="h-4 w-4 text-primary" />
-          <h3 class="text-sm font-semibold text-foreground">Statistik ODC</h3>
+    <!-- 4b. Statistik ODC + Persentase client komplain -->
+    <div v-if="!loading && showNocPerformance" class="mt-6 grid gap-6 xl:grid-cols-2">
+      <Card class="p-5">
+        <div class="mb-4">
+          <div class="flex items-center gap-2">
+            <Cable class="h-4 w-4 text-primary" />
+            <h3 class="text-sm font-semibold text-foreground">Statistik ODC</h3>
+          </div>
+          <p class="mt-1 text-xs text-muted">
+            On-Progress vs Clear per ODC — diurutkan dari total clear terbanyak
+          </p>
         </div>
-        <p class="mt-1 text-xs text-muted">
-          On-Progress vs Clear per ODC — diurutkan dari total clear terbanyak (Komplain, Ticket, Update NOC, Dismantle)
-        </p>
-      </div>
-      <div v-if="odcStats.length" class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-border text-left text-xs text-muted">
-              <th class="pb-2 pr-2" rowspan="2">#</th>
-              <th class="pb-2 pr-3" rowspan="2">ODC</th>
-              <th class="pb-1 pr-2 text-center text-[#EF4444]" colspan="2">Komplain</th>
-              <th class="pb-1 pr-2 text-center text-[#3498DB]" colspan="2">Ticket</th>
-              <th class="pb-1 pr-2 text-center text-[#64748B]" colspan="2">Update NOC</th>
-              <th class="pb-1 pr-2 text-center text-[#E67E22]" colspan="2">Dismantle</th>
-              <th class="pb-2 text-right" rowspan="2">Total Clear</th>
-            </tr>
-            <tr class="border-b border-border text-left text-[10px] text-muted">
-              <th class="pb-2 pr-2 text-right font-medium">OP</th>
-              <th class="pb-2 pr-2 text-right font-medium">Clear</th>
-              <th class="pb-2 pr-2 text-right font-medium">OP</th>
-              <th class="pb-2 pr-2 text-right font-medium">Clear</th>
-              <th class="pb-2 pr-2 text-right font-medium">OP</th>
-              <th class="pb-2 pr-2 text-right font-medium">Clear</th>
-              <th class="pb-2 pr-2 text-right font-medium">OP</th>
-              <th class="pb-2 pr-2 text-right font-medium">Clear</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="(row, idx) in odcStats"
-              :key="row.odc_name"
-              class="border-b border-border/60"
-            >
-              <td class="py-2.5 pr-2">{{ medal(idx) }}</td>
-              <td class="py-2.5 pr-3 font-medium text-foreground">{{ row.odc_name }}</td>
-              <td class="py-2.5 pr-2 text-right text-warning">{{ row.complaints_open }}</td>
-              <td class="py-2.5 pr-2 text-right">{{ row.complaints_clear }}</td>
-              <td class="py-2.5 pr-2 text-right text-warning">{{ row.tickets_open }}</td>
-              <td class="py-2.5 pr-2 text-right">{{ row.tickets_clear }}</td>
-              <td class="py-2.5 pr-2 text-right text-warning">{{ row.noc_updates_open }}</td>
-              <td class="py-2.5 pr-2 text-right">{{ row.noc_updates_clear }}</td>
-              <td class="py-2.5 pr-2 text-right text-warning">{{ row.dismantles_open }}</td>
-              <td class="py-2.5 pr-2 text-right">{{ row.dismantles_clear }}</td>
-              <td class="py-2.5 text-right font-semibold">{{ row.total }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p v-else class="py-8 text-center text-sm text-muted">Belum ada data ODC di periode ini.</p>
-    </Card>
+        <div v-if="odcStats.length" class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-border text-left text-xs text-muted">
+                <th class="pb-2 pr-2" rowspan="2">#</th>
+                <th class="pb-2 pr-3" rowspan="2">ODC</th>
+                <th class="pb-1 pr-2 text-center text-[#EF4444]" colspan="2">Komplain</th>
+                <th class="pb-1 pr-2 text-center text-[#3498DB]" colspan="2">Ticket</th>
+                <th class="pb-1 pr-2 text-center text-[#64748B]" colspan="2">Update NOC</th>
+                <th class="pb-1 pr-2 text-center text-[#E67E22]" colspan="2">Dismantle</th>
+                <th class="pb-2 text-right" rowspan="2">Total Clear</th>
+              </tr>
+              <tr class="border-b border-border text-left text-[10px] text-muted">
+                <th class="pb-2 pr-2 text-right font-medium">OP</th>
+                <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+                <th class="pb-2 pr-2 text-right font-medium">OP</th>
+                <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+                <th class="pb-2 pr-2 text-right font-medium">OP</th>
+                <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+                <th class="pb-2 pr-2 text-right font-medium">OP</th>
+                <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(row, idx) in pagedOdcStats"
+                :key="row.odc_name"
+                class="border-b border-border/60"
+              >
+                <td class="py-2.5 pr-2">{{ rankLabel(odcPage, idx) }}</td>
+                <td class="py-2.5 pr-3 font-medium text-foreground">{{ row.odc_name }}</td>
+                <td class="py-2.5 pr-2 text-right text-warning">{{ row.complaints_open }}</td>
+                <td class="py-2.5 pr-2 text-right">{{ row.complaints_clear }}</td>
+                <td class="py-2.5 pr-2 text-right text-warning">{{ row.tickets_open }}</td>
+                <td class="py-2.5 pr-2 text-right">{{ row.tickets_clear }}</td>
+                <td class="py-2.5 pr-2 text-right text-warning">{{ row.noc_updates_open }}</td>
+                <td class="py-2.5 pr-2 text-right">{{ row.noc_updates_clear }}</td>
+                <td class="py-2.5 pr-2 text-right text-warning">{{ row.dismantles_open }}</td>
+                <td class="py-2.5 pr-2 text-right">{{ row.dismantles_clear }}</td>
+                <td class="py-2.5 text-right font-semibold">{{ row.total }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="odcLastPage > 1" class="mt-4 flex justify-center gap-2">
+          <Button variant="outline" size="sm" :disabled="odcPage <= 1" @click="odcPage -= 1">
+            Sebelumnya
+          </Button>
+          <span class="flex items-center px-3 text-sm text-muted">{{ odcPage }} / {{ odcLastPage }}</span>
+          <Button variant="outline" size="sm" :disabled="odcPage >= odcLastPage" @click="odcPage += 1">
+            Selanjutnya
+          </Button>
+        </div>
+        <p v-else-if="!odcStats.length" class="py-8 text-center text-sm text-muted">Belum ada data ODC di periode ini.</p>
+      </Card>
 
-    <!-- 5. Heatmap -->
+      <Card class="p-5">
+        <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-semibold text-foreground">Persentase Client Komplain</h3>
+            <p class="mt-1 text-xs text-muted">
+              Top 10 client berdasarkan kontribusi komplain
+              <span v-if="complaintClientShare.total"> · total {{ complaintClientShare.total }}</span>
+            </p>
+          </div>
+          <div class="flex flex-wrap items-end gap-3">
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-muted">Tampilan</label>
+              <div class="flex gap-1 rounded-xl border border-border p-1">
+                <button
+                  type="button"
+                  :class="[
+                    'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                    complaintView === 'bars' ? 'bg-primary text-white' : 'text-muted hover:bg-muted',
+                  ]"
+                  @click="complaintView = 'bars'"
+                >
+                  Bar
+                </button>
+                <button
+                  type="button"
+                  :class="[
+                    'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                    complaintView === 'pie' ? 'bg-primary text-white' : 'text-muted hover:bg-muted',
+                  ]"
+                  @click="complaintView = 'pie'"
+                >
+                  Pie
+                </button>
+              </div>
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-muted">Filter ODC</label>
+              <Select v-model="complaintOdcName" class="w-44">
+                <option value="">Semua ODC</option>
+                <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
+              </Select>
+            </div>
+          </div>
+        </div>
+
+        <template v-if="complaintBarRows.length">
+          <div v-if="complaintView === 'bars'" class="space-y-3">
+            <div
+              v-for="(row, idx) in complaintBarRows"
+              :key="row.key"
+              class="space-y-1"
+            >
+              <div class="flex items-start justify-between gap-3 text-sm">
+                <div class="min-w-0">
+                  <p class="truncate font-medium text-foreground">
+                    <span class="mr-1.5 text-muted">{{ medal(idx) }}</span>{{ row.name }}
+                  </p>
+                  <p class="truncate text-[11px] text-muted">
+                    {{ row.customer_code || (row.is_gamas ? 'Gamas' : '—') }}
+                    <span v-if="row.odc_name"> · {{ row.odc_name }}</span>
+                    · {{ row.count }}x
+                  </p>
+                </div>
+                <p class="shrink-0 text-sm font-semibold text-danger">{{ row.pct }}%</p>
+              </div>
+              <div class="h-2 overflow-hidden rounded-full bg-muted/40">
+                <div
+                  class="h-full rounded-full bg-danger/80 transition-all"
+                  :style="{ width: `${Math.max(4, (row.pct / complaintShareMaxPct) * 100)}%` }"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="-mx-1 -mb-1">
+            <VueApexCharts
+              type="pie"
+              :height="300"
+              :options="complaintPieOptions"
+              :series="complaintPieChart.series[0]?.data ?? []"
+            />
+          </div>
+        </template>
+        <p v-else class="py-10 text-center text-sm text-muted">Belum ada komplain di periode ini.</p>
+      </Card>
+    </div>
+
+    <!-- 5. Heatmap NOC -->
     <Card v-if="!loading && showNocPerformance" class="mt-6 p-5">
       <div class="mb-4">
         <h3 class="text-sm font-semibold text-foreground">Heatmap Mingguan</h3>
@@ -423,7 +598,7 @@ onMounted(async () => {
               >
                 <div
                   class="mx-auto flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold"
-                  :class="heatClass(val, heatmapMax)"
+                  :class="nocHeatClass(val, heatmapMax)"
                 >
                   {{ val }}
                 </div>
