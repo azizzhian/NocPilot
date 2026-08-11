@@ -658,85 +658,81 @@ class DashboardController extends Controller
             }
         };
 
-        if ($source === 'all' || $source === 'complaint') {
-            $complaints = DailyComplaint::query()
-                ->select([
-                    'complaint_type',
-                    'customer_id',
-                    'customer_code',
-                    'customer_name',
-                    'location_label',
-                    'odc_name',
-                ])
-                ->whereBetween('report_date', [$from->toDateString(), $to->toDateString()])
-                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
-                ->get();
+        $complaints = DailyComplaint::query()
+            ->select([
+                'complaint_type',
+                'customer_id',
+                'customer_code',
+                'customer_name',
+                'location_label',
+                'odc_name',
+            ])
+            ->whereBetween('report_date', [$from->toDateString(), $to->toDateString()])
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->get();
 
-            foreach ($complaints as $row) {
-                $isGamas = ($row->complaint_type ?? '') === DailyComplaint::TYPE_GAMAS;
-                if ($isGamas) {
-                    $label = trim((string) ($row->location_label ?: $row->customer_name ?: 'Gamas'));
-                    $key = 'gamas:'.mb_strtolower($label).'|'.mb_strtolower((string) ($row->odc_name ?? ''));
-                    $code = null;
-                    $name = 'Gamas: '.$label;
-                } else {
-                    $code = trim((string) ($row->customer_code ?? ''));
-                    $name = trim((string) ($row->customer_name ?? ''));
-                    if ($code === '' && $name === '' && ! $row->customer_id) {
-                        continue;
-                    }
-                    $key = $code !== ''
-                        ? 'code:'.mb_strtolower($code)
-                        : ($row->customer_id ? 'id:'.$row->customer_id : 'name:'.mb_strtolower($name));
-                    $name = $name !== '' ? $name : ($code !== '' ? $code : 'Pelanggan');
-                }
-
-                $bump(
-                    $key,
-                    $name,
-                    $code,
-                    $row->odc_name ? (string) $row->odc_name : null,
-                    $isGamas,
-                    'complaint',
-                );
-            }
-        }
-
-        if ($source === 'all' || $source === 'ticket') {
-            $fromDate = $from->toDateString();
-            $toDate = $to->toDateString();
-            $tickets = ReportTicket::query()
-                ->select(['customer_code', 'customer_name', 'odc_name', 'location'])
-                ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
-                    $q->whereBetween('opened_at', [$fromDate, $toDate])
-                        ->orWhere(function ($q2) use ($from, $to) {
-                            $q2->whereNull('opened_at')
-                                ->whereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
-                        });
-                })
-                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
-                ->get();
-
-            foreach ($tickets as $row) {
+        foreach ($complaints as $row) {
+            $isGamas = ($row->complaint_type ?? '') === DailyComplaint::TYPE_GAMAS;
+            if ($isGamas) {
+                $label = trim((string) ($row->location_label ?: $row->customer_name ?: 'Gamas'));
+                $key = 'gamas:'.mb_strtolower($label).'|'.mb_strtolower((string) ($row->odc_name ?? ''));
+                $code = null;
+                $name = 'Gamas: '.$label;
+            } else {
                 $code = trim((string) ($row->customer_code ?? ''));
                 $name = trim((string) ($row->customer_name ?? ''));
-                if ($code === '' && $name === '') {
+                if ($code === '' && $name === '' && ! $row->customer_id) {
                     continue;
                 }
                 $key = $code !== ''
                     ? 'code:'.mb_strtolower($code)
-                    : 'name:'.mb_strtolower($name);
-                $name = $name !== '' ? $name : $code;
-
-                $bump(
-                    $key,
-                    $name,
-                    $code !== '' ? $code : null,
-                    $row->odc_name ? (string) $row->odc_name : null,
-                    false,
-                    'ticket',
-                );
+                    : ($row->customer_id ? 'id:'.$row->customer_id : 'name:'.mb_strtolower($name));
+                $name = $name !== '' ? $name : ($code !== '' ? $code : 'Pelanggan');
             }
+
+            $bump(
+                $key,
+                $name,
+                $code,
+                $row->odc_name ? (string) $row->odc_name : null,
+                $isGamas,
+                'complaint',
+            );
+        }
+
+        $fromDate = $from->toDateString();
+        $toDate = $to->toDateString();
+        $tickets = ReportTicket::query()
+            ->select(['customer_code', 'customer_name', 'odc_name', 'location'])
+            ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
+                $q->whereBetween('opened_at', [$fromDate, $toDate])
+                    ->orWhere(function ($q2) use ($from, $to) {
+                        $q2->whereNull('opened_at')
+                            ->whereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
+                    });
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->get();
+
+        foreach ($tickets as $row) {
+            $code = trim((string) ($row->customer_code ?? ''));
+            $name = trim((string) ($row->customer_name ?? ''));
+            if ($code === '' && $name === '') {
+                continue;
+            }
+            $key = $code !== ''
+                ? 'code:'.mb_strtolower($code)
+                : 'name:'.mb_strtolower($name);
+            $name = $name !== '' ? $name : $code;
+
+            $bump(
+                $key,
+                $name,
+                $code !== '' ? $code : null,
+                $row->odc_name ? (string) $row->odc_name : null,
+                false,
+                'ticket',
+            );
         }
 
         $complaintsTotal = (int) array_sum(array_column($byClient, 'complaints_count'));

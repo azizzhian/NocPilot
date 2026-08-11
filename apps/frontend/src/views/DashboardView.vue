@@ -126,25 +126,27 @@ function rankLabel(page: number, idx: number) {
   return medal((page - 1) * listPerPage + idx)
 }
 
-const complaintPieColors = [
-  '#3B82F6', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6',
-  '#06B6D4', '#EC4899', '#84CC16', '#F97316', '#64748B',
-]
-
-const complaintPieChart = computed(() => {
-  const rows = complaintClientShare.value.rows.slice(0, 10)
-  return {
-    categories: rows.map((r) => r.name),
-    series: [{ name: 'Komplain', data: rows.map((r) => r.count) }],
-    colors: complaintPieColors.slice(0, Math.max(1, rows.length)),
-  }
-})
-
 const complaintBarRows = computed(() => complaintClientShare.value.rows.slice(0, 10))
 
 const complaintShareMaxPct = computed(() =>
   Math.max(1, ...(complaintBarRows.value.map((r) => r.pct) || [0])),
 )
+
+const complaintTypePie = computed(() => {
+  const complaints = complaintClientShare.value.complaints_total ?? 0
+  const tickets = complaintClientShare.value.tickets_total ?? 0
+  const slices = [
+    { label: 'Komplain', value: complaints },
+    { label: 'Tiket', value: tickets },
+  ].filter((s) => s.value > 0)
+
+  return {
+    categories: slices.map((s) => s.label),
+    series: slices.map((s) => s.value),
+    colors: slices.map((s) => (s.label === 'Komplain' ? '#EF4444' : '#3498DB')),
+    total: complaints + tickets,
+  }
+})
 
 const complaintPieOptions = computed(() => ({
   chart: {
@@ -154,8 +156,8 @@ const complaintPieOptions = computed(() => ({
     background: 'transparent',
     animations: { enabled: true, easing: 'easeinout', speed: 800 },
   },
-  labels: complaintPieChart.value.categories,
-  colors: complaintPieChart.value.colors,
+  labels: complaintTypePie.value.categories,
+  colors: complaintTypePie.value.colors,
   dataLabels: {
     enabled: true,
     formatter: (val: number) => `${Math.round(val)}%`,
@@ -578,8 +580,8 @@ onMounted(async () => {
           </div>
         </div>
 
-        <template v-if="complaintBarRows.length">
-          <div v-if="complaintView === 'bars'" class="space-y-3">
+        <template v-if="complaintView === 'bars'">
+          <div v-if="complaintBarRows.length" class="space-y-3">
             <div
               v-for="(row, idx) in complaintBarRows"
               :key="row.key"
@@ -604,17 +606,20 @@ onMounted(async () => {
               </div>
             </div>
           </div>
+          <p v-else class="py-10 text-center text-sm text-muted">Belum ada data di periode ini.</p>
+        </template>
 
-          <div v-else class="-mx-1 -mb-1">
+        <template v-else>
+          <div v-if="complaintTypePie.total > 0" class="-mx-1 -mb-1">
             <VueApexCharts
               type="pie"
               :height="300"
               :options="complaintPieOptions"
-              :series="complaintPieChart.series[0]?.data ?? []"
+              :series="complaintTypePie.series"
             />
           </div>
+          <p v-else class="py-10 text-center text-sm text-muted">Belum ada data di periode ini.</p>
         </template>
-        <p v-else class="py-10 text-center text-sm text-muted">Belum ada data di periode ini.</p>
       </Card>
     </div>
 
