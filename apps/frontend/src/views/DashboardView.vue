@@ -21,6 +21,7 @@ const toDate = ref(todayInput())
 const userId = ref<number | ''>('')
 const odcName = ref('')
 const complaintOdcName = ref('')
+const clientShareSource = ref<'all' | 'complaint' | 'ticket'>('all')
 const complaintView = ref<'pie' | 'bars'>('bars')
 const odcs = ref<{ id: number; name: string }[]>([])
 const loading = ref(true)
@@ -33,6 +34,9 @@ const nocPerformance = ref<DashboardStats['noc_performance']>([])
 const odcStats = ref<NonNullable<DashboardStats['odc_stats']>>([])
 const complaintClientShare = ref<NonNullable<DashboardStats['complaint_client_share']>>({
   total: 0,
+  complaints_total: 0,
+  tickets_total: 0,
+  source: 'all',
   rows: [],
 })
 const charts = ref<DashboardStats['charts'] | null>(null)
@@ -169,6 +173,36 @@ const complaintPieOptions = computed(() => ({
   },
 }))
 
+const complaintShareSubtitle = computed(() => {
+  const total = complaintClientShare.value.total
+  const c = complaintClientShare.value.complaints_total ?? 0
+  const t = complaintClientShare.value.tickets_total ?? 0
+  if (clientShareSource.value === 'complaint') {
+    return total ? `Top 10 client komplain · total ${total}` : 'Top 10 client berdasarkan komplain'
+  }
+  if (clientShareSource.value === 'ticket') {
+    return total ? `Top 10 client tiket · total ${total}` : 'Top 10 client berdasarkan tiket'
+  }
+  return total
+    ? `Top 10 client · total ${total} (Komplain ${c} · Tiket ${t})`
+    : 'Top 10 client berdasarkan komplain & tiket'
+})
+
+function clientShareMeta(row: NonNullable<DashboardStats['complaint_client_share']>['rows'][number]) {
+  const parts: string[] = []
+  parts.push(row.customer_code || (row.is_gamas ? 'Gamas' : '—'))
+  if (row.odc_name) parts.push(row.odc_name)
+  if (clientShareSource.value === 'all') {
+    parts.push(`Komplain ${row.complaints_count ?? 0}x`)
+    parts.push(`Tiket ${row.tickets_count ?? 0}x`)
+  } else if (clientShareSource.value === 'complaint') {
+    parts.push(`Komplain ${row.complaints_count ?? row.count}x`)
+  } else {
+    parts.push(`Tiket ${row.tickets_count ?? row.count}x`)
+  }
+  return parts.join(' · ')
+}
+
 async function loadOdcs() {
   try {
     const res = await odcApi.list({ per_page: 200 })
@@ -191,6 +225,7 @@ async function load(opts?: { soft?: boolean }) {
       user_id: userId.value === '' ? undefined : Number(userId.value),
       odc_name: odcName.value || undefined,
       complaint_odc_name: complaintOdcName.value || undefined,
+      client_share_source: clientShareSource.value,
     })
     periodLabel.value = data.period.label
     periodDays.value = data.period.days ?? 1
@@ -198,7 +233,13 @@ async function load(opts?: { soft?: boolean }) {
     specialists.value = data.specialists ?? []
     nocPerformance.value = data.noc_performance
     odcStats.value = data.odc_stats ?? []
-    complaintClientShare.value = data.complaint_client_share ?? { total: 0, rows: [] }
+    complaintClientShare.value = data.complaint_client_share ?? {
+      total: 0,
+      complaints_total: 0,
+      tickets_total: 0,
+      source: clientShareSource.value,
+      rows: [],
+    }
     odcPage.value = 1
     charts.value = data.charts ?? emptyCharts()
     heatmap.value = data.heatmap ?? { days: [], rows: [] }
@@ -216,7 +257,13 @@ async function load(opts?: { soft?: boolean }) {
       heatmap.value = { days: [], rows: [] }
       recentActivities.value = []
     }
-    complaintClientShare.value = { total: 0, rows: [] }
+    complaintClientShare.value = {
+      total: 0,
+      complaints_total: 0,
+      tickets_total: 0,
+      source: clientShareSource.value,
+      rows: [],
+    }
   } finally {
     if (!opts?.soft) loading.value = false
   }
@@ -226,7 +273,7 @@ watch([fromDate, toDate, userId, odcName], () => {
   void load()
 })
 
-watch(complaintOdcName, () => {
+watch([complaintOdcName, clientShareSource], () => {
   void load({ soft: true })
 })
 
@@ -484,13 +531,18 @@ onMounted(async () => {
       <Card class="p-5">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 class="text-sm font-semibold text-foreground">Persentase Client Komplain</h3>
-            <p class="mt-1 text-xs text-muted">
-              Top 10 client berdasarkan kontribusi komplain
-              <span v-if="complaintClientShare.total"> · total {{ complaintClientShare.total }}</span>
-            </p>
+            <h3 class="text-sm font-semibold text-foreground">Persentase Client</h3>
+            <p class="mt-1 text-xs text-muted">{{ complaintShareSubtitle }}</p>
           </div>
           <div class="flex flex-wrap items-end gap-3">
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-muted">Sumber</label>
+              <Select v-model="clientShareSource" class="w-36">
+                <option value="all">Semua</option>
+                <option value="complaint">Komplain</option>
+                <option value="ticket">Tiket</option>
+              </Select>
+            </div>
             <div>
               <label class="mb-1.5 block text-xs font-medium text-muted">Tampilan</label>
               <div class="flex gap-1 rounded-xl border border-border p-1">
@@ -539,9 +591,7 @@ onMounted(async () => {
                     <span class="mr-1.5 text-muted">{{ medal(idx) }}</span>{{ row.name }}
                   </p>
                   <p class="truncate text-[11px] text-muted">
-                    {{ row.customer_code || (row.is_gamas ? 'Gamas' : '—') }}
-                    <span v-if="row.odc_name"> · {{ row.odc_name }}</span>
-                    · {{ row.count }}x
+                    {{ clientShareMeta(row) }}
                   </p>
                 </div>
                 <p class="shrink-0 text-sm font-semibold text-danger">{{ row.pct }}%</p>
@@ -564,7 +614,7 @@ onMounted(async () => {
             />
           </div>
         </template>
-        <p v-else class="py-10 text-center text-sm text-muted">Belum ada komplain di periode ini.</p>
+        <p v-else class="py-10 text-center text-sm text-muted">Belum ada data di periode ini.</p>
       </Card>
     </div>
 

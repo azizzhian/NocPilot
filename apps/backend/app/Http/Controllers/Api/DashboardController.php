@@ -67,6 +67,10 @@ class DashboardController extends Controller
         $userId = $request->integer('user_id', 0) ?: null;
         $odcName = trim($request->string('odc_name')->toString()) ?: null;
         $complaintOdcName = trim($request->string('complaint_odc_name')->toString()) ?: null;
+        $clientShareSource = strtolower(trim($request->string('client_share_source')->toString()));
+        if (! in_array($clientShareSource, ['all', 'complaint', 'ticket'], true)) {
+            $clientShareSource = 'all';
+        }
         $periodDays = max(1, $from->diffInDays($to) + 1);
 
         $summary = $this->summaryForRange($from, $to, $userId, $odcName);
@@ -82,7 +86,7 @@ class DashboardController extends Controller
         $specialists = $this->specialistBadges($nocPerformance);
         $charts = $this->buildCharts($summary, $nocPerformance);
         $odcStats = $this->odcPerformance($from, $to, $periodDays, $odcName);
-        $complaintClientShare = $this->complaintClientShare($from, $to, $complaintOdcName);
+        $complaintClientShare = $this->complaintClientShare($from, $to, $complaintOdcName, $clientShareSource);
 
         return response()->json([
             'period' => [
@@ -608,62 +612,148 @@ class DashboardController extends Controller
     }
 
     /**
-     * Persentase kontribusi komplain per client (top 10) dalam rentang tanggal.
-     * Filter ODC di sini hanya memengaruhi ranking ini, bukan statistik ODC global.
+     * Persentase kontribusi client (top 10) dari komplain dan/atau tiket.
+     * Filter ODC & source hanya memengaruhi ranking ini.
      *
-     * @return array{total: int, rows: list<array<string, mixed>>}
+     * @param  'all'|'complaint'|'ticket'  $source
+     * @return array{total: int, complaints_total: int, tickets_total: int, source: string, rows: list<array<string, mixed>>}
      */
-    protected function complaintClientShare(Carbon $from, Carbon $to, ?string $odcName = null): array
-    {
-        $complaints = DailyComplaint::query()
-            ->select([
-                'complaint_type',
-                'customer_id',
-                'customer_code',
-                'customer_name',
-                'location_label',
-                'odc_name',
-            ])
-            ->whereBetween('report_date', [$from->toDateString(), $to->toDateString()])
-            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
-            ->get();
-
+    protected function complaintClientShare(
+        Carbon $from,
+        Carbon $to,
+        ?string $odcName = null,
+        string $source = 'all',
+    ): array {
         $byClient = [];
-        foreach ($complaints as $row) {
-            $isGamas = ($row->complaint_type ?? '') === DailyComplaint::TYPE_GAMAS;
-            if ($isGamas) {
-                $label = trim((string) ($row->location_label ?: $row->customer_name ?: 'Gamas'));
-                $key = 'gamas:'.mb_strtolower($label).'|'.mb_strtolower((string) ($row->odc_name ?? ''));
-                $code = null;
-                $name = 'Gamas: '.$label;
-            } else {
-                $code = trim((string) ($row->customer_code ?? ''));
-                $name = trim((string) ($row->customer_name ?? ''));
-                if ($code === '' && $name === '' && ! $row->customer_id) {
-                    continue;
-                }
-                $key = $row->customer_id
-                    ? 'id:'.$row->customer_id
-                    : 'code:'.mb_strtolower($code !== '' ? $code : $name);
-                $name = $name !== '' ? $name : ($code !== '' ? $code : 'Pelanggan');
-            }
 
+        $bump = function (
+            string $key,
+            string $name,
+            ?string $code,
+            ?string $odc,
+            bool $isGamas,
+            string $type,
+        ) use (&$byClient): void {
             if (! isset($byClient[$key])) {
                 $byClient[$key] = [
                     'key' => $key,
                     'name' => $name,
                     'customer_code' => $code,
-                    'odc_name' => $row->odc_name ? (string) $row->odc_name : null,
+                    'odc_name' => $odc,
                     'is_gamas' => $isGamas,
-                    'count' => 0,
+                    'complaints_count' => 0,
+                    'tickets_count' => 0,
                 ];
             }
+            if ($type === 'complaint') {
+                $byClient[$key]['complaints_count']++;
+            } else {
+                $byClient[$key]['tickets_count']++;
+            }
+            if (! $byClient[$key]['odc_name'] && $odc) {
+                $byClient[$key]['odc_name'] = $odc;
+            }
+            if (! $byClient[$key]['customer_code'] && $code) {
+                $byClient[$key]['customer_code'] = $code;
+            }
+        };
 
-            $byClient[$key]['count']++;
+        if ($source === 'all' || $source === 'complaint') {
+            $complaints = DailyComplaint::query()
+                ->select([
+                    'complaint_type',
+                    'customer_id',
+                    'customer_code',
+                    'customer_name',
+                    'location_label',
+                    'odc_name',
+                ])
+                ->whereBetween('report_date', [$from->toDateString(), $to->toDateString()])
+                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+                ->get();
+
+            foreach ($complaints as $row) {
+                $isGamas = ($row->complaint_type ?? '') === DailyComplaint::TYPE_GAMAS;
+                if ($isGamas) {
+                    $label = trim((string) ($row->location_label ?: $row->customer_name ?: 'Gamas'));
+                    $key = 'gamas:'.mb_strtolower($label).'|'.mb_strtolower((string) ($row->odc_name ?? ''));
+                    $code = null;
+                    $name = 'Gamas: '.$label;
+                } else {
+                    $code = trim((string) ($row->customer_code ?? ''));
+                    $name = trim((string) ($row->customer_name ?? ''));
+                    if ($code === '' && $name === '' && ! $row->customer_id) {
+                        continue;
+                    }
+                    $key = $code !== ''
+                        ? 'code:'.mb_strtolower($code)
+                        : ($row->customer_id ? 'id:'.$row->customer_id : 'name:'.mb_strtolower($name));
+                    $name = $name !== '' ? $name : ($code !== '' ? $code : 'Pelanggan');
+                }
+
+                $bump(
+                    $key,
+                    $name,
+                    $code,
+                    $row->odc_name ? (string) $row->odc_name : null,
+                    $isGamas,
+                    'complaint',
+                );
+            }
         }
 
-        $total = max(1, (int) array_sum(array_column($byClient, 'count')));
+        if ($source === 'all' || $source === 'ticket') {
+            $fromDate = $from->toDateString();
+            $toDate = $to->toDateString();
+            $tickets = ReportTicket::query()
+                ->select(['customer_code', 'customer_name', 'odc_name', 'location'])
+                ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
+                    $q->whereBetween('opened_at', [$fromDate, $toDate])
+                        ->orWhere(function ($q2) use ($from, $to) {
+                            $q2->whereNull('opened_at')
+                                ->whereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
+                        });
+                })
+                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+                ->get();
+
+            foreach ($tickets as $row) {
+                $code = trim((string) ($row->customer_code ?? ''));
+                $name = trim((string) ($row->customer_name ?? ''));
+                if ($code === '' && $name === '') {
+                    continue;
+                }
+                $key = $code !== ''
+                    ? 'code:'.mb_strtolower($code)
+                    : 'name:'.mb_strtolower($name);
+                $name = $name !== '' ? $name : $code;
+
+                $bump(
+                    $key,
+                    $name,
+                    $code !== '' ? $code : null,
+                    $row->odc_name ? (string) $row->odc_name : null,
+                    false,
+                    'ticket',
+                );
+            }
+        }
+
+        $complaintsTotal = (int) array_sum(array_column($byClient, 'complaints_count'));
+        $ticketsTotal = (int) array_sum(array_column($byClient, 'tickets_count'));
+
+        foreach ($byClient as &$client) {
+            $client['count'] = match ($source) {
+                'complaint' => (int) $client['complaints_count'],
+                'ticket' => (int) $client['tickets_count'],
+                default => (int) $client['complaints_count'] + (int) $client['tickets_count'],
+            };
+        }
+        unset($client);
+
+        $byClient = array_filter($byClient, fn (array $c) => (int) $c['count'] > 0);
         $actualTotal = (int) array_sum(array_column($byClient, 'count'));
+        $total = max(1, $actualTotal);
 
         $rows = collect($byClient)
             ->sortByDesc('count')
@@ -678,6 +768,8 @@ class DashboardController extends Controller
                     'customer_code' => $client['customer_code'],
                     'odc_name' => $client['odc_name'],
                     'is_gamas' => $client['is_gamas'],
+                    'complaints_count' => (int) $client['complaints_count'],
+                    'tickets_count' => (int) $client['tickets_count'],
                     'count' => $count,
                     'pct' => round(($count / $total) * 100, 1),
                 ];
@@ -686,6 +778,9 @@ class DashboardController extends Controller
 
         return [
             'total' => $actualTotal,
+            'complaints_total' => $complaintsTotal,
+            'tickets_total' => $ticketsTotal,
+            'source' => $source,
             'rows' => $rows,
         ];
     }

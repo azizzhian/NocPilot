@@ -148,12 +148,17 @@ export interface DashboardStats {
   }>
   complaint_client_share?: {
     total: number
+    complaints_total?: number
+    tickets_total?: number
+    source?: 'all' | 'complaint' | 'ticket' | string
     rows: Array<{
       key: string
       name: string
       customer_code?: string | null
       odc_name?: string | null
       is_gamas?: boolean
+      complaints_count?: number
+      tickets_count?: number
       count: number
       pct: number
     }>
@@ -219,6 +224,7 @@ export const dashboardApi = {
     user_id?: number
     odc_name?: string
     complaint_odc_name?: string
+    client_share_source?: 'all' | 'complaint' | 'ticket'
   }) => api.get<DashboardStats>('/dashboard/stats', { params }),
   navBadges: () => api.get<{ nav_badges: DashboardStats['nav_badges'] }>('/dashboard/nav-badges'),
 }
