@@ -299,7 +299,7 @@ watch(
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="grid gap-6 xl:grid-cols-2">
     <!-- Hari ini / rentang filter -->
     <div class="overflow-hidden rounded-[18px] border border-border bg-card card-shadow">
       <div class="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-6 sm:py-5">
