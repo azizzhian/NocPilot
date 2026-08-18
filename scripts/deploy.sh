@@ -37,6 +37,11 @@ if [[ ! -f apps/frontend/.env ]]; then
   cp apps/frontend/.env.example apps/frontend/.env
 fi
 
+DEPLOY_FROM=""
+if [[ -d .git ]]; then
+  DEPLOY_FROM="$(git rev-parse HEAD 2>/dev/null || true)"
+fi
+
 if [[ "$SKIP_PULL" -eq 0 ]]; then
   if [[ -d .git ]]; then
     echo "[deploy] git fetch + pull ($BRANCH)"
@@ -46,6 +51,11 @@ if [[ "$SKIP_PULL" -eq 0 ]]; then
   else
     echo "[deploy] Bukan git repo — lewati pull"
   fi
+fi
+
+DEPLOY_TO=""
+if [[ -d .git ]]; then
+  DEPLOY_TO="$(git rev-parse HEAD 2>/dev/null || true)"
 fi
 
 echo "[deploy] composer install (backend)"
@@ -64,6 +74,11 @@ if [[ "$NO_MIGRATE" -eq 0 ]]; then
   php apps/backend/artisan migrate --force
 else
   echo "[deploy] Lewati migrate (--no-migrate)"
+fi
+
+if [[ -n "$DEPLOY_FROM" && -n "$DEPLOY_TO" && "$DEPLOY_FROM" != "$DEPLOY_TO" ]]; then
+  echo "[deploy] Catat update aplikasi ($DEPLOY_FROM..$DEPLOY_TO)"
+  php apps/backend/artisan app:record-deploy "$DEPLOY_FROM" "$DEPLOY_TO" --branch="$BRANCH" || true
 fi
 
 echo "[deploy] Laravel optimize"

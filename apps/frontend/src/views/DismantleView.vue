@@ -16,6 +16,7 @@ import { Plus, Pencil, Trash2, FileText } from 'lucide-vue-next'
 
 const search = ref('')
 const statusFilter = ref('all')
+const locationFilter = ref('')
 const fromDate = ref('')
 const toDate = ref('')
 const currentPage = ref(1)
@@ -47,6 +48,8 @@ const statusTabs = [
   { key: 'Clear', label: 'Clear' },
 ]
 
+const locationOptions = ref<string[]>([])
+
 function statusVariant(status: string) {
   if (status === 'Clear') return 'success'
   if (status === 'Pending') return 'secondary'
@@ -61,6 +64,7 @@ async function load(page = currentPage.value) {
       dismantleApi.list({
         search: search.value || undefined,
         status: statusFilter.value,
+        location: locationFilter.value || undefined,
         from: fromDate.value || undefined,
         to: toDate.value || undefined,
         page,
@@ -72,6 +76,14 @@ async function load(page = currentPage.value) {
     currentPage.value = meta?.current_page ?? page
     lastPage.value = meta?.last_page ?? 1
     stats.value = statsRes.data
+    locationOptions.value = Array.from(
+      new Set(
+        [
+          ...locationOptions.value,
+          ...listRes.data.data.map((item) => item.location?.trim()).filter((value): value is string => Boolean(value)),
+        ],
+      ),
+    ).sort((a, b) => a.localeCompare(b))
   } catch {
     error.value = 'Gagal memuat dismantle.'
   } finally {
@@ -154,7 +166,7 @@ async function confirmDelete() {
 }
 
 let searchTimeout: ReturnType<typeof setTimeout>
-watch([search, statusFilter, fromDate, toDate], () => {
+watch([search, statusFilter, locationFilter, fromDate, toDate], () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => load(1), 400)
 })
@@ -186,6 +198,13 @@ onMounted(() => load(1))
 
     <div class="mb-4 flex flex-wrap items-end gap-3">
       <SearchInput v-model="search" placeholder="Cari lokasi / ID pel / nama..." class="max-w-sm" />
+      <div>
+        <label class="mb-1.5 block text-xs font-medium text-muted">Filter Lokasi</label>
+        <Select v-model="locationFilter" class="w-48">
+          <option value="">Semua Lokasi</option>
+          <option v-for="location in locationOptions" :key="location" :value="location">{{ location }}</option>
+        </Select>
+      </div>
       <DateRangePicker
         v-model:from="fromDate"
         v-model:to="toDate"
@@ -222,6 +241,7 @@ onMounted(() => load(1))
             <th class="pb-3 pr-4 font-medium">Lokasi</th>
             <th class="pb-3 pr-4 font-medium">ID Pel</th>
             <th class="pb-3 pr-4 font-medium">Nama</th>
+            <th class="pb-3 pr-4 font-medium">NOC</th>
             <th class="pb-3 pr-4 font-medium">Status</th>
             <th class="pb-3 pr-4 font-medium">Open Ticket</th>
             <th class="pb-3 pr-4 font-medium">Close Ticket</th>
@@ -230,7 +250,7 @@ onMounted(() => load(1))
         </thead>
         <tbody>
           <tr v-if="!items.length">
-            <td colspan="7" class="py-10 text-center text-muted">Belum ada data dismantle.</td>
+            <td colspan="8" class="py-10 text-center text-muted">Belum ada data dismantle.</td>
           </tr>
           <tr
             v-for="item in items"
@@ -240,6 +260,7 @@ onMounted(() => load(1))
             <td class="py-3 pr-4">{{ item.location || '—' }}</td>
             <td class="py-3 pr-4 font-mono text-xs">{{ item.customer_code || '—' }}</td>
             <td class="py-3 pr-4 font-medium">{{ item.customer_name }}</td>
+            <td class="py-3 pr-4">{{ item.creator_name || '—' }}</td>
             <td class="py-3 pr-4">
               <Badge :variant="statusVariant(item.status)">{{ item.status }}</Badge>
             </td>

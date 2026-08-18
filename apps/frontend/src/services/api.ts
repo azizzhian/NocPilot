@@ -513,6 +513,7 @@ export interface DismantleItem {
   closed_at: string | null
   notes: string | null
   assignee?: { id: number; name: string } | null
+  creator_name?: string | null
   created_at: string | null
 }
 
@@ -528,6 +529,7 @@ export const dismantleApi = {
   list: (params?: {
     search?: string
     status?: string
+    location?: string
     from?: string
     to?: string
     page?: number
@@ -600,6 +602,34 @@ export const reportApi = {
 export const realtimeApi = {
   feed: (since?: number) => api.get('/realtime/feed', { params: { since } }),
   markRead: () => api.post('/realtime/mark-read'),
+}
+
+export interface AppUpdateChange {
+  hash: string
+  message: string
+  author: string
+  date: string
+}
+
+export interface AppUpdateItem {
+  id: number
+  from_commit: string | null
+  to_commit: string
+  branch: string | null
+  changes: AppUpdateChange[]
+  deployed_at: string
+  is_unread: boolean
+}
+
+export const appUpdatesApi = {
+  list: () => api.get<{
+    updates: AppUpdateItem[]
+    unread: number
+    last_read_id: number | null
+  }>('/app-updates'),
+  markRead: () => api.post<{ message: string; unread: number; last_read_id: number | null }>(
+    '/app-updates/mark-read',
+  ),
 }
 
 export async function downloadCsv(path: string, filename: string) {

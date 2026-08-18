@@ -19,6 +19,7 @@ use Spatie\Permission\Traits\HasRoles;
     'department',
     'status',
     'last_login_at',
+    'last_read_app_update_id',
     'telegram_id',
     'telegram_username',
 ])]

@@ -22,7 +22,7 @@ class DismantleController extends Controller
 
     public function index(Request $request): AnonymousResourceCollection
     {
-        $query = Dismantle::query()->with('assignee:id,name')->latest();
+        $query = Dismantle::query()->with(['assignee:id,name', 'creator:id,name'])->latest();
 
         if ($search = $request->string('search')->toString()) {
             $query->where(function ($q) use ($search) {
@@ -37,6 +37,10 @@ class DismantleController extends Controller
             if ($status !== 'all') {
                 $query->where('status', $status);
             }
+        }
+
+        if ($location = trim($request->string('location')->toString())) {
+            $query->where('location', $location);
         }
 
         $from = $request->string('from')->toString();
@@ -100,13 +104,13 @@ class DismantleController extends Controller
 
         return response()->json([
             'message' => 'Dismantle berhasil dibuat.',
-            'data' => new DismantleResource($dismantle->load('assignee')),
+            'data' => new DismantleResource($dismantle->load(['assignee', 'creator'])),
         ], 201);
     }
 
     public function show(Dismantle $dismantle): DismantleResource
     {
-        return new DismantleResource($dismantle->load('assignee', 'customer'));
+        return new DismantleResource($dismantle->load('assignee', 'creator', 'customer'));
     }
 
     public function update(Request $request, Dismantle $dismantle): JsonResponse
@@ -134,7 +138,7 @@ class DismantleController extends Controller
 
         return response()->json([
             'message' => 'Dismantle berhasil diperbarui.',
-            'data' => new DismantleResource($dismantle->fresh()->load('assignee')),
+            'data' => new DismantleResource($dismantle->fresh()->load(['assignee', 'creator'])),
         ]);
     }
 

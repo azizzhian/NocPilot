@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { appUpdatesApi, type AppUpdateItem } from '@/services/api'
 import {
   Search,
   Moon,
@@ -12,6 +13,8 @@ import {
   ChevronDown,
   User,
   Menu,
+  Bell,
+  CheckCheck,
 } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 
@@ -24,6 +27,51 @@ const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const profileOpen = ref(false)
+const updatesOpen = ref(false)
+const updates = ref<AppUpdateItem[]>([])
+const unreadCount = ref(0)
+const updatesLoading = ref(false)
+
+async function loadUpdates() {
+  updatesLoading.value = true
+  try {
+    const { data } = await appUpdatesApi.list()
+    updates.value = data.updates
+    unreadCount.value = data.unread
+  } catch {
+    // abaikan jika endpoint belum tersedia
+  } finally {
+    updatesLoading.value = false
+  }
+}
+
+async function markUpdatesRead() {
+  try {
+    const { data } = await appUpdatesApi.markRead()
+    unreadCount.value = data.unread
+    updates.value = updates.value.map((u) => ({ ...u, is_unread: false }))
+  } catch {
+    // abaikan
+  }
+}
+
+function toggleUpdates() {
+  updatesOpen.value = !updatesOpen.value
+  profileOpen.value = false
+  if (updatesOpen.value) {
+    loadUpdates()
+  }
+}
+
+function formatDeployedAt(iso: string) {
+  return new Date(iso).toLocaleString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 async function handleLogout() {
   profileOpen.value = false
@@ -41,9 +89,15 @@ function onDocClick(e: MouseEvent) {
   if (!target?.closest('[data-profile-menu]')) {
     profileOpen.value = false
   }
+  if (!target?.closest('[data-updates-menu]')) {
+    updatesOpen.value = false
+  }
 }
 
-onMounted(() => document.addEventListener('click', onDocClick))
+onMounted(() => {
+  document.addEventListener('click', onDocClick)
+  loadUpdates()
+})
 onUnmounted(() => document.removeEventListener('click', onDocClick))
 </script>
 
@@ -80,6 +134,90 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
         <kbd class="rounded bg-[#F1F5F9] px-1.5 py-0.5 text-[10px] font-mono text-[#94A3B8] dark:bg-slate-800">Ctrl+K</kbd>
       </button>
 
+      <div class="relative" data-updates-menu>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="relative"
+          aria-label="Update aplikasi"
+          @click.stop="toggleUpdates"
+        >
+          <Bell class="h-4 w-4" />
+          <span
+            v-if="unreadCount > 0"
+            class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white"
+          >
+            {{ unreadCount > 9 ? '9+' : unreadCount }}
+          </span>
+        </Button>
+
+        <Transition
+          enter-active-class="transition duration-200 ease-out"
+          enter-from-class="opacity-0 scale-95"
+          enter-to-class="opacity-100 scale-100"
+          leave-active-class="transition duration-150 ease-in"
+          leave-from-class="opacity-100 scale-100"
+          leave-to-class="opacity-0 scale-95"
+        >
+          <div
+            v-if="updatesOpen"
+            class="absolute right-0 top-full z-50 mt-2 w-[min(100vw-2rem,380px)] overflow-hidden rounded-[18px] border border-border bg-card card-shadow-hover"
+            @click.stop
+          >
+            <div class="flex items-center justify-between border-b border-border px-4 py-3">
+              <div>
+                <p class="text-sm font-semibold text-foreground">Update Aplikasi</p>
+                <p class="text-[11px] text-muted">Perubahan dari deploy terbaru</p>
+              </div>
+              <button
+                v-if="unreadCount > 0"
+                type="button"
+                class="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10"
+                @click="markUpdatesRead"
+              >
+                <CheckCheck class="h-3.5 w-3.5" />
+                Tandai dibaca
+              </button>
+            </div>
+
+            <div class="max-h-[min(70vh,420px)] overflow-y-auto">
+              <div v-if="updatesLoading" class="px-4 py-8 text-center text-sm text-muted">
+                Memuat...
+              </div>
+              <div v-else-if="updates.length === 0" class="px-4 py-8 text-center text-sm text-muted">
+                Belum ada catatan update.
+              </div>
+              <div v-else class="divide-y divide-border">
+                <div
+                  v-for="update in updates"
+                  :key="update.id"
+                  class="px-4 py-3"
+                  :class="update.is_unread ? 'bg-primary/5' : ''"
+                >
+                  <div class="mb-2 flex items-start justify-between gap-2">
+                    <p class="text-xs font-medium text-foreground">
+                      Deploy
+                      <span v-if="update.branch" class="text-muted">({{ update.branch }})</span>
+                    </p>
+                    <time class="shrink-0 text-[10px] text-muted">{{ formatDeployedAt(update.deployed_at) }}</time>
+                  </div>
+                  <ul class="space-y-1.5">
+                    <li
+                      v-for="(change, idx) in update.changes"
+                      :key="change.hash + idx"
+                      class="flex gap-2 text-xs text-foreground"
+                    >
+                      <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+                      <span class="leading-relaxed">{{ change.message }}</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </div>
+
       <Button variant="ghost" size="icon" @click="appStore.toggleDark()">
         <Sun v-if="appStore.isDark" class="h-4 w-4" />
         <Moon v-else class="h-4 w-4" />
@@ -106,7 +244,7 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
           enter-from-class="opacity-0 scale-95"
           enter-to-class="opacity-100 scale-100"
           leave-active-class="transition duration-150 ease-in"
-          leave-from-class="opacity-100"
+          leave-from-class="opacity-100 scale-100"
           leave-to-class="opacity-0 scale-95"
         >
           <div

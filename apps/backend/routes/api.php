@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ActivationController;
+use App\Http\Controllers\Api\AppUpdateController;
 use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\AlertController;
 use App\Http\Controllers\Api\AuthController;
@@ -101,6 +102,9 @@ Route::prefix('v1')->group(function () {
         Route::get('/activity-logs', [ActivityLogController::class, 'index']);
         Route::get('/realtime/feed', [RealtimeController::class, 'feed']);
         Route::post('/realtime/mark-read', [RealtimeController::class, 'markRead']);
+
+        Route::get('/app-updates', [AppUpdateController::class, 'index']);
+        Route::post('/app-updates/mark-read', [AppUpdateController::class, 'markRead']);
 
         // Reports
         Route::get('/reports/analytics', [ReportController::class, 'analytics']);
