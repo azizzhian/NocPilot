@@ -7,11 +7,14 @@ use App\Http\Resources\DismantleResource;
 use App\Models\Customer;
 use App\Models\Dismantle;
 use App\Services\Audit\ActivityLogger;
+use App\Services\Dismantle\DismantleImportService;
 use App\Services\Notification\NotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class DismantleController extends Controller
 {
@@ -93,6 +96,8 @@ class DismantleController extends Controller
             $data['location'] = $data['location'] ?? $customer?->area;
         }
 
+        $this->assertNoOpenDuplicate($data['customer_code'] ?? null, $data['status'] ?? 'On-Progress');
+
         $dismantle = Dismantle::create([
             ...$data,
             'reference' => Dismantle::generateReference(),
@@ -133,6 +138,10 @@ class DismantleController extends Controller
             'notes' => ['nullable', 'string'],
         ]);
 
+        $nextCode = array_key_exists('customer_code', $data) ? $data['customer_code'] : $dismantle->customer_code;
+        $nextStatus = $data['status'] ?? $dismantle->status;
+        $this->assertNoOpenDuplicate($nextCode, $nextStatus, $dismantle->id);
+
         $dismantle->update($data);
 
         $label = $dismantle->customer_name ?: ($dismantle->reference ?: '#'.$dismantle->id);
@@ -163,5 +172,86 @@ class DismantleController extends Controller
         );
 
         return response()->json(['message' => 'Dismantle berhasil dihapus.']);
+    }
+
+    public function import(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => ['required', 'file', 'max:5120'],
+        ]);
+
+        /** @var UploadedFile $file */
+        $file = $request->file('file');
+        $extension = strtolower($file->getClientOriginalExtension() ?: '');
+        if (! in_array($extension, ['csv', 'txt'], true)) {
+            return response()->json(['message' => 'File harus berformat CSV.'], 422);
+        }
+        $path = $file->getRealPath();
+        $probe = fopen($path, 'r');
+        $firstLine = $probe ? (string) fgets($probe) : '';
+        if ($probe) {
+            fclose($probe);
+        }
+        $delimiter = substr_count($firstLine, ';') > substr_count($firstLine, ',') ? ';' : ',';
+
+        $handle = fopen($path, 'r');
+
+        if ($handle === false) {
+            return response()->json(['message' => 'File tidak dapat dibaca.'], 422);
+        }
+
+        $header = fgetcsv($handle, 0, $delimiter);
+        if (! $header) {
+            fclose($handle);
+
+            return response()->json(['message' => 'File CSV kosong atau tidak valid.'], 422);
+        }
+
+        $rows = [];
+        while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
+            $rows[] = $row;
+        }
+        fclose($handle);
+
+        $importer = new DismantleImportService($request->user()->id);
+
+        try {
+            $importer->import($header, $rows);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $this->activity->log(
+            'dismantle',
+            "Import dismantle: {$importer->success} dibuat, {$importer->skipped} dilewati, {$importer->failed} gagal",
+            $request->user(),
+            $request,
+        );
+
+        return response()->json([
+            'message' => 'Import dismantle selesai.',
+            'success' => $importer->success,
+            'skipped' => $importer->skipped,
+            'failed' => $importer->failed,
+            'errors' => array_merge($importer->skippedMessages, $importer->errors),
+        ]);
+    }
+
+    private function assertNoOpenDuplicate(?string $customerCode, string $status, ?int $exceptId = null): void
+    {
+        if (! in_array($status, Dismantle::openStatuses(), true)) {
+            return;
+        }
+
+        $existing = Dismantle::findOpenByCustomerCode((string) $customerCode, $exceptId);
+        if (! $existing) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'customer_code' => [
+                "ID Pel {$existing->customer_code} sudah punya tiket dismantle terbuka ({$existing->reference}).",
+            ],
+        ]);
     }
 }

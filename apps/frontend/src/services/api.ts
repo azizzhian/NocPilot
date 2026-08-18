@@ -543,6 +543,19 @@ export const dismantleApi = {
   create: (data: Record<string, unknown>) => api.post('/dismantles', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/dismantles/${id}`, data),
   destroy: (id: number) => api.delete(`/dismantles/${id}`),
+  importCsv: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<{
+      message: string
+      success: number
+      skipped: number
+      failed: number
+      errors: string[]
+    }>('/dismantles/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
 }
 
 export interface ReportTicketItem {

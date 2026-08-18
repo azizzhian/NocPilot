@@ -49,4 +49,33 @@ class Dismantle extends Model
 
         return sprintf('DSM-%d-%04d', $year, $seq);
     }
+
+    /** @return list<string> */
+    public static function openStatuses(): array
+    {
+        return ['Pending', 'On-Progress'];
+    }
+
+    public function isOpen(): bool
+    {
+        return in_array($this->status, static::openStatuses(), true);
+    }
+
+    public static function findOpenByCustomerCode(string $code, ?int $exceptId = null): ?self
+    {
+        $normalized = strtolower(trim($code));
+        if ($normalized === '') {
+            return null;
+        }
+
+        $query = static::query()
+            ->whereIn('status', static::openStatuses())
+            ->whereRaw('LOWER(TRIM(customer_code)) = ?', [$normalized]);
+
+        if ($exceptId) {
+            $query->where('id', '!=', $exceptId);
+        }
+
+        return $query->first();
+    }
 }

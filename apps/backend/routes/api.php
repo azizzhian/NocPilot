@@ -63,6 +63,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('activations', ActivationController::class);
 
         Route::get('/dismantles/stats', [DismantleController::class, 'stats']);
+        Route::post('/dismantles/import', [DismantleController::class, 'import']);
         Route::apiResource('dismantles', DismantleController::class);
 
         Route::get('/report-tickets/stats', [ReportTicketController::class, 'stats']);

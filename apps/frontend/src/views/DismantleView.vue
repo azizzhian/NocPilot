@@ -12,7 +12,7 @@ import Modal from '@/components/ui/Modal.vue'
 import SectionReportModal from '@/components/report/SectionReportModal.vue'
 import { dismantleApi, type DismantleItem } from '@/services/api'
 import { todayInput } from '@/lib/date-input'
-import { Plus, Pencil, Trash2, FileText } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, FileText, Upload, Download } from 'lucide-vue-next'
 
 const search = ref('')
 const statusFilter = ref('all')
@@ -31,6 +31,10 @@ const error = ref('')
 const deleteTarget = ref<DismantleItem | null>(null)
 const deleting = ref(false)
 const reportModalOpen = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+const importModalOpen = ref(false)
+const importResult = ref<{ success: number; skipped: number; failed: number; errors: string[] } | null>(null)
 
 const form = ref({
   location: '',
@@ -170,6 +174,51 @@ async function confirmDelete() {
   }
 }
 
+function triggerImport() {
+  fileInput.value?.click()
+}
+
+function downloadTemplate() {
+  const csv = [
+    'id_pel,nama,lokasi,status,open_ticket',
+    '12345,Budi Santoso,Cibaduyut,On-Progress,2026-08-18',
+  ].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'template-dismantle.csv'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+async function handleImportFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  importing.value = true
+  error.value = ''
+  importResult.value = null
+  try {
+    const res = await dismantleApi.importCsv(file)
+    importResult.value = {
+      success: res.data.success,
+      skipped: res.data.skipped,
+      failed: res.data.failed,
+      errors: res.data.errors ?? [],
+    }
+    importModalOpen.value = true
+    await load()
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { message?: string } } }
+    error.value = err.response?.data?.message ?? 'Gagal mengimpor file.'
+  } finally {
+    importing.value = false
+  }
+}
+
 let searchTimeout: ReturnType<typeof setTimeout>
 watch([search, statusFilter, locationFilter, fromDate, toDate], () => {
   clearTimeout(searchTimeout)
@@ -230,12 +279,22 @@ onMounted(() => load(1))
         </button>
       </div>
       <div class="ml-auto flex gap-2">
+        <input ref="fileInput" type="file" accept=".csv,.txt" class="hidden" @change="handleImportFile" />
+        <Button variant="outline" :disabled="importing" @click="downloadTemplate">
+          <Download class="h-4 w-4" /> Template
+        </Button>
+        <Button variant="outline" :disabled="importing" @click="triggerImport">
+          <Upload class="h-4 w-4" /> {{ importing ? 'Mengimpor...' : 'Import CSV' }}
+        </Button>
         <Button variant="outline" @click="reportModalOpen = true">
           <FileText class="h-4 w-4" /> Generate
         </Button>
         <Button @click="openCreate"><Plus class="h-4 w-4" /> Tambah Dismantle</Button>
       </div>
     </div>
+    <p class="mb-4 text-xs text-muted">
+      Import CSV: id_pel, nama, lokasi, status, open_ticket. ID Pel yang sudah punya tiket terbuka dilewati.
+    </p>
 
     <Card v-if="loading" class="p-8 text-center text-sm text-muted">Memuat data...</Card>
 
@@ -360,6 +419,22 @@ onMounted(() => load(1))
         <Button type="button" variant="danger" :disabled="deleting" @click="confirmDelete">
           {{ deleting ? 'Menghapus...' : 'Hapus' }}
         </Button>
+      </template>
+    </Modal>
+
+    <Modal :open="importModalOpen" title="Hasil Import Dismantle" @close="importModalOpen = false">
+      <div v-if="importResult" class="space-y-3 text-sm">
+        <div class="flex flex-wrap gap-4">
+          <span class="font-medium text-success">{{ importResult.success }} dibuat</span>
+          <span class="font-medium text-warning">{{ importResult.skipped }} dilewati</span>
+          <span class="font-medium text-danger">{{ importResult.failed }} gagal</span>
+        </div>
+        <div v-if="importResult.errors.length" class="max-h-48 overflow-y-auto rounded-xl border border-border bg-slate-50 p-3 text-xs dark:bg-slate-800/50">
+          <p v-for="(err, i) in importResult.errors" :key="i" class="text-muted">{{ err }}</p>
+        </div>
+      </div>
+      <template #footer>
+        <Button @click="importModalOpen = false">Tutup</Button>
       </template>
     </Modal>
 
