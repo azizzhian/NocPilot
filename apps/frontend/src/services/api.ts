@@ -534,7 +534,12 @@ export const dismantleApi = {
     to?: string
     page?: number
   }) => api.get<PaginatedResponse<DismantleItem>>('/dismantles', { params }),
-  stats: () => api.get<Record<string, number>>('/dismantles/stats'),
+  stats: (params?: {
+    search?: string
+    location?: string
+    from?: string
+    to?: string
+  }) => api.get<Record<string, number>>('/dismantles/stats', { params }),
   create: (data: Record<string, unknown>) => api.post('/dismantles', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/dismantles/${id}`, data),
   destroy: (id: number) => api.delete(`/dismantles/${id}`),

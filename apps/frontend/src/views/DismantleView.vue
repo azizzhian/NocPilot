@@ -69,7 +69,12 @@ async function load(page = currentPage.value) {
         to: toDate.value || undefined,
         page,
       }),
-      dismantleApi.stats(),
+      dismantleApi.stats({
+        search: search.value || undefined,
+        location: locationFilter.value || undefined,
+        from: fromDate.value || undefined,
+        to: toDate.value || undefined,
+      }),
     ])
     items.value = listRes.data.data
     const meta = listRes.data.meta

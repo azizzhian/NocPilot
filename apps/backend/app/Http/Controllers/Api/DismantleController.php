@@ -23,7 +23,26 @@ class DismantleController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         $query = Dismantle::query()->with(['assignee:id,name', 'creator:id,name'])->latest();
+        $this->applyFilters($query, $request, includeStatus: true);
 
+        return DismantleResource::collection($query->paginate(15));
+    }
+
+    public function stats(Request $request): JsonResponse
+    {
+        $query = Dismantle::query();
+        $this->applyFilters($query, $request, includeStatus: false);
+
+        return response()->json([
+            'total' => (clone $query)->count(),
+            'pending' => (clone $query)->where('status', 'Pending')->count(),
+            'on_progress' => (clone $query)->where('status', 'On-Progress')->count(),
+            'clear' => (clone $query)->where('status', 'Clear')->count(),
+        ]);
+    }
+
+    private function applyFilters($query, Request $request, bool $includeStatus = true): void
+    {
         if ($search = $request->string('search')->toString()) {
             $query->where(function ($q) use ($search) {
                 $q->where('reference', 'like', "%{$search}%")
@@ -33,8 +52,9 @@ class DismantleController extends Controller
             });
         }
 
-        if ($status = $request->string('status')->toString()) {
-            if ($status !== 'all') {
+        if ($includeStatus) {
+            $status = $request->string('status')->toString();
+            if ($status !== '' && $status !== 'all') {
                 $query->where('status', $status);
             }
         }
@@ -51,18 +71,6 @@ class DismantleController extends Controller
         if ($to !== '') {
             $query->whereDate('opened_at', '<=', $to);
         }
-
-        return DismantleResource::collection($query->paginate(15));
-    }
-
-    public function stats(): JsonResponse
-    {
-        return response()->json([
-            'total' => Dismantle::count(),
-            'pending' => Dismantle::where('status', 'Pending')->count(),
-            'on_progress' => Dismantle::where('status', 'On-Progress')->count(),
-            'clear' => Dismantle::where('status', 'Clear')->count(),
-        ]);
     }
 
     public function store(Request $request): JsonResponse
