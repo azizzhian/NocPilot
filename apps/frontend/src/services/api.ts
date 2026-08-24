@@ -540,6 +540,7 @@ export const dismantleApi = {
     from?: string
     to?: string
   }) => api.get<Record<string, number>>('/dismantles/stats', { params }),
+  locations: () => api.get<{ data: string[] }>('/dismantles/locations'),
   create: (data: Record<string, unknown>) => api.post('/dismantles', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/dismantles/${id}`, data),
   destroy: (id: number) => api.delete(`/dismantles/${id}`),

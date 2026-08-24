@@ -85,18 +85,19 @@ async function load(page = currentPage.value) {
     currentPage.value = meta?.current_page ?? page
     lastPage.value = meta?.last_page ?? 1
     stats.value = statsRes.data
-    locationOptions.value = Array.from(
-      new Set(
-        [
-          ...locationOptions.value,
-          ...listRes.data.data.map((item) => item.location?.trim()).filter((value): value is string => Boolean(value)),
-        ],
-      ),
-    ).sort((a, b) => a.localeCompare(b))
   } catch {
     error.value = 'Gagal memuat dismantle.'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadLocations() {
+  try {
+    const res = await dismantleApi.locations()
+    locationOptions.value = res.data.data
+  } catch {
+    // biarkan opsi lokasi kosong; list tetap bisa dipakai
   }
 }
 
@@ -143,7 +144,7 @@ async function submit() {
       await dismantleApi.create(payload)
     }
     showModal.value = false
-    await load()
+    await Promise.all([load(), loadLocations()])
   } catch (e: unknown) {
     const err = e as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } }
     const first = err.response?.data?.errors
@@ -166,7 +167,7 @@ async function confirmDelete() {
   try {
     await dismantleApi.destroy(deleteTarget.value.id)
     deleteTarget.value = null
-    await load()
+    await Promise.all([load(), loadLocations()])
   } catch {
     error.value = 'Gagal menghapus dismantle.'
   } finally {
@@ -210,7 +211,7 @@ async function handleImportFile(e: Event) {
       errors: res.data.errors ?? [],
     }
     importModalOpen.value = true
-    await load()
+    await Promise.all([load(), loadLocations()])
   } catch (e: unknown) {
     const err = e as { response?: { data?: { message?: string } } }
     error.value = err.response?.data?.message ?? 'Gagal mengimpor file.'
@@ -225,7 +226,9 @@ watch([search, statusFilter, locationFilter, fromDate, toDate], () => {
   searchTimeout = setTimeout(() => load(1), 400)
 })
 
-onMounted(() => load(1))
+onMounted(() => {
+  void Promise.all([load(1), loadLocations()])
+})
 </script>
 
 <template>

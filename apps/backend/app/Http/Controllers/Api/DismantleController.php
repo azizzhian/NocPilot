@@ -44,6 +44,22 @@ class DismantleController extends Controller
         ]);
     }
 
+    public function locations(): JsonResponse
+    {
+        $locations = Dismantle::query()
+            ->whereNotNull('location')
+            ->where('location', '!=', '')
+            ->distinct()
+            ->orderBy('location')
+            ->pluck('location')
+            ->map(fn ($location) => trim((string) $location))
+            ->filter()
+            ->unique(fn ($location) => strtolower($location))
+            ->values();
+
+        return response()->json(['data' => $locations]);
+    }
+
     private function applyFilters($query, Request $request, bool $includeStatus = true): void
     {
         if ($search = $request->string('search')->toString()) {
