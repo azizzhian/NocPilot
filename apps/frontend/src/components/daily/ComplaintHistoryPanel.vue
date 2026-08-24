@@ -303,10 +303,14 @@ function closeDrawer() {
                   <div class="min-w-0 flex-1">
                     <p class="text-sm font-semibold text-foreground">{{ formatDate(item.report_date) }}</p>
                     <ul class="mt-1.5 space-y-0.5 text-xs text-muted">
+                    
                       <li class="font-medium text-foreground">{{ item.problem || '—' }}</li>
                       <li v-if="item.shift">Shift {{ item.shift }}</li>
                       <li v-if="item.creator_name">Admin: {{ item.creator_name }}</li>
                       <li v-if="item.odc_name">ODC: {{ item.odc_name }}</li>
+                      <li v-if="item.action?.trim()" class="whitespace-pre-wrap text-foreground/80">
+                       Action: {{ item.action.trim() }}
+                      </li>
                       <li class="flex items-center gap-1" :class="isClear(item.status) ? 'text-success' : 'text-warning'">
                         <Check v-if="isClear(item.status)" class="h-3 w-3" />
                         {{ item.status }}
