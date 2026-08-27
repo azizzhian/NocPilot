@@ -25,7 +25,7 @@ class DismantleController extends Controller
 
     public function index(Request $request): AnonymousResourceCollection
     {
-        $query = Dismantle::query()->with(['assignee:id,name', 'creator:id,name'])->latest();
+        $query = Dismantle::query()->with(['assignee:id,name', 'creator:id,name', 'clearer:id,name'])->latest();
         $this->applyFilters($query, $request, includeStatus: true);
 
         return DismantleResource::collection($query->paginate(15));
@@ -114,11 +114,13 @@ class DismantleController extends Controller
 
         $this->assertNoOpenDuplicate($data['customer_code'] ?? null, $data['status'] ?? 'On-Progress');
 
-        $dismantle = Dismantle::create([
+        $dismantle = new Dismantle([
             ...$data,
             'reference' => Dismantle::generateReference(),
             'created_by' => $request->user()->id,
         ]);
+        $dismantle->syncClearAttribution($data['status'], $request->user()->id);
+        $dismantle->save();
 
         $this->notifications->dismantleCreated($dismantle);
 
@@ -133,13 +135,13 @@ class DismantleController extends Controller
 
         return response()->json([
             'message' => 'Dismantle berhasil dibuat.',
-            'data' => new DismantleResource($dismantle->load(['assignee', 'creator'])),
+            'data' => new DismantleResource($dismantle->load(['assignee', 'creator', 'clearer'])),
         ], 201);
     }
 
     public function show(Dismantle $dismantle): DismantleResource
     {
-        return new DismantleResource($dismantle->load('assignee', 'creator', 'customer'));
+        return new DismantleResource($dismantle->load('assignee', 'creator', 'clearer', 'customer'));
     }
 
     public function update(Request $request, Dismantle $dismantle): JsonResponse
@@ -158,7 +160,10 @@ class DismantleController extends Controller
         $nextStatus = $data['status'] ?? $dismantle->status;
         $this->assertNoOpenDuplicate($nextCode, $nextStatus, $dismantle->id);
 
-        $dismantle->update($data);
+        $previous = $dismantle->status;
+        $dismantle->fill($data);
+        $dismantle->syncClearAttribution($nextStatus, $request->user()->id, $previous);
+        $dismantle->save();
 
         $label = $dismantle->customer_name ?: ($dismantle->reference ?: '#'.$dismantle->id);
         $this->activity->log(
@@ -171,7 +176,7 @@ class DismantleController extends Controller
 
         return response()->json([
             'message' => 'Dismantle berhasil diperbarui.',
-            'data' => new DismantleResource($dismantle->fresh()->load(['assignee', 'creator'])),
+            'data' => new DismantleResource($dismantle->fresh()->load(['assignee', 'creator', 'clearer'])),
         ]);
     }
 

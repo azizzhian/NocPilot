@@ -27,6 +27,8 @@ class DismantleResource extends JsonResource
                 'name' => $this->assignee?->name,
             ]),
             'creator_name' => $this->creator?->name,
+            'clearer_name' => $this->clearer?->name,
+            'cleared_at' => $this->cleared_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

@@ -308,7 +308,8 @@ onMounted(() => {
             <th class="pb-3 pr-4 font-medium">Lokasi</th>
             <th class="pb-3 pr-4 font-medium">ID Pel</th>
             <th class="pb-3 pr-4 font-medium">Nama</th>
-            <th class="pb-3 pr-4 font-medium">NOC</th>
+            <th class="pb-3 pr-4 font-medium">Input oleh</th>
+            <th class="pb-3 pr-4 font-medium">Close oleh</th>
             <th class="pb-3 pr-4 font-medium">Status</th>
             <th class="pb-3 pr-4 font-medium">Open Ticket</th>
             <th class="pb-3 pr-4 font-medium">Close Ticket</th>
@@ -317,7 +318,7 @@ onMounted(() => {
         </thead>
         <tbody>
           <tr v-if="!items.length">
-            <td colspan="8" class="py-10 text-center text-muted">Belum ada data dismantle.</td>
+            <td colspan="9" class="py-10 text-center text-muted">Belum ada data dismantle.</td>
           </tr>
           <tr
             v-for="item in items"
@@ -327,7 +328,8 @@ onMounted(() => {
             <td class="py-3 pr-4">{{ item.location || '—' }}</td>
             <td class="py-3 pr-4 font-mono text-xs">{{ item.customer_code || '—' }}</td>
             <td class="py-3 pr-4 font-medium">{{ item.customer_name }}</td>
-            <td class="py-3 pr-4">{{ item.creator_name || '—' }}</td>
+            <td class="py-3 pr-4 text-xs">{{ item.creator_name || '—' }}</td>
+            <td class="py-3 pr-4 text-xs">{{ item.clearer_name || '—' }}</td>
             <td class="py-3 pr-4">
               <Badge :variant="statusVariant(item.status)">{{ item.status }}</Badge>
             </td>

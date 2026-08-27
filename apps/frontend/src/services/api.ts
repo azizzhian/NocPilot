@@ -514,6 +514,8 @@ export interface DismantleItem {
   notes: string | null
   assignee?: { id: number; name: string } | null
   creator_name?: string | null
+  clearer_name?: string | null
+  cleared_at?: string | null
   created_at: string | null
 }
 

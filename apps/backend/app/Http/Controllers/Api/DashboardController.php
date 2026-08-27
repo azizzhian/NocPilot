@@ -871,20 +871,18 @@ class DashboardController extends Controller
         return Dismantle::query()
             ->where('status', 'Clear')
             ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
-                $q->whereBetween('closed_at', [$fromDate, $toDate])
-                    ->orWhere(function ($q2) use ($from, $to) {
-                        $q2->whereNull('closed_at')
-                            ->whereBetween('completed_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
-                    })
+                $q->whereBetween('cleared_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()])
                     ->orWhere(function ($q2) use ($fromDate, $toDate) {
-                        $q2->whereNull('closed_at')
-                            ->whereNull('completed_at')
-                            ->whereBetween('opened_at', [$fromDate, $toDate]);
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('closed_at', [$fromDate, $toDate]);
+                    })
+                    ->orWhere(function ($q2) use ($from, $to) {
+                        $q2->whereNull('cleared_at')
+                            ->whereNull('closed_at')
+                            ->whereBetween('completed_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
                     });
             })
-            ->when($userId, fn ($q) => $q->where(function ($q2) use ($userId) {
-                $q2->where('assigned_to', $userId)->orWhere('created_by', $userId);
-            }))
+            ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
             ->when($odcName, fn ($q) => $this->scopeDismantleByOdc($q, $odcName))
             ->count();
     }
@@ -895,25 +893,23 @@ class DashboardController extends Controller
         $to = Carbon::parse($toDate)->endOfDay();
 
         return Dismantle::query()
-            ->select(DB::raw('COALESCE(assigned_to, created_by) as cleared_by'), DB::raw('COUNT(*) as total'))
+            ->select('cleared_by', DB::raw('COUNT(*) as total'))
             ->where('status', 'Clear')
+            ->whereNotNull('cleared_by')
             ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
-                $q->whereBetween('closed_at', [$fromDate, $toDate])
-                    ->orWhere(function ($q2) use ($from, $to) {
-                        $q2->whereNull('closed_at')
-                            ->whereBetween('completed_at', [$from, $to]);
-                    })
+                $q->whereBetween('cleared_at', [$from, $to])
                     ->orWhere(function ($q2) use ($fromDate, $toDate) {
-                        $q2->whereNull('closed_at')
-                            ->whereNull('completed_at')
-                            ->whereBetween('opened_at', [$fromDate, $toDate]);
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('closed_at', [$fromDate, $toDate]);
+                    })
+                    ->orWhere(function ($q2) use ($from, $to) {
+                        $q2->whereNull('cleared_at')
+                            ->whereNull('closed_at')
+                            ->whereBetween('completed_at', [$from, $to]);
                     });
             })
-            ->where(function ($q) {
-                $q->whereNotNull('assigned_to')->orWhereNotNull('created_by');
-            })
             ->when($odcName, fn ($q) => $this->scopeDismantleByOdc($q, $odcName))
-            ->groupBy(DB::raw('COALESCE(assigned_to, created_by)'))
+            ->groupBy('cleared_by')
             ->get()
             ->keyBy('cleared_by');
     }
@@ -1338,30 +1334,27 @@ class DashboardController extends Controller
 
         $dismantleHeatRows = Dismantle::query()
             ->select(
-                DB::raw('COALESCE(assigned_to, created_by) as cleared_by'),
-                DB::raw('DATE(COALESCE(closed_at, completed_at, opened_at)) as clear_date'),
+                'cleared_by',
+                DB::raw('DATE(COALESCE(cleared_at, closed_at, completed_at)) as clear_date'),
                 DB::raw('COUNT(*) as total'),
             )
             ->where('status', 'Clear')
+            ->whereNotNull('cleared_by')
             ->where(function ($q) use ($weekStart, $weekEnd) {
-                $q->whereBetween('closed_at', [$weekStart->toDateString(), $weekEnd->toDateString()])
+                $q->whereBetween('cleared_at', [$weekStart, $weekEnd])
                     ->orWhere(function ($q2) use ($weekStart, $weekEnd) {
-                        $q2->whereNull('closed_at')
-                            ->whereBetween('completed_at', [$weekStart, $weekEnd]);
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('closed_at', [$weekStart->toDateString(), $weekEnd->toDateString()]);
                     })
                     ->orWhere(function ($q2) use ($weekStart, $weekEnd) {
-                        $q2->whereNull('closed_at')
-                            ->whereNull('completed_at')
-                            ->whereBetween('opened_at', [$weekStart->toDateString(), $weekEnd->toDateString()]);
+                        $q2->whereNull('cleared_at')
+                            ->whereNull('closed_at')
+                            ->whereBetween('completed_at', [$weekStart, $weekEnd]);
                     });
             })
-            ->when($userId, function ($q) use ($userId) {
-                $q->where(function ($q2) use ($userId) {
-                    $q2->where('assigned_to', $userId)->orWhere('created_by', $userId);
-                });
-            })
+            ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
             ->when($odcName, fn ($q) => $this->scopeDismantleByOdc($q, $odcName))
-            ->groupBy(DB::raw('COALESCE(assigned_to, created_by)'), DB::raw('DATE(COALESCE(closed_at, completed_at, opened_at))'))
+            ->groupBy('cleared_by', DB::raw('DATE(COALESCE(cleared_at, closed_at, completed_at))'))
             ->get();
 
         foreach ($dismantleHeatRows as $row) {

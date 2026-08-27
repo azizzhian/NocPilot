@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'reference', 'customer_id', 'customer_name', 'location', 'customer_code',
     'phone', 'pppoe', 'package', 'area', 'reason', 'status',
     'opened_at', 'closed_at', 'scheduled_at', 'completed_at',
-    'assigned_to', 'notes', 'created_by',
+    'assigned_to', 'notes', 'created_by', 'cleared_by', 'cleared_at',
 ])]
 class Dismantle extends Model
 {
@@ -21,6 +21,7 @@ class Dismantle extends Model
             'closed_at' => 'date',
             'scheduled_at' => 'datetime',
             'completed_at' => 'datetime',
+            'cleared_at' => 'datetime',
         ];
     }
 
@@ -37,6 +38,31 @@ class Dismantle extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function clearer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cleared_by');
+    }
+
+    public function syncClearAttribution(string $newStatus, ?int $userId, ?string $previousStatus = null): void
+    {
+        if ($newStatus === 'Clear') {
+            if ($previousStatus !== 'Clear' || ! $this->cleared_by) {
+                $this->cleared_by = $userId;
+                $this->cleared_at = now();
+            }
+            if (! $this->closed_at) {
+                $this->closed_at = now()->toDateString();
+            }
+
+            return;
+        }
+
+        if ($previousStatus === 'Clear' || $this->cleared_by) {
+            $this->cleared_by = null;
+            $this->cleared_at = null;
+        }
     }
 
     public static function generateReference(): string

@@ -123,6 +123,8 @@ class DismantleImportService
             'opened_at' => $openedAt ?? now()->toDateString(),
             'closed_at' => $status === 'Clear' ? ($closedAt ?? now()->toDateString()) : $closedAt,
             'created_by' => $this->userId,
+            'cleared_by' => $status === 'Clear' ? $this->userId : null,
+            'cleared_at' => $status === 'Clear' ? now() : null,
         ]);
 
         $this->success++;
