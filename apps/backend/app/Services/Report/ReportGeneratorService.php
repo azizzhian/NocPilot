@@ -103,13 +103,7 @@ class ReportGeneratorService
     /** @return array<string, mixed> */
     private function nocContextRange(Carbon $from, Carbon $to): array
     {
-        $updates = DailyNocUpdate::query()
-            ->whereDate('report_date', '>=', $from->toDateString())
-            ->whereDate('report_date', '<=', $to->toDateString())
-            ->orderBy('sort_order')
-            ->get();
-        $onProgress = $updates->filter(fn ($u) => ! ReportStatus::isClear($u->status))->values();
-        $cleared = $updates->filter(fn ($u) => ReportStatus::isClear($u->status))->values();
+        [$onProgress, $cleared] = $this->nocUpdatesForPeriod($from, $to);
 
         $dismantles = DailyDismantle::query()
             ->whereDate('report_date', '>=', $from->toDateString())
@@ -148,19 +142,54 @@ class ReportGeneratorService
     /** @return array<string, mixed> */
     private function nocUpdateOnlyContext(Carbon $from, Carbon $to): array
     {
-        $updates = DailyNocUpdate::query()
-            ->whereDate('report_date', '>=', $from->toDateString())
-            ->whereDate('report_date', '<=', $to->toDateString())
-            ->orderBy('sort_order')
-            ->get();
-        $onProgress = $updates->filter(fn ($u) => ! ReportStatus::isClear($u->status))->values();
-        $cleared = $updates->filter(fn ($u) => ReportStatus::isClear($u->status))->values();
+        [$onProgress, $cleared] = $this->nocUpdatesForPeriod($from, $to);
 
         return [
             'noc_on_progress' => $onProgress->map(fn ($u) => ['description' => $u->description])->all(),
             'has_noc_cleared' => $cleared->isNotEmpty(),
             'noc_cleared' => $cleared->map(fn ($u) => ['description' => $u->description])->all(),
         ];
+    }
+
+    /**
+     * Update NOC untuk generate:
+     * - semua yang masih On-Progress (termasuk backlog hari sebelumnya)
+     * - yang Clear pada periode dipilih (cleared_at; fallback report_date bila cleared_at kosong)
+     *
+     * @return array{0: \Illuminate\Support\Collection<int, DailyNocUpdate>, 1: \Illuminate\Support\Collection<int, DailyNocUpdate>}
+     */
+    private function nocUpdatesForPeriod(Carbon $from, Carbon $to): array
+    {
+        $fromDate = $from->toDateString();
+        $toDate = $to->toDateString();
+        $fromStart = $from->copy()->startOfDay();
+        $toEnd = $to->copy()->endOfDay();
+
+        $onProgress = DailyNocUpdate::query()
+            ->where(function ($q) {
+                $q->whereNull('status')
+                    ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+            })
+            ->orderBy('sort_order')
+            ->orderBy('report_date')
+            ->orderBy('id')
+            ->get();
+
+        $cleared = DailyNocUpdate::query()
+            ->whereRaw('LOWER(status) = ?', [strtolower(ReportStatus::CLEAR)])
+            ->where(function ($q) use ($fromDate, $toDate, $fromStart, $toEnd) {
+                $q->whereBetween('cleared_at', [$fromStart, $toEnd])
+                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('report_date', [$fromDate, $toDate]);
+                    });
+            })
+            ->orderBy('sort_order')
+            ->orderBy('report_date')
+            ->orderBy('id')
+            ->get();
+
+        return [$onProgress, $cleared];
     }
 
     /** @return array<int, array<string, string>> */
