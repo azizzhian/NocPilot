@@ -37,7 +37,10 @@ return [
     |
     */
 
-    'guard' => ['web'],
+    // This frontend authenticates every API call with a personal access token.
+    // Do not let a leftover Laravel web-session cookie take precedence over the
+    // bearer token, or a request can be resolved as a previously logged-in user.
+    'guard' => [],
 
     /*
     |--------------------------------------------------------------------------
@@ -50,7 +53,8 @@ return [
     |
     */
 
-    'expiration' => null,
+    // Default to one 12-hour NOC shift. Override in .env when required.
+    'expiration' => (int) env('SANCTUM_EXPIRATION', 720),
 
     /*
     |--------------------------------------------------------------------------

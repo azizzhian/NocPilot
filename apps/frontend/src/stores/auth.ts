@@ -3,6 +3,10 @@ import { ref, computed } from 'vue'
 import type { UserRole } from '@/data/navigation'
 import { authApi, type ApiUser } from '@/services/api'
 
+const TOKEN_KEY = 'nocpilot_token'
+const TAB_ID_KEY = 'nocpilot_tab_id'
+const AUTH_SYNC_KEY = 'nocpilot_auth_sync'
+
 export interface User {
   id: number
   name: string
@@ -33,8 +37,13 @@ function mapUser(apiUser: ApiUser): User {
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
-  const token = ref<string | null>(localStorage.getItem('nocpilot_token'))
+  // A browser profile can have several NocPilot tabs. Keep each tab's account
+  // isolated so logging in/out in one tab cannot replace another tab's account.
+  const token = ref<string | null>(sessionStorage.getItem(TOKEN_KEY))
   const loading = ref(false)
+  let sessionVersion = 0
+  const tabId = sessionStorage.getItem(TAB_ID_KEY) ?? crypto.randomUUID()
+  sessionStorage.setItem(TAB_ID_KEY, tabId)
 
   const isAuthenticated = computed(() => !!token.value && !!user.value)
 
@@ -43,10 +52,43 @@ export const useAuthStore = defineStore('auth', () => {
   )
 
   function setSession(data: { token: string; user: ApiUser }) {
+    sessionVersion += 1
     token.value = data.token
     user.value = mapUser(data.user)
-    localStorage.setItem('nocpilot_token', data.token)
+    sessionStorage.setItem(TOKEN_KEY, data.token)
   }
+
+  function clearSession() {
+    sessionVersion += 1
+    token.value = null
+    user.value = null
+    sessionStorage.removeItem(TOKEN_KEY)
+  }
+
+  function notifyOtherTabs(type: 'login' | 'logout') {
+    localStorage.setItem(AUTH_SYNC_KEY, JSON.stringify({ type, source: tabId, at: Date.now() }))
+  }
+
+  function redirectToLogin() {
+    if (!window.location.pathname.includes('/login')) window.location.href = '/login'
+  }
+
+  window.addEventListener('storage', (event) => {
+    if (event.key !== AUTH_SYNC_KEY || !event.newValue) return
+
+    try {
+      const message = JSON.parse(event.newValue) as { source?: string; type?: string }
+      if (message.source === tabId || (message.type !== 'login' && message.type !== 'logout')) return
+      clearSession()
+      redirectToLogin()
+    } catch {
+      // Ignore malformed values written by an old client or browser extension.
+    }
+  })
+
+  window.addEventListener('nocpilot:auth-invalid', () => {
+    clearSession()
+  })
 
   function can(permission?: string | string[]): boolean {
     if (!permission) return true
@@ -62,6 +104,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const { data } = await authApi.login(username, password)
       setSession(data)
+      notifyOtherTabs('login')
       return true
     } finally {
       loading.value = false
@@ -73,6 +116,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const { data } = await authApi.loginTelegram(payload)
       setSession(data)
+      notifyOtherTabs('login')
       return true
     } finally {
       loading.value = false
@@ -80,15 +124,16 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function fetchUser() {
-    if (!token.value) return false
+    const expectedToken = token.value
+    const expectedVersion = sessionVersion
+    if (!expectedToken) return false
     try {
       const { data } = await authApi.me()
+      if (token.value !== expectedToken || sessionVersion !== expectedVersion) return false
       user.value = mapUser(data.user)
       return true
     } catch {
-      token.value = null
-      user.value = null
-      localStorage.removeItem('nocpilot_token')
+      if (token.value === expectedToken && sessionVersion === expectedVersion) clearSession()
       return false
     }
   }
@@ -100,16 +145,21 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
+    const currentToken = token.value
+    // Invalidate this tab immediately, so a pending /auth/me response from the
+    // prior user cannot restore that user while logout is in flight.
+    clearSession()
+    notifyOtherTabs('logout')
     try {
-      if (token.value) await authApi.logout()
-    } finally {
-      token.value = null
-      user.value = null
-      localStorage.removeItem('nocpilot_token')
+      if (currentToken) await authApi.logout(currentToken)
+    } catch {
+      // Local logout must still succeed if the server token has already expired.
     }
   }
 
   async function init() {
+    // Remove the legacy shared token once. Tokens now belong to a browser tab.
+    localStorage.removeItem(TOKEN_KEY)
     if (token.value && !user.value) {
       return fetchUser()
     }

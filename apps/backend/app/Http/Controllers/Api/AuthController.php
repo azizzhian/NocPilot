@@ -9,7 +9,6 @@ use App\Services\Audit\ActivityLogger;
 use App\Services\Auth\TelegramAuthVerifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -163,8 +162,11 @@ class AuthController extends Controller
             ]);
         }
 
-        Auth::login($user);
         $user->forceFill(['last_login_at' => now()])->save();
+        // One account is allowed one active API session. This also makes a
+        // freshly issued token immediately invalidate any token left behind on
+        // a shared NOC workstation.
+        $user->tokens()->delete();
         $token = $user->createToken('nocpilot-api')->plainTextToken;
         $this->activity->log('login', $message, $user, $request);
 

@@ -212,7 +212,8 @@ export const authApi = {
   me: () => api.get<{ user: ApiUser }>('/auth/me'),
   updateProfile: (data: Record<string, unknown>) =>
     api.put<{ message: string; user: ApiUser }>('/auth/profile', data),
-  logout: () => api.post('/auth/logout'),
+  logout: (token?: string) =>
+    api.post('/auth/logout', undefined, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined),
 }
 
 export const dashboardApi = {
