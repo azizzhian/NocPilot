@@ -37,9 +37,8 @@ return [
     |
     */
 
-    // This frontend authenticates every API call with a personal access token.
-    // Do not let a leftover Laravel web-session cookie take precedence over the
-    // bearer token, or a request can be resolved as a previously logged-in user.
+    // Frontend SPA autentikasi lewat bearer token. Jangan prioritaskan guard web
+    // (cookie session), agar token bearer selalu yang dipakai.
     'guard' => [],
 
     /*
@@ -53,8 +52,10 @@ return [
     |
     */
 
-    // Default to one 12-hour NOC shift. Override in .env when required.
-    'expiration' => (int) env('SANCTUM_EXPIRATION', 720),
+    // Default 12 jam (1 shift NOC). Override lewat SANCTUM_EXPIRATION di .env.
+    'expiration' => env('SANCTUM_EXPIRATION') !== null && env('SANCTUM_EXPIRATION') !== ''
+        ? (int) env('SANCTUM_EXPIRATION')
+        : 720,
 
     /*
     |--------------------------------------------------------------------------

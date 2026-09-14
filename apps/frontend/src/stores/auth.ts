@@ -4,8 +4,6 @@ import type { UserRole } from '@/data/navigation'
 import { authApi, type ApiUser } from '@/services/api'
 
 const TOKEN_KEY = 'nocpilot_token'
-const TAB_ID_KEY = 'nocpilot_tab_id'
-const AUTH_SYNC_KEY = 'nocpilot_auth_sync'
 
 export interface User {
   id: number
@@ -35,15 +33,17 @@ function mapUser(apiUser: ApiUser): User {
   }
 }
 
+function redirectToLogin() {
+  if (!window.location.pathname.includes('/login')) {
+    window.location.href = '/login'
+  }
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
-  // A browser profile can have several NocPilot tabs. Keep each tab's account
-  // isolated so logging in/out in one tab cannot replace another tab's account.
-  const token = ref<string | null>(sessionStorage.getItem(TOKEN_KEY))
+  const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
   const loading = ref(false)
-  let sessionVersion = 0
-  const tabId = sessionStorage.getItem(TAB_ID_KEY) ?? crypto.randomUUID()
-  sessionStorage.setItem(TAB_ID_KEY, tabId)
+  let syncBound = false
 
   const isAuthenticated = computed(() => !!token.value && !!user.value)
 
@@ -52,43 +52,45 @@ export const useAuthStore = defineStore('auth', () => {
   )
 
   function setSession(data: { token: string; user: ApiUser }) {
-    sessionVersion += 1
     token.value = data.token
     user.value = mapUser(data.user)
-    sessionStorage.setItem(TOKEN_KEY, data.token)
+    localStorage.setItem(TOKEN_KEY, data.token)
   }
 
   function clearSession() {
-    sessionVersion += 1
     token.value = null
     user.value = null
-    sessionStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(TOKEN_KEY)
   }
 
-  function notifyOtherTabs(type: 'login' | 'logout') {
-    localStorage.setItem(AUTH_SYNC_KEY, JSON.stringify({ type, source: tabId, at: Date.now() }))
-  }
+  function bindSessionSync() {
+    if (syncBound || typeof window === 'undefined') return
+    syncBound = true
 
-  function redirectToLogin() {
-    if (!window.location.pathname.includes('/login')) window.location.href = '/login'
-  }
+    // Tab lain login/logout → tab ini ikut sync (storage event hanya di tab lain)
+    window.addEventListener('storage', (event) => {
+      if (event.key !== TOKEN_KEY) return
 
-  window.addEventListener('storage', (event) => {
-    if (event.key !== AUTH_SYNC_KEY || !event.newValue) return
+      if (!event.newValue) {
+        clearSession()
+        redirectToLogin()
+        return
+      }
 
-    try {
-      const message = JSON.parse(event.newValue) as { source?: string; type?: string }
-      if (message.source === tabId || (message.type !== 'login' && message.type !== 'logout')) return
+      if (event.newValue === token.value) return
+
+      token.value = event.newValue
+      void fetchUser().then((ok) => {
+        if (!ok) redirectToLogin()
+      })
+    })
+
+    // 401 dari axios interceptor
+    window.addEventListener('nocpilot:auth-invalid', () => {
       clearSession()
       redirectToLogin()
-    } catch {
-      // Ignore malformed values written by an old client or browser extension.
-    }
-  })
-
-  window.addEventListener('nocpilot:auth-invalid', () => {
-    clearSession()
-  })
+    })
+  }
 
   function can(permission?: string | string[]): boolean {
     if (!permission) return true
@@ -99,12 +101,11 @@ export const useAuthStore = defineStore('auth', () => {
     return needed.some((p) => have.has(p))
   }
 
-  async function login(username: string, password: string) {
+  async function login(username: string, password: string, captchaId: string, captchaAnswer: string | number) {
     loading.value = true
     try {
-      const { data } = await authApi.login(username, password)
+      const { data } = await authApi.login(username, password, captchaId, captchaAnswer)
       setSession(data)
-      notifyOtherTabs('login')
       return true
     } finally {
       loading.value = false
@@ -116,7 +117,6 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const { data } = await authApi.loginTelegram(payload)
       setSession(data)
-      notifyOtherTabs('login')
       return true
     } finally {
       loading.value = false
@@ -124,16 +124,13 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function fetchUser() {
-    const expectedToken = token.value
-    const expectedVersion = sessionVersion
-    if (!expectedToken) return false
+    if (!token.value) return false
     try {
       const { data } = await authApi.me()
-      if (token.value !== expectedToken || sessionVersion !== expectedVersion) return false
       user.value = mapUser(data.user)
       return true
     } catch {
-      if (token.value === expectedToken && sessionVersion === expectedVersion) clearSession()
+      clearSession()
       return false
     }
   }
@@ -145,21 +142,17 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
-    const currentToken = token.value
-    // Invalidate this tab immediately, so a pending /auth/me response from the
-    // prior user cannot restore that user while logout is in flight.
-    clearSession()
-    notifyOtherTabs('logout')
     try {
-      if (currentToken) await authApi.logout(currentToken)
+      if (token.value) await authApi.logout()
     } catch {
-      // Local logout must still succeed if the server token has already expired.
+      // tetap logout lokal walau token sudah invalid di server
+    } finally {
+      clearSession()
     }
   }
 
   async function init() {
-    // Remove the legacy shared token once. Tokens now belong to a browser tab.
-    localStorage.removeItem(TOKEN_KEY)
+    bindSessionSync()
     if (token.value && !user.value) {
       return fetchUser()
     }
@@ -179,5 +172,6 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     fetchUser,
     init,
+    clearSession,
   }
 })

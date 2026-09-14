@@ -203,8 +203,14 @@ export interface DashboardStats {
 }
 
 export const authApi = {
-  login: (username: string, password: string) =>
-    api.post<LoginResponse>('/auth/login', { username, password }),
+  captcha: () => api.get<{ captcha_id: string; question: string }>('/auth/captcha'),
+  login: (username: string, password: string, captchaId: string, captchaAnswer: string | number) =>
+    api.post<LoginResponse>('/auth/login', {
+      username,
+      password,
+      captcha_id: captchaId,
+      captcha_answer: captchaAnswer,
+    }),
   telegramConfig: () =>
     api.get<{ enabled: boolean; bot_username: string | null }>('/auth/telegram-config'),
   loginTelegram: (payload: Record<string, unknown>) =>
@@ -212,8 +218,7 @@ export const authApi = {
   me: () => api.get<{ user: ApiUser }>('/auth/me'),
   updateProfile: (data: Record<string, unknown>) =>
     api.put<{ message: string; user: ApiUser }>('/auth/profile', data),
-  logout: (token?: string) =>
-    api.post('/auth/logout', undefined, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined),
+  logout: () => api.post('/auth/logout'),
 }
 
 export const dashboardApi = {

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\Audit\ActivityLogger;
+use App\Services\Auth\LoginMathCaptcha;
 use App\Services\Auth\TelegramAuthVerifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,7 @@ class AuthController extends Controller
     public function __construct(
         private ActivityLogger $activity,
         private TelegramAuthVerifier $telegramVerifier,
+        private LoginMathCaptcha $mathCaptcha,
     ) {}
 
     public function telegramConfig(): JsonResponse
@@ -32,12 +34,24 @@ class AuthController extends Controller
         ]);
     }
 
+    public function captcha(): JsonResponse
+    {
+        return response()->json($this->mathCaptcha->issue());
+    }
+
     public function login(Request $request): JsonResponse
     {
         $credentials = $request->validate([
             'username' => ['required', 'string', 'max:100'],
             'password' => ['required', 'string'],
+            'captcha_id' => ['required', 'string', 'max:64'],
+            'captcha_answer' => ['required'],
         ]);
+
+        $this->mathCaptcha->assertValid(
+            $credentials['captcha_id'],
+            $credentials['captcha_answer'],
+        );
 
         $username = strtolower(trim($credentials['username']));
         $user = User::query()->whereRaw('LOWER(username) = ?', [$username])->first();
@@ -162,10 +176,9 @@ class AuthController extends Controller
             ]);
         }
 
+        // SPA memakai bearer token; jangan buat web session cookie supaya
+        // request tidak terselesaikan sebagai user lain dari cookie lama.
         $user->forceFill(['last_login_at' => now()])->save();
-        // One account is allowed one active API session. This also makes a
-        // freshly issued token immediately invalidate any token left behind on
-        // a shared NOC workstation.
         $user->tokens()->delete();
         $token = $user->createToken('nocpilot-api')->plainTextToken;
         $this->activity->log('login', $message, $user, $request);

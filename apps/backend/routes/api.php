@@ -31,6 +31,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::get('/auth/captcha', [AuthController::class, 'captcha']);
     Route::get('/auth/telegram-config', [AuthController::class, 'telegramConfig']);
     Route::post('/auth/telegram', [AuthController::class, 'loginTelegram']);
 

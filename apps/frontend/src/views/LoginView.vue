@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { Zap, Eye, EyeOff, User, Lock } from 'lucide-vue-next'
+import { Zap, Eye, EyeOff, User, Lock, RefreshCw } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { authApi } from '@/services/api'
 
@@ -21,6 +21,10 @@ const loading = ref(false)
 const error = ref('')
 const telegramEnabled = ref(false)
 const telegramContainer = ref<HTMLElement | null>(null)
+const captchaId = ref('')
+const captchaQuestion = ref('')
+const captchaAnswer = ref('')
+const captchaLoading = ref(false)
 
 function extractError(e: unknown, fallback: string): string {
   const err = e as {
@@ -39,14 +43,42 @@ function extractError(e: unknown, fallback: string): string {
   return err.response?.data?.message ?? fallback
 }
 
+async function loadCaptcha() {
+  captchaLoading.value = true
+  try {
+    const { data } = await authApi.captcha()
+    captchaId.value = data.captcha_id
+    captchaQuestion.value = data.question
+    captchaAnswer.value = ''
+  } catch {
+    captchaId.value = ''
+    captchaQuestion.value = ''
+    error.value = 'Gagal memuat captcha. Muat ulang halaman.'
+  } finally {
+    captchaLoading.value = false
+  }
+}
+
 async function handleLogin() {
+  const answer = String(captchaAnswer.value ?? '').trim()
+  if (!captchaId.value || answer === '') {
+    error.value = 'Isi jawaban captcha terlebih dahulu.'
+    return
+  }
+
   loading.value = true
   error.value = ''
   try {
-    const success = await authStore.login(username.value, password.value)
+    const success = await authStore.login(
+      username.value,
+      password.value,
+      captchaId.value,
+      answer,
+    )
     if (success) router.push('/')
   } catch (e: unknown) {
     error.value = extractError(e, 'Username atau password salah')
+    await loadCaptcha()
   } finally {
     loading.value = false
   }
@@ -67,6 +99,7 @@ async function handleTelegramAuth(user: Record<string, unknown>) {
 
 onMounted(async () => {
   window.onTelegramAuth = handleTelegramAuth
+  await loadCaptcha()
   try {
     const { data } = await authApi.telegramConfig()
     telegramEnabled.value = data.enabled && !!data.bot_username
@@ -156,9 +189,44 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <div class="login-field">
+          <label for="login-captcha">Captcha</label>
+          <div class="login-captcha-row">
+            <div class="login-captcha-question" aria-live="polite">
+              {{ captchaLoading ? '...' : (captchaQuestion ? `${captchaQuestion} =` : '—') }}
+            </div>
+            <div class="login-input-wrap login-captcha-input">
+              <input
+                id="login-captcha"
+                v-model="captchaAnswer"
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                autocomplete="off"
+                placeholder="Jawaban"
+                class="login-input"
+                required
+              />
+            </div>
+            <button
+              type="button"
+              class="login-captcha-refresh"
+              title="Muat ulang captcha"
+              :disabled="captchaLoading || loading"
+              @click="loadCaptcha"
+            >
+              <RefreshCw class="h-4 w-4" :class="captchaLoading ? 'animate-spin' : ''" />
+            </button>
+          </div>
+        </div>
+
         <p v-if="error" class="login-error">{{ error }}</p>
 
-        <button type="submit" class="login-submit" :disabled="loading">
+        <button
+          type="submit"
+          class="login-submit"
+          :disabled="loading || captchaLoading || !captchaId"
+        >
           {{ loading ? 'Memproses...' : 'Masuk' }}
         </button>
       </form>
@@ -414,6 +482,54 @@ onBeforeUnmount(() => {
 
 .login-eye:hover {
   color: #475569;
+}
+
+.login-captcha-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.login-captcha-question {
+  display: flex;
+  min-width: 5.5rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.75rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--login-border);
+  background: #f8fafc;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--login-text);
+  white-space: nowrap;
+}
+
+.login-captcha-input {
+  flex: 1;
+}
+
+.login-captcha-refresh {
+  display: inline-flex;
+  width: 3rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--login-border);
+  border-radius: 0.9rem;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.login-captcha-refresh:hover:not(:disabled) {
+  color: var(--login-accent);
+  background: #f8fafc;
+}
+
+.login-captcha-refresh:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .login-error {

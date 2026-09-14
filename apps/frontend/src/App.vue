@@ -1,102 +1,100 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { RouterView } from 'vue-router'
+import { RouterView, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import Button from '@/components/ui/Button.vue'
 
-const IDLE_TIMEOUT_MS = 60 * 60 * 1000
-const WARNING_BEFORE_MS = 2 * 60 * 1000
-const activityEvents = ['pointerdown', 'keydown', 'touchstart', 'scroll'] as const
+const IDLE_MS = 60 * 60 * 1000
+const WARN_BEFORE_MS = 2 * 60 * 1000
+const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'touchstart', 'scroll'] as const
 
 const auth = useAuthStore()
+const router = useRouter()
 const showIdleWarning = ref(false)
-let warningTimer: number | undefined
-let logoutTimer: number | undefined
 
-function clearIdleTimers() {
-  if (warningTimer) window.clearTimeout(warningTimer)
-  if (logoutTimer) window.clearTimeout(logoutTimer)
-  warningTimer = undefined
+let warnTimer: ReturnType<typeof setTimeout> | undefined
+let logoutTimer: ReturnType<typeof setTimeout> | undefined
+
+function clearTimers() {
+  if (warnTimer) clearTimeout(warnTimer)
+  if (logoutTimer) clearTimeout(logoutTimer)
+  warnTimer = undefined
   logoutTimer = undefined
 }
 
-function stopIdleTracking() {
-  clearIdleTimers()
+function stopIdleWatch() {
+  clearTimers()
   showIdleWarning.value = false
 }
 
 function scheduleIdleLogout() {
-  clearIdleTimers()
+  clearTimers()
   if (!auth.isAuthenticated) return
 
   showIdleWarning.value = false
-  warningTimer = window.setTimeout(() => {
+  warnTimer = setTimeout(() => {
     showIdleWarning.value = true
-  }, IDLE_TIMEOUT_MS - WARNING_BEFORE_MS)
-  logoutTimer = window.setTimeout(async () => {
+  }, IDLE_MS - WARN_BEFORE_MS)
+
+  logoutTimer = setTimeout(async () => {
     showIdleWarning.value = false
     await auth.logout()
-    window.location.href = '/login'
-  }, IDLE_TIMEOUT_MS)
+    await router.replace('/login')
+  }, IDLE_MS)
 }
 
-function registerActivity() {
-  if (auth.isAuthenticated) scheduleIdleLogout()
+function onActivity() {
+  if (!auth.isAuthenticated) return
+  // Jangan reset timer saat dialog warning terbuka — user harus klik "Tetap masuk"
+  if (showIdleWarning.value) return
+  scheduleIdleLogout()
 }
 
 watch(
   () => auth.isAuthenticated,
-  (isAuthenticated) => {
-    if (isAuthenticated) scheduleIdleLogout()
-    else stopIdleTracking()
+  (ok) => {
+    if (ok) scheduleIdleLogout()
+    else stopIdleWatch()
   },
 )
 
-onMounted(() => activityEvents.forEach((event) => window.addEventListener(event, registerActivity, { passive: true })))
+onMounted(() => {
+  ACTIVITY_EVENTS.forEach((event) => {
+    window.addEventListener(event, onActivity, { passive: true })
+  })
+  if (auth.isAuthenticated) scheduleIdleLogout()
+})
+
 onBeforeUnmount(() => {
-  activityEvents.forEach((event) => window.removeEventListener(event, registerActivity))
-  stopIdleTracking()
+  ACTIVITY_EVENTS.forEach((event) => {
+    window.removeEventListener(event, onActivity)
+  })
+  stopIdleWatch()
 })
 </script>
 
 <template>
   <RouterView />
-  <div v-if="showIdleWarning" class="idle-warning" role="alertdialog" aria-modal="true">
-    <div class="idle-warning__card">
-      <h2>Sesi akan berakhir</h2>
-      <p>Tidak ada aktivitas selama 58 menit. Anda akan logout otomatis dalam 2 menit.</p>
-      <button type="button" @click="scheduleIdleLogout">Tetap masuk</button>
+
+  <Teleport to="body">
+    <div
+      v-if="showIdleWarning"
+      class="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-900/55 p-6"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="idle-warning-title"
+    >
+      <div class="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-xl">
+        <h2 id="idle-warning-title" class="text-lg font-semibold text-foreground">
+          Sesi akan berakhir
+        </h2>
+        <p class="mt-2 text-sm text-muted">
+          Tidak ada aktivitas selama 58 menit. Anda akan logout otomatis dalam 2 menit.
+        </p>
+        <div class="mt-5 flex justify-end">
+          <Button type="button" @click="scheduleIdleLogout">Tetap masuk</Button>
+        </div>
+      </div>
     </div>
-  </div>
+  </Teleport>
 </template>
-
-<style scoped>
-.idle-warning {
-  position: fixed;
-  z-index: 10000;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 1.5rem;
-  background: rgb(15 23 42 / 0.55);
-}
-
-.idle-warning__card {
-  width: min(100%, 25rem);
-  padding: 1.5rem;
-  border-radius: 0.75rem;
-  background: #fff;
-  color: #0f172a;
-  box-shadow: 0 1.5rem 4rem rgb(15 23 42 / 0.3);
-}
-
-.idle-warning__card h2 { margin: 0 0 0.5rem; font-size: 1.125rem; }
-.idle-warning__card p { margin: 0 0 1rem; line-height: 1.5; }
-.idle-warning__card button {
-  border: 0;
-  border-radius: 0.5rem;
-  padding: 0.625rem 1rem;
-  background: #2563eb;
-  color: #fff;
-  cursor: pointer;
-}
-</style>
