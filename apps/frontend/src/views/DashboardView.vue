@@ -10,19 +10,14 @@ import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { dashboardApi, odcApi, type DashboardStats, type DashboardSpecialist } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
-import { useAppStore } from '@/stores/app'
 import { todayInput } from '@/lib/date-input'
 import { Activity, Trophy, Award, Cable } from 'lucide-vue-next'
 
 const auth = useAuthStore()
-const appStore = useAppStore()
 const fromDate = ref(todayInput())
 const toDate = ref(todayInput())
 const userId = ref<number | ''>('')
 const odcName = ref('')
-const complaintOdcName = ref('')
-const clientShareSource = ref<'all' | 'complaint' | 'ticket'>('all')
-const complaintView = ref<'pie' | 'bars'>('bars')
 const odcs = ref<{ id: number; name: string }[]>([])
 const loading = ref(true)
 
@@ -32,13 +27,6 @@ const kpis = ref<DashboardStats['kpis']>([])
 const specialists = ref<DashboardSpecialist[]>([])
 const nocPerformance = ref<DashboardStats['noc_performance']>([])
 const odcStats = ref<NonNullable<DashboardStats['odc_stats']>>([])
-const complaintClientShare = ref<NonNullable<DashboardStats['complaint_client_share']>>({
-  total: 0,
-  complaints_total: 0,
-  tickets_total: 0,
-  source: 'all',
-  rows: [],
-})
 const charts = ref<DashboardStats['charts'] | null>(null)
 const heatmap = ref<DashboardStats['heatmap']>({ days: [], rows: [] })
 const recentActivities = ref<DashboardStats['recent_activities']>([])
@@ -71,6 +59,16 @@ const emptyCharts = (): DashboardStats['charts'] => ({
       { name: 'CCTV', data: [], color: '#9B59B6' },
     ],
   },
+  stacked_by_odc: {
+    categories: [],
+    series: [
+      { name: 'Komplain', data: [], color: '#EF4444' },
+      { name: 'Aktivasi', data: [], color: '#22C55E' },
+      { name: 'Ticket', data: [], color: '#3498DB' },
+      { name: 'Dismantle', data: [], color: '#E67E22' },
+      { name: 'CCTV', data: [], color: '#9B59B6' },
+    ],
+  },
   clear_by_type: { categories: [], series: [{ name: 'Clear', data: [] }], colors: [] },
   contribution: { categories: [], series: [{ name: 'Kontribusi', data: [] }], colors: [] },
 })
@@ -82,6 +80,7 @@ const subtitle = computed(() =>
 )
 
 const stacked = computed(() => charts.value?.stacked_by_noc ?? emptyCharts().stacked_by_noc!)
+const stackedOdc = computed(() => charts.value?.stacked_by_odc ?? emptyCharts().stacked_by_odc!)
 const contribution = computed(() => charts.value?.contribution ?? emptyCharts().contribution!)
 
 const medal = (idx: number) => {
@@ -126,85 +125,6 @@ function rankLabel(page: number, idx: number) {
   return medal((page - 1) * listPerPage + idx)
 }
 
-const complaintBarRows = computed(() => complaintClientShare.value.rows.slice(0, 10))
-
-const complaintShareMaxPct = computed(() =>
-  Math.max(1, ...(complaintBarRows.value.map((r) => r.pct) || [0])),
-)
-
-const complaintTypePie = computed(() => {
-  const complaints = complaintClientShare.value.complaints_total ?? 0
-  const tickets = complaintClientShare.value.tickets_total ?? 0
-  const slices = [
-    { label: 'Komplain', value: complaints },
-    { label: 'Tiket', value: tickets },
-  ].filter((s) => s.value > 0)
-
-  return {
-    categories: slices.map((s) => s.label),
-    series: slices.map((s) => s.value),
-    colors: slices.map((s) => (s.label === 'Komplain' ? '#EF4444' : '#3498DB')),
-    total: complaints + tickets,
-  }
-})
-
-const complaintPieOptions = computed(() => ({
-  chart: {
-    type: 'pie' as const,
-    toolbar: { show: false },
-    fontFamily: 'Inter, sans-serif',
-    background: 'transparent',
-    animations: { enabled: true, easing: 'easeinout', speed: 800 },
-  },
-  labels: complaintTypePie.value.categories,
-  colors: complaintTypePie.value.colors,
-  dataLabels: {
-    enabled: true,
-    formatter: (val: number) => `${Math.round(val)}%`,
-  },
-  legend: {
-    position: 'bottom' as const,
-    labels: { colors: '#94a3b8' },
-  },
-  stroke: { width: 0 },
-  tooltip: {
-    theme: (appStore.isDark ? 'dark' : 'light') as 'dark' | 'light',
-    y: {
-      formatter: (val: number) => `${val}x`,
-    },
-  },
-}))
-
-const complaintShareSubtitle = computed(() => {
-  const total = complaintClientShare.value.total
-  const c = complaintClientShare.value.complaints_total ?? 0
-  const t = complaintClientShare.value.tickets_total ?? 0
-  if (clientShareSource.value === 'complaint') {
-    return total ? `Top 10 client komplain · total ${total}` : 'Top 10 client berdasarkan komplain'
-  }
-  if (clientShareSource.value === 'ticket') {
-    return total ? `Top 10 client tiket · total ${total}` : 'Top 10 client berdasarkan tiket'
-  }
-  return total
-    ? `Top 10 client · total ${total} (Komplain ${c} · Tiket ${t})`
-    : 'Top 10 client berdasarkan komplain & tiket'
-})
-
-function clientShareMeta(row: NonNullable<DashboardStats['complaint_client_share']>['rows'][number]) {
-  const parts: string[] = []
-  parts.push(row.customer_code || (row.is_gamas ? 'Gamas' : '—'))
-  if (row.odc_name) parts.push(row.odc_name)
-  if (clientShareSource.value === 'all') {
-    parts.push(`Komplain ${row.complaints_count ?? 0}x`)
-    parts.push(`Tiket ${row.tickets_count ?? 0}x`)
-  } else if (clientShareSource.value === 'complaint') {
-    parts.push(`Komplain ${row.complaints_count ?? row.count}x`)
-  } else {
-    parts.push(`Tiket ${row.tickets_count ?? row.count}x`)
-  }
-  return parts.join(' · ')
-}
-
 async function loadOdcs() {
   try {
     const res = await odcApi.list({ per_page: 200 })
@@ -217,8 +137,8 @@ async function loadOdcs() {
   }
 }
 
-async function load(opts?: { soft?: boolean }) {
-  if (!opts?.soft) loading.value = true
+async function load() {
+  loading.value = true
   try {
     const { data } = await dashboardApi.stats({
       period: 'custom',
@@ -226,8 +146,6 @@ async function load(opts?: { soft?: boolean }) {
       to: toDate.value,
       user_id: userId.value === '' ? undefined : Number(userId.value),
       odc_name: odcName.value || undefined,
-      complaint_odc_name: complaintOdcName.value || undefined,
-      client_share_source: clientShareSource.value,
     })
     periodLabel.value = data.period.label
     periodDays.value = data.period.days ?? 1
@@ -235,48 +153,28 @@ async function load(opts?: { soft?: boolean }) {
     specialists.value = data.specialists ?? []
     nocPerformance.value = data.noc_performance
     odcStats.value = data.odc_stats ?? []
-    complaintClientShare.value = data.complaint_client_share ?? {
-      total: 0,
-      complaints_total: 0,
-      tickets_total: 0,
-      source: clientShareSource.value,
-      rows: [],
-    }
     odcPage.value = 1
     charts.value = data.charts ?? emptyCharts()
     heatmap.value = data.heatmap ?? { days: [], rows: [] }
     recentActivities.value = data.recent_activities
     nocUsers.value = data.noc_users
   } catch {
-    if (!opts?.soft) {
-      periodLabel.value = ''
-      periodDays.value = 1
-      kpis.value = []
-      specialists.value = []
-      nocPerformance.value = []
-      odcStats.value = []
-      charts.value = emptyCharts()
-      heatmap.value = { days: [], rows: [] }
-      recentActivities.value = []
-    }
-    complaintClientShare.value = {
-      total: 0,
-      complaints_total: 0,
-      tickets_total: 0,
-      source: clientShareSource.value,
-      rows: [],
-    }
+    periodLabel.value = ''
+    periodDays.value = 1
+    kpis.value = []
+    specialists.value = []
+    nocPerformance.value = []
+    odcStats.value = []
+    charts.value = emptyCharts()
+    heatmap.value = { days: [], rows: [] }
+    recentActivities.value = []
   } finally {
-    if (!opts?.soft) loading.value = false
+    loading.value = false
   }
 }
 
 watch([fromDate, toDate, userId, odcName], () => {
   void load()
-})
-
-watch([complaintOdcName, clientShareSource], () => {
-  void load({ soft: true })
 })
 
 onMounted(async () => {
@@ -462,7 +360,7 @@ onMounted(async () => {
       />
     </div>
 
-    <!-- 4b. Statistik ODC + Persentase client komplain -->
+    <!-- 4b. Statistik ODC + stacked bar ODC -->
     <div v-if="!loading && showNocPerformance" class="mt-6 grid gap-6 xl:grid-cols-2">
       <Card class="p-5">
         <div class="mb-4">
@@ -530,97 +428,16 @@ onMounted(async () => {
         <p v-else-if="!odcStats.length" class="py-8 text-center text-sm text-muted">Belum ada data ODC di periode ini.</p>
       </Card>
 
-      <Card class="p-5">
-        <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 class="text-sm font-semibold text-foreground">Persentase Client</h3>
-            <p class="mt-1 text-xs text-muted">{{ complaintShareSubtitle }}</p>
-          </div>
-          <div class="flex flex-wrap items-end gap-3">
-            <div>
-              <label class="mb-1.5 block text-xs font-medium text-muted">Sumber</label>
-              <Select v-model="clientShareSource" class="w-36">
-                <option value="all">Semua</option>
-                <option value="complaint">Komplain</option>
-                <option value="ticket">Tiket</option>
-              </Select>
-            </div>
-            <div>
-              <label class="mb-1.5 block text-xs font-medium text-muted">Tampilan</label>
-              <div class="flex gap-1 rounded-xl border border-border p-1">
-                <button
-                  type="button"
-                  :class="[
-                    'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-                    complaintView === 'bars' ? 'bg-primary text-white' : 'text-muted hover:bg-muted',
-                  ]"
-                  @click="complaintView = 'bars'"
-                >
-                  Bar
-                </button>
-                <button
-                  type="button"
-                  :class="[
-                    'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-                    complaintView === 'pie' ? 'bg-primary text-white' : 'text-muted hover:bg-muted',
-                  ]"
-                  @click="complaintView = 'pie'"
-                >
-                  Pie
-                </button>
-              </div>
-            </div>
-            <div>
-              <label class="mb-1.5 block text-xs font-medium text-muted">Filter ODC</label>
-              <Select v-model="complaintOdcName" class="w-44">
-                <option value="">Semua ODC</option>
-                <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
-              </Select>
-            </div>
-          </div>
-        </div>
-
-        <template v-if="complaintView === 'bars'">
-          <div v-if="complaintBarRows.length" class="space-y-3">
-            <div
-              v-for="(row, idx) in complaintBarRows"
-              :key="row.key"
-              class="space-y-1"
-            >
-              <div class="flex items-start justify-between gap-3 text-sm">
-                <div class="min-w-0">
-                  <p class="truncate font-medium text-foreground">
-                    <span class="mr-1.5 text-muted">{{ medal(idx) }}</span>{{ row.name }}
-                  </p>
-                  <p class="truncate text-[11px] text-muted">
-                    {{ clientShareMeta(row) }}
-                  </p>
-                </div>
-                <p class="shrink-0 text-sm font-semibold text-danger">{{ row.pct }}%</p>
-              </div>
-              <div class="h-2 overflow-hidden rounded-full bg-muted/40">
-                <div
-                  class="h-full rounded-full bg-danger/80 transition-all"
-                  :style="{ width: `${Math.max(4, (row.pct / complaintShareMaxPct) * 100)}%` }"
-                />
-              </div>
-            </div>
-          </div>
-          <p v-else class="py-10 text-center text-sm text-muted">Belum ada data di periode ini.</p>
-        </template>
-
-        <template v-else>
-          <div v-if="complaintTypePie.total > 0" class="-mx-1 -mb-1">
-            <VueApexCharts
-              type="pie"
-              :height="300"
-              :options="complaintPieOptions"
-              :series="complaintTypePie.series"
-            />
-          </div>
-          <p v-else class="py-10 text-center text-sm text-muted">Belum ada data di periode ini.</p>
-        </template>
-      </Card>
+      <ChartCard
+        title="Performa ODC per Kategori"
+        subtitle="Stacked bar — clear per ODC (top 20)"
+        :categories="stackedOdc.categories"
+        :series="stackedOdc.series"
+        type="bar"
+        horizontal
+        stacked
+        :height="Math.max(240, (stackedOdc.categories.length || 1) * 42 + 90)"
+      />
     </div>
 
     <!-- 5. Heatmap NOC -->

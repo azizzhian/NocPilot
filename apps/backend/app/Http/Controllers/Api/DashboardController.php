@@ -4,17 +4,20 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
+use App\Models\Customer;
 use App\Models\DailyActivation;
 use App\Models\DailyCctvSetup;
 use App\Models\DailyComplaint;
 use App\Models\DailyNocUpdate;
 use App\Models\Dismantle;
+use App\Models\Odp;
 use App\Models\ReportTicket;
 use App\Models\User;
 use App\Support\ReportStatus;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
@@ -84,8 +87,8 @@ class DashboardController extends Controller
 
         $categoryKpis = $this->categoryKpis($summary, $nocPerformance);
         $specialists = $this->specialistBadges($nocPerformance);
-        $charts = $this->buildCharts($summary, $nocPerformance);
         $odcStats = $this->odcPerformance($from, $to, $periodDays, $odcName);
+        $charts = $this->buildCharts($summary, $nocPerformance, $odcStats);
         $complaintClientShare = $this->complaintClientShare($from, $to, $complaintOdcName, $clientShareSource);
 
         return response()->json([
@@ -549,9 +552,15 @@ class DashboardController extends Controller
             'location',
         );
 
+        $activationClears = $this->activationCountsByOdc($from, $to, true, $odcName);
+        $activationOpens = $this->activationCountsByOdc($from, $to, false, $odcName);
+        $cctvClears = $this->cctvCountsByOdc($from, $to, true, $odcName);
+        $cctvOpens = $this->cctvCountsByOdc($from, $to, false, $odcName);
+
         $odcKeys = collect([
             $complaintClears, $complaintOpens, $ticketClears, $ticketOpens,
             $nocClears, $nocOpens, $dismantleClears, $dismantleOpens,
+            $activationClears, $activationOpens, $cctvClears, $cctvOpens,
         ])
             ->flatMap(fn ($rows) => $rows->keys())
             ->unique()
@@ -568,6 +577,9 @@ class DashboardController extends Controller
                 $nocOpens,
                 $dismantleClears,
                 $dismantleOpens,
+                $activationClears,
+                $activationOpens,
+                $cctvClears,
                 $periodDays,
             ) {
                 $complaintsClear = (int) ($complaintClears->get($key) ?? 0);
@@ -578,17 +590,21 @@ class DashboardController extends Controller
                 $nocOpen = (int) ($nocOpens->get($key) ?? 0);
                 $dismantlesClear = (int) ($dismantleClears->get($key) ?? 0);
                 $dismantlesOpen = (int) ($dismantleOpens->get($key) ?? 0);
-                $total = $complaintsClear + $ticketsClear + $nocClear + $dismantlesClear;
+                $activationsClear = (int) ($activationClears->get($key) ?? 0);
+                $activationsOpen = (int) ($activationOpens->get($key) ?? 0);
+                $cctvClear = (int) ($cctvClears->get($key) ?? 0);
+                $total = $complaintsClear + $ticketsClear + $nocClear + $dismantlesClear
+                    + $activationsClear + $cctvClear;
 
                 return [
                     'odc_name' => (string) $key,
                     'complaints_open' => $complaintsOpen,
                     'complaints_clear' => $complaintsClear,
-                    'activations_open' => 0,
-                    'activations_clear' => 0,
+                    'activations_open' => $activationsOpen,
+                    'activations_clear' => $activationsClear,
                     'tickets_open' => $ticketsOpen,
                     'tickets_clear' => $ticketsClear,
-                    'cctv_clear' => 0,
+                    'cctv_clear' => $cctvClear,
                     'dismantles_open' => $dismantlesOpen,
                     'dismantles_clear' => $dismantlesClear,
                     'noc_updates_open' => $nocOpen,
@@ -609,6 +625,164 @@ class DashboardController extends Controller
                 return $row;
             })
             ->all();
+    }
+
+    /**
+     * Map ODP name (lowercase) → ODC name.
+     *
+     * @return array<string, string>
+     */
+    protected function odpNameToOdcMap(): array
+    {
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+
+        $cache = [];
+        Odp::query()
+            ->with('odc:id,name')
+            ->get(['id', 'name', 'odc_id'])
+            ->each(function (Odp $odp) use (&$cache): void {
+                $odpKey = mb_strtolower(trim((string) $odp->name));
+                $odcName = trim((string) ($odp->odc?->name ?? ''));
+                if ($odpKey !== '' && $odcName !== '') {
+                    $cache[$odpKey] = $odcName;
+                }
+            });
+
+        return $cache;
+    }
+
+    /**
+     * Map customer name (lowercase, paren suffix stripped) → ODC name.
+     *
+     * @return array<string, string>
+     */
+    protected function customerNameToOdcMap(): array
+    {
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+
+        $cache = [];
+        Customer::query()
+            ->with('odc:id,name')
+            ->get(['id', 'name', 'odc_id'])
+            ->each(function (Customer $customer) use (&$cache): void {
+                $key = $this->normalizeLookupName((string) $customer->name);
+                if ($key === '') {
+                    return;
+                }
+                $odcName = trim((string) ($customer->odc?->name ?? ''));
+                $cache[$key] = $odcName !== '' ? $odcName : 'Tanpa ODC';
+            });
+
+        return $cache;
+    }
+
+    protected function normalizeLookupName(string $value): string
+    {
+        $value = trim($value);
+        $value = preg_replace('/\s*\([^)]*\)\s*$/u', '', $value) ?? $value;
+
+        return mb_strtolower(trim($value));
+    }
+
+    /**
+     * @return Collection<string, int>
+     */
+    protected function activationCountsByOdc(
+        Carbon $from,
+        Carbon $to,
+        bool $cleared,
+        ?string $odcName = null,
+    ): Collection {
+        return $this->resolvedDailyCountsByOdc(
+            DailyActivation::class,
+            'odp_name',
+            $this->odpNameToOdcMap(),
+            $from,
+            $to,
+            $cleared,
+            $odcName,
+        );
+    }
+
+    /**
+     * @return Collection<string, int>
+     */
+    protected function cctvCountsByOdc(
+        Carbon $from,
+        Carbon $to,
+        bool $cleared,
+        ?string $odcName = null,
+    ): Collection {
+        return $this->resolvedDailyCountsByOdc(
+            DailyCctvSetup::class,
+            'customer_name',
+            $this->customerNameToOdcMap(),
+            $from,
+            $to,
+            $cleared,
+            $odcName,
+        );
+    }
+
+    /**
+     * @param  class-string  $modelClass
+     * @param  array<string, string>  $nameToOdc
+     * @return Collection<string, int>
+     */
+    protected function resolvedDailyCountsByOdc(
+        string $modelClass,
+        string $lookupColumn,
+        array $nameToOdc,
+        Carbon $from,
+        Carbon $to,
+        bool $cleared,
+        ?string $odcName = null,
+    ): Collection {
+        $fromDate = $from->toDateString();
+        $toDate = $to->toDateString();
+        $fromStart = $from->copy()->startOfDay();
+        $toEnd = $to->copy()->endOfDay();
+
+        $query = $modelClass::query()->select([$lookupColumn, 'status', 'cleared_at', 'report_date']);
+
+        if ($cleared) {
+            $query->where('status', ReportStatus::CLEAR)
+                ->where(function ($q) use ($fromStart, $toEnd, $fromDate, $toDate) {
+                    $q->whereBetween('cleared_at', [$fromStart, $toEnd])
+                        ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                            $q2->whereNull('cleared_at')
+                                ->whereBetween('report_date', [$fromDate, $toDate]);
+                        });
+                });
+        } else {
+            $query->whereDate('report_date', '<=', $toDate)
+                ->where(function ($q) {
+                    $q->whereNull('status')
+                        ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+                });
+        }
+
+        $merged = [];
+        foreach ($query->cursor() as $row) {
+            $lookup = $this->normalizeLookupName((string) ($row->{$lookupColumn} ?? ''));
+            $key = ($lookup !== '' && isset($nameToOdc[$lookup]))
+                ? $nameToOdc[$lookup]
+                : 'Tanpa ODC';
+
+            if ($odcName && $key !== $odcName) {
+                continue;
+            }
+
+            $merged[$key] = ($merged[$key] ?? 0) + 1;
+        }
+
+        return collect($merged);
     }
 
     /**
@@ -1197,6 +1371,7 @@ class DashboardController extends Controller
     protected function buildCharts(
         array $summary,
         array $nocPerformance,
+        array $odcStats = [],
     ): array {
         $rows = $nocPerformance;
 
@@ -1228,6 +1403,39 @@ class DashboardController extends Controller
                 [
                     'name' => 'CCTV',
                     'data' => array_map(fn ($row) => (int) ($row['cctv_clear'] ?? $row['cctv'] ?? 0), $rows),
+                    'color' => '#9B59B6',
+                ],
+            ],
+        ];
+
+        $odcRows = array_slice($odcStats, 0, 20);
+        $odcNames = array_map(fn ($row) => (string) $row['odc_name'], $odcRows);
+        $stackedByOdc = [
+            'categories' => $odcNames,
+            'series' => [
+                [
+                    'name' => 'Komplain',
+                    'data' => array_map(fn ($row) => (int) $row['complaints_clear'], $odcRows),
+                    'color' => '#EF4444',
+                ],
+                [
+                    'name' => 'Aktivasi',
+                    'data' => array_map(fn ($row) => (int) ($row['activations_clear'] ?? 0), $odcRows),
+                    'color' => '#22C55E',
+                ],
+                [
+                    'name' => 'Ticket',
+                    'data' => array_map(fn ($row) => (int) $row['tickets_clear'], $odcRows),
+                    'color' => '#3498DB',
+                ],
+                [
+                    'name' => 'Dismantle',
+                    'data' => array_map(fn ($row) => (int) $row['dismantles_clear'], $odcRows),
+                    'color' => '#E67E22',
+                ],
+                [
+                    'name' => 'CCTV',
+                    'data' => array_map(fn ($row) => (int) ($row['cctv_clear'] ?? 0), $odcRows),
                     'color' => '#9B59B6',
                 ],
             ],
@@ -1271,6 +1479,7 @@ class DashboardController extends Controller
         return [
             'clear_by_noc' => $clearByNoc,
             'stacked_by_noc' => $stackedByNoc,
+            'stacked_by_odc' => $stackedByOdc,
             'clear_by_type' => $clearByType,
             'contribution' => $contribution,
         ];

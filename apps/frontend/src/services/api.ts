@@ -172,6 +172,10 @@ export interface DashboardStats {
       categories: string[]
       series: Array<{ name: string; data: number[]; color?: string }>
     }
+    stacked_by_odc?: {
+      categories: string[]
+      series: Array<{ name: string; data: number[]; color?: string }>
+    }
     clear_by_type: {
       categories: string[]
       series: Array<{ name: string; data: number[]; color?: string }>
