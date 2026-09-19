@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\InternetPackage;
+use App\Models\Location;
 use App\Models\Odc;
 use App\Models\Odp;
 use App\Models\Olt;
@@ -23,6 +24,7 @@ class MasterDataController extends Controller
                 ['key' => 'odcs', 'label' => 'ODC', 'count' => Odc::count()],
                 ['key' => 'odps', 'label' => 'ODP', 'count' => Odp::count()],
                 ['key' => 'olts', 'label' => 'OLT', 'count' => Olt::count()],
+                ['key' => 'locations', 'label' => 'Lokasi', 'count' => Location::count()],
                 ['key' => 'onus', 'label' => 'ONU', 'count' => Onu::count()],
                 ['key' => 'routers', 'label' => 'Router', 'count' => Router::count()],
                 ['key' => 'packages', 'label' => 'Paket Internet', 'count' => InternetPackage::count()],
@@ -33,6 +35,7 @@ class MasterDataController extends Controller
                 ['label' => 'ODC', 'to' => '/odc'],
                 ['label' => 'ODP', 'to' => '/odp'],
                 ['label' => 'OLT', 'to' => '/olt'],
+                ['label' => 'Lokasi', 'to' => '/location'],
                 ['label' => 'ONU', 'to' => '/onu'],
                 ['label' => 'Router', 'to' => '/router'],
                 ['label' => 'Paket Internet', 'to' => '/paket'],

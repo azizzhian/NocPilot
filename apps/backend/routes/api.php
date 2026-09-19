@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DismantleController;
 use App\Http\Controllers\Api\InternetPackageController;
 use App\Http\Controllers\Api\InventoryController;
+use App\Http\Controllers\Api\LocationController;
 use App\Http\Controllers\Api\MasterDataController;
 use App\Http\Controllers\Api\MonitoringController;
 use App\Http\Controllers\Api\OdcController;
@@ -143,6 +144,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('odcs', OdcController::class);
         Route::apiResource('odps', OdpController::class);
         Route::apiResource('olts', OltController::class);
+        Route::apiResource('locations', LocationController::class);
         Route::apiResource('onus', OnuController::class);
         Route::apiResource('packages', InternetPackageController::class);
 

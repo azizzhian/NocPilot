@@ -28,4 +28,14 @@ class Odc extends Model
     {
         return $this->hasMany(Odp::class);
     }
+
+    public function olts(): HasMany
+    {
+        return $this->hasMany(Olt::class);
+    }
+
+    public function locations(): HasMany
+    {
+        return $this->hasMany(Location::class);
+    }
 }

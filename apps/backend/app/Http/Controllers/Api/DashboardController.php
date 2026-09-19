@@ -10,7 +10,10 @@ use App\Models\DailyCctvSetup;
 use App\Models\DailyComplaint;
 use App\Models\DailyNocUpdate;
 use App\Models\Dismantle;
+use App\Models\Location;
+use App\Models\Odc;
 use App\Models\Odp;
+use App\Models\Olt;
 use App\Models\ReportTicket;
 use App\Models\User;
 use App\Support\ReportStatus;
@@ -518,38 +521,42 @@ class DashboardController extends Controller
             'odc_name',
         );
 
-        $dismantleClears = $this->mergeOdcCounts(
-            Dismantle::query()
-                ->selectRaw('location, COUNT(*) as total')
-                ->where('status', 'Clear')
-                ->where(function ($q) use ($fromDate, $toDate, $fromStart, $toEnd) {
-                    $q->whereBetween('closed_at', [$fromDate, $toDate])
-                        ->orWhere(function ($q2) use ($fromStart, $toEnd) {
-                            $q2->whereNull('closed_at')
-                                ->whereBetween('updated_at', [$fromStart, $toEnd]);
-                        });
-                })
-                ->when($odcName, fn ($q) => $this->scopeDismantleByOdc($q, $odcName))
-                ->groupBy('location')
-                ->get(),
-            'location',
+        $dismantleClears = $this->remapLocationCountsToOdc(
+            $this->mergeOdcCounts(
+                Dismantle::query()
+                    ->selectRaw('location, COUNT(*) as total')
+                    ->where('status', 'Clear')
+                    ->where(function ($q) use ($fromDate, $toDate, $fromStart, $toEnd) {
+                        $q->whereBetween('closed_at', [$fromDate, $toDate])
+                            ->orWhere(function ($q2) use ($fromStart, $toEnd) {
+                                $q2->whereNull('closed_at')
+                                    ->whereBetween('updated_at', [$fromStart, $toEnd]);
+                            });
+                    })
+                    ->when($odcName, fn ($q) => $this->scopeDismantleByOdc($q, $odcName))
+                    ->groupBy('location')
+                    ->get(),
+                'location',
+            ),
         );
 
-        $dismantleOpens = $this->mergeOdcCounts(
-            Dismantle::query()
-                ->selectRaw('location, COUNT(*) as total')
-                ->whereIn('status', ['Pending', 'On-Progress'])
-                ->where(function ($q) use ($toDate) {
-                    $q->whereDate('opened_at', '<=', $toDate)
-                        ->orWhere(function ($q2) use ($toDate) {
-                            $q2->whereNull('opened_at')
-                                ->whereDate('created_at', '<=', $toDate);
-                        });
-                })
-                ->when($odcName, fn ($q) => $this->scopeDismantleByOdc($q, $odcName))
-                ->groupBy('location')
-                ->get(),
-            'location',
+        $dismantleOpens = $this->remapLocationCountsToOdc(
+            $this->mergeOdcCounts(
+                Dismantle::query()
+                    ->selectRaw('location, COUNT(*) as total')
+                    ->whereIn('status', ['Pending', 'On-Progress'])
+                    ->where(function ($q) use ($toDate) {
+                        $q->whereDate('opened_at', '<=', $toDate)
+                            ->orWhere(function ($q2) use ($toDate) {
+                                $q2->whereNull('opened_at')
+                                    ->whereDate('created_at', '<=', $toDate);
+                            });
+                    })
+                    ->when($odcName, fn ($q) => $this->scopeDismantleByOdc($q, $odcName))
+                    ->groupBy('location')
+                    ->get(),
+                'location',
+            ),
         );
 
         $activationClears = $this->activationCountsByOdc($from, $to, true, $odcName);
@@ -628,6 +635,34 @@ class DashboardController extends Controller
     }
 
     /**
+     * Map OLT name (lowercase) → ODC name via olts.odc_id.
+     *
+     * @return array<string, string>
+     */
+    protected function oltNameToOdcMap(): array
+    {
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+
+        $cache = [];
+        Olt::query()
+            ->with('odc:id,name')
+            ->whereNotNull('odc_id')
+            ->get(['id', 'name', 'odc_id'])
+            ->each(function (Olt $olt) use (&$cache): void {
+                $oltKey = mb_strtolower(trim((string) $olt->name));
+                $odcName = trim((string) ($olt->odc?->name ?? ''));
+                if ($oltKey !== '' && $odcName !== '') {
+                    $cache[$oltKey] = $odcName;
+                }
+            });
+
+        return $cache;
+    }
+
+    /**
      * Map ODP name (lowercase) → ODC name.
      *
      * @return array<string, string>
@@ -691,6 +726,8 @@ class DashboardController extends Controller
     }
 
     /**
+     * Aktivasi → ODC: utamakan olt_name (master OLT.odc_id), fallback odp_name.
+     *
      * @return Collection<string, int>
      */
     protected function activationCountsByOdc(
@@ -699,15 +736,54 @@ class DashboardController extends Controller
         bool $cleared,
         ?string $odcName = null,
     ): Collection {
-        return $this->resolvedDailyCountsByOdc(
-            DailyActivation::class,
-            'odp_name',
-            $this->odpNameToOdcMap(),
-            $from,
-            $to,
-            $cleared,
-            $odcName,
-        );
+        $oltMap = $this->oltNameToOdcMap();
+        $odpMap = $this->odpNameToOdcMap();
+
+        $fromDate = $from->toDateString();
+        $toDate = $to->toDateString();
+        $fromStart = $from->copy()->startOfDay();
+        $toEnd = $to->copy()->endOfDay();
+
+        $query = DailyActivation::query()->select(['olt_name', 'odp_name', 'status', 'cleared_at', 'report_date']);
+
+        if ($cleared) {
+            $query->where('status', ReportStatus::CLEAR)
+                ->where(function ($q) use ($fromStart, $toEnd, $fromDate, $toDate) {
+                    $q->whereBetween('cleared_at', [$fromStart, $toEnd])
+                        ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                            $q2->whereNull('cleared_at')
+                                ->whereBetween('report_date', [$fromDate, $toDate]);
+                        });
+                });
+        } else {
+            $query->whereDate('report_date', '<=', $toDate)
+                ->where(function ($q) {
+                    $q->whereNull('status')
+                        ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+                });
+        }
+
+        $merged = [];
+        foreach ($query->cursor() as $row) {
+            $oltKey = $this->normalizeLookupName((string) ($row->olt_name ?? ''));
+            $odpKey = $this->normalizeLookupName((string) ($row->odp_name ?? ''));
+
+            if ($oltKey !== '' && isset($oltMap[$oltKey])) {
+                $key = $oltMap[$oltKey];
+            } elseif ($odpKey !== '' && isset($odpMap[$odpKey])) {
+                $key = $odpMap[$odpKey];
+            } else {
+                $key = 'Tanpa ODC';
+            }
+
+            if ($odcName && $key !== $odcName) {
+                continue;
+            }
+
+            $merged[$key] = ($merged[$key] ?? 0) + 1;
+        }
+
+        return collect($merged);
     }
 
     /**
@@ -975,16 +1051,95 @@ class DashboardController extends Controller
     }
 
     /**
+     * Map nama lokasi (lowercase) → nama ODC.
+     * Termasuk identity map nama ODC agar lokasi = nama ODC tetap valid.
+     *
+     * @return array<string, string>
+     */
+    protected function locationNameToOdcMap(): array
+    {
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+
+        $cache = [];
+
+        Odc::query()->get(['name'])->each(function (Odc $odc) use (&$cache): void {
+            $name = trim((string) $odc->name);
+            if ($name !== '') {
+                $cache[mb_strtolower($name)] = $name;
+            }
+        });
+
+        Location::query()
+            ->with('odc:id,name')
+            ->whereNotNull('odc_id')
+            ->get(['id', 'name', 'odc_id'])
+            ->each(function (Location $location) use (&$cache): void {
+                $key = mb_strtolower(trim((string) $location->name));
+                $odcName = trim((string) ($location->odc?->name ?? ''));
+                if ($key !== '' && $odcName !== '') {
+                    $cache[$key] = $odcName;
+                }
+            });
+
+        return $cache;
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<string, int>  $byLocation
+     * @return \Illuminate\Support\Collection<string, int>
+     */
+    protected function remapLocationCountsToOdc(Collection $byLocation): Collection
+    {
+        $map = $this->locationNameToOdcMap();
+        $merged = [];
+
+        foreach ($byLocation as $location => $count) {
+            $raw = trim((string) $location);
+            if ($raw === '' || mb_strtolower($raw) === 'tanpa odc') {
+                $key = 'Tanpa ODC';
+            } else {
+                $norm = mb_strtolower($raw);
+                $key = $map[$norm] ?? $raw;
+            }
+            $merged[$key] = ($merged[$key] ?? 0) + (int) $count;
+        }
+
+        return collect($merged);
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function locationNamesForOdc(string $odcName): array
+    {
+        return Location::query()
+            ->whereHas('odc', fn ($q) => $q->where('name', $odcName))
+            ->orderBy('name')
+            ->pluck('name')
+            ->map(fn ($n) => (string) $n)
+            ->all();
+    }
+
+    /**
      * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\Dismantle>  $query
      * @return \Illuminate\Database\Eloquent\Builder<\App\Models\Dismantle>
      */
     protected function scopeDismantleByOdc($query, string $odcName)
     {
-        return $query->where(function ($q) use ($odcName) {
+        $aliases = $this->locationNamesForOdc($odcName);
+
+        return $query->where(function ($q) use ($odcName, $aliases) {
             $q->where('location', $odcName)
                 ->orWhere('area', $odcName)
                 ->orWhere('location', 'like', '%'.$odcName.'%')
                 ->orWhere('area', 'like', '%'.$odcName.'%');
+
+            if ($aliases !== []) {
+                $q->orWhereIn('location', $aliases);
+            }
         });
     }
 

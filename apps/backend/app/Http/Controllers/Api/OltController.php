@@ -11,7 +11,10 @@ class OltController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Olt::query()->with('pop:id,name,code')->withCount('onus')->orderBy('name');
+        $query = Olt::query()
+            ->with(['pop:id,name,code', 'odc:id,name,code'])
+            ->withCount('onus')
+            ->orderBy('name');
 
         if ($search = $request->string('search')->toString()) {
             $query->where(function ($q) use ($search) {
@@ -24,6 +27,10 @@ class OltController extends Controller
             $query->where('pop_id', $popId);
         }
 
+        if ($odcId = $request->integer('odc_id')) {
+            $query->where('odc_id', $odcId);
+        }
+
         return response()->json($query->paginate(min(max($request->integer('per_page', 20), 1), 100)));
     }
 
@@ -31,6 +38,7 @@ class OltController extends Controller
     {
         $data = $request->validate([
             'pop_id' => 'required|exists:pops,id',
+            'odc_id' => 'nullable|exists:odcs,id',
             'name' => 'required|string|max:255',
             'ip' => 'nullable|ip',
             'status' => 'nullable|in:online,offline,maintenance',
@@ -41,18 +49,24 @@ class OltController extends Controller
 
         $olt = Olt::create($data);
 
-        return response()->json(['message' => 'OLT berhasil ditambahkan.', 'data' => $olt->load('pop:id,name,code')], 201);
+        return response()->json([
+            'message' => 'OLT berhasil ditambahkan.',
+            'data' => $olt->load(['pop:id,name,code', 'odc:id,name,code']),
+        ], 201);
     }
 
     public function show(Olt $olt): JsonResponse
     {
-        return response()->json(['data' => $olt->load('pop:id,name,code')->loadCount('onus')]);
+        return response()->json([
+            'data' => $olt->load(['pop:id,name,code', 'odc:id,name,code'])->loadCount('onus'),
+        ]);
     }
 
     public function update(Request $request, Olt $olt): JsonResponse
     {
         $data = $request->validate([
             'pop_id' => 'sometimes|exists:pops,id',
+            'odc_id' => 'nullable|exists:odcs,id',
             'name' => 'sometimes|string|max:255',
             'ip' => 'nullable|ip',
             'status' => 'nullable|in:online,offline,maintenance',
@@ -63,7 +77,10 @@ class OltController extends Controller
 
         $olt->update($data);
 
-        return response()->json(['message' => 'OLT berhasil diperbarui.', 'data' => $olt->load('pop:id,name,code')]);
+        return response()->json([
+            'message' => 'OLT berhasil diperbarui.',
+            'data' => $olt->load(['pop:id,name,code', 'odc:id,name,code']),
+        ]);
     }
 
     public function destroy(Olt $olt): JsonResponse

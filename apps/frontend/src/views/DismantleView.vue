@@ -10,7 +10,7 @@ import Select from '@/components/ui/Select.vue'
 import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 import Modal from '@/components/ui/Modal.vue'
 import SectionReportModal from '@/components/report/SectionReportModal.vue'
-import { dismantleApi, type DismantleItem } from '@/services/api'
+import { dismantleApi, locationApi, type DismantleItem } from '@/services/api'
 import { todayInput } from '@/lib/date-input'
 import { Plus, Pencil, Trash2, FileText, Upload, Download } from 'lucide-vue-next'
 
@@ -52,7 +52,7 @@ const statusTabs = [
   { key: 'Clear', label: 'Clear' },
 ]
 
-const locationOptions = ref<string[]>([])
+const locationOptions = ref<{ name: string; odc_name: string | null }[]>([])
 
 function statusVariant(status: string) {
   if (status === 'Clear') return 'success'
@@ -94,10 +94,13 @@ async function load(page = currentPage.value) {
 
 async function loadLocations() {
   try {
-    const res = await dismantleApi.locations()
-    locationOptions.value = res.data.data
+    const res = await locationApi.list({ per_page: 200, status: 'active' })
+    locationOptions.value = (res.data.data as { name?: string; odc?: { name?: string } | null }[]).map((l) => ({
+      name: String(l.name ?? ''),
+      odc_name: l.odc?.name ? String(l.odc.name) : null,
+    })).filter((l) => l.name)
   } catch {
-    // biarkan opsi lokasi kosong; list tetap bisa dipakai
+    locationOptions.value = []
   }
 }
 
@@ -259,7 +262,9 @@ onMounted(() => {
         <label class="mb-1.5 block text-xs font-medium text-muted">Filter Lokasi</label>
         <Select v-model="locationFilter" class="w-48">
           <option value="">Semua Lokasi</option>
-          <option v-for="location in locationOptions" :key="location" :value="location">{{ location }}</option>
+          <option v-for="location in locationOptions" :key="location.name" :value="location.name">
+            {{ location.name }}{{ location.odc_name ? ` → ${location.odc_name}` : '' }}
+          </option>
         </Select>
       </div>
       <DateRangePicker
@@ -373,7 +378,12 @@ onMounted(() => {
         <div class="grid gap-3 sm:grid-cols-2">
           <div>
             <label class="mb-1.5 block text-sm font-medium">Lokasi</label>
-            <Input v-model="form.location" placeholder="POP / Area / Site" />
+            <Select v-model="form.location" class="w-full">
+              <option value="">— Pilih lokasi —</option>
+              <option v-for="location in locationOptions" :key="location.name" :value="location.name">
+                {{ location.name }}{{ location.odc_name ? ` → ${location.odc_name}` : '' }}
+              </option>
+            </Select>
           </div>
           <div>
             <label class="mb-1.5 block text-sm font-medium">ID Pel</label>

@@ -55,6 +55,7 @@ const router = createRouter({
     { path: '/pop', name: 'pop', component: () => import('@/views/PopView.vue'), meta: { permission: 'network.view' } },
     { path: '/odc', name: 'odc', component: () => import('@/views/OdcView.vue'), meta: { permission: 'network.view' } },
     { path: '/odp', name: 'odp', component: () => import('@/views/OdpView.vue'), meta: { permission: 'network.view' } },
+    { path: '/location', name: 'location', component: () => import('@/views/LocationView.vue'), meta: { permission: 'network.view' } },
     { path: '/inventory', name: 'inventory', component: () => import('@/views/InventoryView.vue'), meta: { permission: 'network.view' } },
     { path: '/report', redirect: '/report/generate' },
     { path: '/report/generate', name: 'report-generate', component: () => import('@/views/GenerateReportView.vue'), meta: { permission: 'report.generate' } },

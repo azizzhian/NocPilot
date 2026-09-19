@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Olt extends Model
 {
-    protected $fillable = ['pop_id', 'name', 'ip', 'status', 'capacity', 'pon_ports', 'notes'];
+    protected $fillable = ['pop_id', 'odc_id', 'name', 'ip', 'status', 'capacity', 'pon_ports', 'notes'];
 
     protected static function booted(): void
     {
@@ -25,6 +25,11 @@ class Olt extends Model
     public function pop(): BelongsTo
     {
         return $this->belongsTo(Pop::class);
+    }
+
+    public function odc(): BelongsTo
+    {
+        return $this->belongsTo(Odc::class);
     }
 
     public function onus(): HasMany

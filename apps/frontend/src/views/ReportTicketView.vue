@@ -11,7 +11,7 @@ import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 import Modal from '@/components/ui/Modal.vue'
 import Textarea from '@/components/ui/Textarea.vue'
 import SectionReportModal from '@/components/report/SectionReportModal.vue'
-import { reportTicketApi, odcApi, type ReportTicketItem } from '@/services/api'
+import { reportTicketApi, odcApi, locationApi, type ReportTicketItem } from '@/services/api'
 import { todayInput } from '@/lib/date-input'
 import { Plus, Pencil, Trash2, Download, FileText } from 'lucide-vue-next'
 
@@ -23,6 +23,7 @@ const odcName = ref('')
 const currentPage = ref(1)
 const lastPage = ref(1)
 const odcs = ref<{ id: number; name: string }[]>([])
+const locations = ref<{ name: string; odc_name: string | null }[]>([])
 const items = ref<ReportTicketItem[]>([])
 const stats = ref<Record<string, number>>({})
 const loading = ref(true)
@@ -86,6 +87,27 @@ async function loadOdcs() {
     odcs.value = res.data.data.map((o) => ({ id: o.id as number, name: String(o.name ?? '') }))
   } catch {
     odcs.value = []
+  }
+}
+
+async function loadLocations() {
+  try {
+    const res = await locationApi.list({ per_page: 200, status: 'active' })
+    locations.value = (res.data.data as { name?: string; odc?: { name?: string } | null }[]).map((l) => ({
+      name: String(l.name ?? ''),
+      odc_name: l.odc?.name ? String(l.odc.name) : null,
+    })).filter((l) => l.name)
+  } catch {
+    locations.value = []
+  }
+}
+
+function onLocationChange(value: string | number) {
+  const name = String(value ?? '')
+  form.value.location = name
+  const match = locations.value.find((l) => l.name === name)
+  if (match?.odc_name) {
+    form.value.odc_name = match.odc_name
   }
 }
 
@@ -211,7 +233,7 @@ watch([search, statusFilter, fromDate, toDate, odcName], () => {
 })
 
 onMounted(async () => {
-  await loadOdcs()
+  await Promise.all([loadOdcs(), loadLocations()])
   await load(1)
 })
 </script>
@@ -368,15 +390,24 @@ onMounted(async () => {
           </div>
         </div>
         <div>
+          <label class="mb-1.5 block text-sm font-medium">Lokasi</label>
+          <Select
+            :model-value="form.location"
+            @update:model-value="onLocationChange"
+          >
+            <option value="">— Pilih lokasi —</option>
+            <option v-for="l in locations" :key="l.name" :value="l.name">
+              {{ l.name }}{{ l.odc_name ? ` → ${l.odc_name}` : '' }}
+            </option>
+          </Select>
+        </div>
+        <div>
           <label class="mb-1.5 block text-sm font-medium">ODC / Site</label>
           <Select v-model="form.odc_name">
             <option value="">— Pilih ODC —</option>
             <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
           </Select>
-        </div>
-        <div>
-          <label class="mb-1.5 block text-sm font-medium">Lokasi</label>
-          <Input v-model="form.location" />
+          <p class="mt-1 text-[11px] text-muted">Terisi otomatis jika lokasi sudah di-map ke ODC</p>
         </div>
         <div v-if="ticketType === 'customer'">
           <label class="mb-1.5 block text-sm font-medium">ID Pelanggan</label>

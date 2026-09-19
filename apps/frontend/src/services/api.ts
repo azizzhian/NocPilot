@@ -347,6 +347,7 @@ export const popApi = crudApi('/pops')
 export const odcApi = crudApi('/odcs')
 export const odpApi = crudApi('/odps')
 export const oltApi = crudApi('/olts')
+export const locationApi = crudApi('/locations')
 export const onuApi = crudApi('/onus')
 export const packageApi = crudApi<InternetPackage>('/packages')
 
