@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import VueApexCharts from 'vue3-apexcharts'
+import type { ApexOptions } from 'apexcharts'
 import { useAppStore } from '@/stores/app'
 import Card from '@/components/ui/Card.vue'
 
@@ -45,23 +46,25 @@ function emitPointClick(seriesIndex: number, dataPointIndex: number) {
   emit('pointClick', { category, seriesName, value, seriesIndex, dataPointIndex })
 }
 
-const chartEvents = computed(() => {
+type ApexEvents = NonNullable<NonNullable<ApexOptions['chart']>['events']>
+
+const chartEvents = computed((): ApexEvents | undefined => {
   if (!props.clickable || isDonut.value || isRadar.value) return undefined
 
   const handle = (
-    _event: unknown,
-    _ctx: unknown,
-    config: { seriesIndex?: number; dataPointIndex?: number },
+    _event: MouseEvent | undefined,
+    _chart: ApexCharts | undefined,
+    options?: { seriesIndex?: number; dataPointIndex?: number },
   ) => {
-    const seriesIndex = Number(config.seriesIndex ?? -1)
-    const dataPointIndex = Number(config.dataPointIndex ?? -1)
+    const seriesIndex = Number(options?.seriesIndex ?? -1)
+    const dataPointIndex = Number(options?.dataPointIndex ?? -1)
     if (dataPointIndex < 0) return
     emitPointClick(Math.max(0, seriesIndex), dataPointIndex)
   }
 
   return {
-    dataPointSelection: handle,
-    click: handle,
+    dataPointSelection: handle as ApexEvents['dataPointSelection'],
+    click: handle as ApexEvents['click'],
   }
 })
 
