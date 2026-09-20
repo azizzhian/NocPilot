@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import Card from '@/components/ui/Card.vue'
 import Badge from '@/components/ui/Badge.vue'
@@ -15,6 +16,7 @@ import { reportTicketApi, odcApi, locationApi, type ReportTicketItem } from '@/s
 import { todayInput } from '@/lib/date-input'
 import { Plus, Pencil, Trash2, Download, FileText } from 'lucide-vue-next'
 
+const route = useRoute()
 const search = ref('')
 const statusFilter = ref('all')
 const fromDate = ref('')
@@ -232,7 +234,21 @@ watch([search, statusFilter, fromDate, toDate, odcName], () => {
   searchTimeout = setTimeout(() => load(1), 400)
 })
 
+function applyRouteQuery() {
+  const q = route.query
+  if (typeof q.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(q.from)) {
+    fromDate.value = q.from
+  }
+  if (typeof q.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(q.to)) {
+    toDate.value = q.to
+  }
+  if (typeof q.odc_name === 'string') {
+    odcName.value = q.odc_name
+  }
+}
+
 onMounted(async () => {
+  applyRouteQuery()
   await Promise.all([loadOdcs(), loadLocations()])
   await load(1)
 })

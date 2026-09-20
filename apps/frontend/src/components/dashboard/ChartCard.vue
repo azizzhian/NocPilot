@@ -15,11 +15,55 @@ const props = defineProps<{
   horizontal?: boolean
   stacked?: boolean
   colors?: string[]
+  /** Aktifkan klik data point (bar/area/line) */
+  clickable?: boolean
+}>()
+
+const emit = defineEmits<{
+  pointClick: [payload: {
+    category: string
+    seriesName: string
+    value: number
+    seriesIndex: number
+    dataPointIndex: number
+  }]
 }>()
 
 const appStore = useAppStore()
 const isDonut = computed(() => props.type === 'donut' || props.type === 'pie')
 const isRadar = computed(() => props.type === 'radar')
+
+function emitPointClick(seriesIndex: number, dataPointIndex: number) {
+  if (!props.clickable || isDonut.value || isRadar.value) return
+  if (seriesIndex < 0 || dataPointIndex < 0) return
+
+  const category = props.categories[dataPointIndex] ?? ''
+  const seriesName = props.series[seriesIndex]?.name ?? ''
+  const value = Number(props.series[seriesIndex]?.data[dataPointIndex] ?? 0)
+  if (!category || !seriesName) return
+
+  emit('pointClick', { category, seriesName, value, seriesIndex, dataPointIndex })
+}
+
+const chartEvents = computed(() => {
+  if (!props.clickable || isDonut.value || isRadar.value) return undefined
+
+  const handle = (
+    _event: unknown,
+    _ctx: unknown,
+    config: { seriesIndex?: number; dataPointIndex?: number },
+  ) => {
+    const seriesIndex = Number(config.seriesIndex ?? -1)
+    const dataPointIndex = Number(config.dataPointIndex ?? -1)
+    if (dataPointIndex < 0) return
+    emitPointClick(Math.max(0, seriesIndex), dataPointIndex)
+  }
+
+  return {
+    dataPointSelection: handle,
+    click: handle,
+  }
+})
 
 const chartOptions = computed(() => {
   const palette = props.colors?.length
@@ -107,6 +151,7 @@ const chartOptions = computed(() => {
       fontFamily: 'Inter, sans-serif',
       background: 'transparent',
       animations: { enabled: true, easing: 'easeinout', speed: 800 },
+      events: chartEvents.value,
     },
     colors: palette,
     dataLabels: { enabled: false },
@@ -132,26 +177,43 @@ const chartOptions = computed(() => {
     },
     xaxis: {
       categories: props.categories,
-      labels: { style: { colors: '#94a3b8', fontSize: '11px' } },
+      labels: {
+        style: {
+          colors: appStore.isDark ? '#94a3b8' : '#334155',
+          fontSize: '11px',
+          fontWeight: 500,
+        },
+      },
       axisBorder: { show: false },
       axisTicks: { show: false },
     },
     yaxis: {
       labels: {
-        style: { colors: '#94a3b8', fontSize: '11px' },
+        style: {
+          colors: appStore.isDark ? '#94a3b8' : '#334155',
+          fontSize: '11px',
+          fontWeight: 500,
+        },
         formatter: (val: number) => `${val}${props.unit ?? ''}`,
       },
     },
     legend: {
       position: 'top' as const,
       horizontalAlign: 'right' as const,
-      labels: { colors: '#94a3b8' },
+      labels: { colors: appStore.isDark ? '#94a3b8' : '#64748B' },
       markers: { size: 4, shape: 'circle' as const },
     },
     tooltip: {
       theme: (appStore.isDark ? 'dark' : 'light') as 'dark' | 'light',
       x: { show: true },
     },
+    states: props.clickable
+      ? {
+          active: {
+            filter: { type: 'none' as const },
+          },
+        }
+      : undefined,
   }
 })
 
@@ -176,6 +238,9 @@ const hasData = computed(() => {
       <div>
         <h3 class="text-sm font-semibold">{{ title }}</h3>
         <p v-if="subtitle" class="text-xs text-muted">{{ subtitle }}</p>
+        <p v-if="clickable && hasData" class="mt-0.5 text-[11px] text-muted">
+          Klik bar untuk membuka detail data
+        </p>
       </div>
     </div>
     <div
@@ -184,12 +249,13 @@ const hasData = computed(() => {
     >
       Belum ada data untuk grafik ini.
     </div>
-    <VueApexCharts
-      v-else
-      :type="type ?? 'area'"
-      :height="height ?? 280"
-      :options="chartOptions"
-      :series="chartSeries"
-    />
+    <div v-else :class="clickable ? 'cursor-pointer' : ''">
+      <VueApexCharts
+        :type="type ?? 'area'"
+        :height="height ?? 280"
+        :options="chartOptions"
+        :series="chartSeries"
+      />
+    </div>
   </Card>
 </template>

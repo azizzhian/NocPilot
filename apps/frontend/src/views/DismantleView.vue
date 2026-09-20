@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import Card from '@/components/ui/Card.vue'
 import Badge from '@/components/ui/Badge.vue'
@@ -14,9 +15,11 @@ import { dismantleApi, locationApi, type DismantleItem } from '@/services/api'
 import { todayInput } from '@/lib/date-input'
 import { Plus, Pencil, Trash2, FileText, Upload, Download } from 'lucide-vue-next'
 
+const route = useRoute()
 const search = ref('')
 const statusFilter = ref('all')
 const locationFilter = ref('')
+const odcNameFilter = ref('')
 const fromDate = ref('')
 const toDate = ref('')
 const currentPage = ref(1)
@@ -69,6 +72,7 @@ async function load(page = currentPage.value) {
         search: search.value || undefined,
         status: statusFilter.value,
         location: locationFilter.value || undefined,
+        odc_name: odcNameFilter.value || undefined,
         from: fromDate.value || undefined,
         to: toDate.value || undefined,
         page,
@@ -76,6 +80,7 @@ async function load(page = currentPage.value) {
       dismantleApi.stats({
         search: search.value || undefined,
         location: locationFilter.value || undefined,
+        odc_name: odcNameFilter.value || undefined,
         from: fromDate.value || undefined,
         to: toDate.value || undefined,
       }),
@@ -224,12 +229,29 @@ async function handleImportFile(e: Event) {
 }
 
 let searchTimeout: ReturnType<typeof setTimeout>
-watch([search, statusFilter, locationFilter, fromDate, toDate], () => {
+watch([search, statusFilter, locationFilter, odcNameFilter, fromDate, toDate], () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => load(1), 400)
 })
 
+function applyRouteQuery() {
+  const q = route.query
+  if (typeof q.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(q.from)) {
+    fromDate.value = q.from
+  }
+  if (typeof q.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(q.to)) {
+    toDate.value = q.to
+  }
+  if (typeof q.odc_name === 'string') {
+    odcNameFilter.value = q.odc_name
+  }
+  if (typeof q.location === 'string') {
+    locationFilter.value = q.location
+  }
+}
+
 onMounted(() => {
+  applyRouteQuery()
   void Promise.all([load(1), loadLocations()])
 })
 </script>
@@ -252,8 +274,9 @@ onMounted(() => {
       </Card>
     </div>
 
-    <div v-if="error && !showModal && !deleteTarget" class="mb-4 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
-      {{ error }}
+    <div v-if="odcNameFilter" class="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm text-foreground">
+      Filter ODC dari dashboard: <span class="font-semibold">{{ odcNameFilter }}</span>
+      <button type="button" class="ml-2 text-xs text-primary underline" @click="odcNameFilter = ''">Hapus</button>
     </div>
 
     <div class="mb-4 flex flex-wrap items-end gap-3">

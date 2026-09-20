@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import KpiCard from '@/components/dashboard/KpiCard.vue'
 import ChartCard from '@/components/dashboard/ChartCard.vue'
@@ -14,6 +15,7 @@ import { todayInput } from '@/lib/date-input'
 import { Activity, Trophy, Award, Cable } from 'lucide-vue-next'
 
 const auth = useAuthStore()
+const router = useRouter()
 const fromDate = ref(todayInput())
 const toDate = ref(todayInput())
 const userId = ref<number | ''>('')
@@ -80,8 +82,107 @@ const subtitle = computed(() =>
 )
 
 const stacked = computed(() => charts.value?.stacked_by_noc ?? emptyCharts().stacked_by_noc!)
-const stackedOdc = computed(() => charts.value?.stacked_by_odc ?? emptyCharts().stacked_by_odc!)
 const contribution = computed(() => charts.value?.contribution ?? emptyCharts().contribution!)
+
+type OdcCategoryKey = 'all' | 'complaints' | 'activations' | 'tickets' | 'dismantles' | 'cctv' | 'noc_updates'
+
+const odcCategoryFilter = ref<OdcCategoryKey>('all')
+
+const odcCategoryOptions: Array<{
+  key: OdcCategoryKey
+  label: string
+  seriesName: string
+  clearKey: keyof NonNullable<DashboardStats['odc_stats']>[number]
+  openKey?: keyof NonNullable<DashboardStats['odc_stats']>[number]
+  color: string
+}> = [
+  { key: 'all', label: 'Semua', seriesName: '', clearKey: 'total', color: '#64748B' },
+  { key: 'complaints', label: 'Komplain', seriesName: 'Komplain', clearKey: 'complaints_clear', openKey: 'complaints_open', color: '#EF4444' },
+  { key: 'activations', label: 'Aktivasi', seriesName: 'Aktivasi', clearKey: 'activations_clear', openKey: 'activations_open', color: '#22C55E' },
+  { key: 'tickets', label: 'Ticket', seriesName: 'Ticket', clearKey: 'tickets_clear', openKey: 'tickets_open', color: '#3498DB' },
+  { key: 'dismantles', label: 'Dismantle', seriesName: 'Dismantle', clearKey: 'dismantles_clear', openKey: 'dismantles_open', color: '#E67E22' },
+  { key: 'cctv', label: 'CCTV', seriesName: 'CCTV', clearKey: 'cctv_clear', color: '#9B59B6' },
+  { key: 'noc_updates', label: 'Update NOC', seriesName: 'Update NOC', clearKey: 'noc_updates_clear', openKey: 'noc_updates_open', color: '#64748B' },
+]
+
+function odcClearValue(
+  row: NonNullable<DashboardStats['odc_stats']>[number],
+  key: keyof NonNullable<DashboardStats['odc_stats']>[number],
+): number {
+  return Number(row[key] ?? 0)
+}
+
+const filteredOdcStats = computed(() => {
+  let rows = [...odcStats.value]
+  if (odcCategoryFilter.value === 'all') {
+    return rows.filter((r) => Number(r.total ?? 0) > 0)
+  }
+  const opt = odcCategoryOptions.find((o) => o.key === odcCategoryFilter.value)
+  if (!opt) return rows
+  return rows
+    .filter((r) => odcClearValue(r, opt.clearKey) > 0 || (opt.openKey ? odcClearValue(r, opt.openKey) > 0 : false))
+    .sort((a, b) => odcClearValue(b, opt.clearKey) - odcClearValue(a, opt.clearKey))
+})
+
+const listPerPage = 10
+const odcPage = ref(1)
+
+const odcLastPage = computed(() => Math.max(1, Math.ceil(filteredOdcStats.value.length / listPerPage)))
+const pagedOdcStats = computed(() => {
+  const start = (odcPage.value - 1) * listPerPage
+  return filteredOdcStats.value.slice(start, start + listPerPage)
+})
+
+/** Chart memakai baris yang sama dengan halaman tabel agar tinggi & ranking selaras. */
+const stackedOdc = computed(() => {
+  const rows = pagedOdcStats.value
+  const categories = rows.map((r) => r.odc_name)
+
+  if (odcCategoryFilter.value === 'all') {
+    const seriesDefs = odcCategoryOptions.filter((o) =>
+      ['complaints', 'activations', 'tickets', 'dismantles', 'cctv'].includes(o.key),
+    )
+    return {
+      categories,
+      series: seriesDefs.map((s) => ({
+        name: s.seriesName,
+        data: rows.map((r) => odcClearValue(r, s.clearKey)),
+        color: s.color,
+      })),
+    }
+  }
+
+  const opt = odcCategoryOptions.find((o) => o.key === odcCategoryFilter.value)
+  if (!opt || !opt.seriesName) {
+    return emptyCharts().stacked_by_odc!
+  }
+
+  return {
+    categories,
+    series: [{
+      name: opt.seriesName,
+      data: rows.map((r) => odcClearValue(r, opt.clearKey)),
+      color: opt.color,
+    }],
+  }
+})
+
+const stackedOdcSubtitle = computed(() => {
+  const page = odcPage.value
+  const last = odcLastPage.value
+  const n = pagedOdcStats.value.length
+  const pageNote = last > 1 ? ` · halaman ${page}/${last}` : ''
+  if (odcCategoryFilter.value === 'all') {
+    return `Stacked bar — clear per ODC (${n} baris${pageNote})`
+  }
+  const opt = odcCategoryOptions.find((o) => o.key === odcCategoryFilter.value)
+  return `Clear ${opt?.label ?? ''} per ODC (${n} baris${pageNote})`
+})
+
+const stackedOdcHeight = computed(() => {
+  const n = Math.max(1, stackedOdc.value.categories.length)
+  return Math.min(520, Math.max(220, n * 38 + 100))
+})
 
 const medal = (idx: number) => {
   if (idx === 0) return '🥇'
@@ -112,18 +213,59 @@ const heatmapMax = computed(() => {
   return Math.max(1, ...values, 0)
 })
 
-const listPerPage = 10
-const odcPage = ref(1)
+const activeOdcCategory = computed(() =>
+  odcCategoryOptions.find((o) => o.key === odcCategoryFilter.value) ?? odcCategoryOptions[0],
+)
 
-const odcLastPage = computed(() => Math.max(1, Math.ceil(odcStats.value.length / listPerPage)))
-const pagedOdcStats = computed(() => {
-  const start = (odcPage.value - 1) * listPerPage
-  return odcStats.value.slice(start, start + listPerPage)
-})
+function odcRowMetric(row: NonNullable<DashboardStats['odc_stats']>[number]) {
+  if (odcCategoryFilter.value === 'all') {
+    return row.total
+  }
+  return odcClearValue(row, activeOdcCategory.value.clearKey)
+}
+
+function setOdcCategory(key: OdcCategoryKey) {
+  odcCategoryFilter.value = key
+  odcPage.value = 1
+}
 
 function rankLabel(page: number, idx: number) {
   return medal((page - 1) * listPerPage + idx)
 }
+
+const odcSeriesRoute: Record<string, { path: string; query?: Record<string, string> }> = {
+  Komplain: { path: '/komplain' },
+  Aktivasi: { path: '/aktivasi', query: { tab: 'activation' } },
+  CCTV: { path: '/aktivasi', query: { tab: 'cctv' } },
+  Ticket: { path: '/report/ticket' },
+  Dismantle: { path: '/report/dismantle' },
+  'Update NOC': { path: '/update-noc' },
+}
+
+function onOdcChartClick(payload: {
+  category: string
+  seriesName: string
+  value: number
+}) {
+  const dest = odcSeriesRoute[payload.seriesName]
+  if (!dest) return
+
+  const odc = payload.category.trim()
+  const query: Record<string, string> = {
+    ...(dest.query ?? {}),
+    from: fromDate.value,
+    to: toDate.value,
+  }
+  if (odc && odc.toLowerCase() !== 'tanpa odc') {
+    query.odc_name = odc
+  }
+
+  void router.push({ path: dest.path, query })
+}
+
+watch(odcCategoryFilter, () => {
+  odcPage.value = 1
+})
 
 async function loadOdcs() {
   try {
@@ -361,7 +503,27 @@ onMounted(async () => {
     </div>
 
     <!-- 4b. Statistik ODC + stacked bar ODC -->
-    <div v-if="!loading && showNocPerformance" class="mt-6 grid gap-6 xl:grid-cols-2">
+    <div v-if="!loading && showNocPerformance" class="mt-6 space-y-4">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs font-medium text-muted">Filter kategori:</span>
+        <button
+          v-for="opt in odcCategoryOptions"
+          :key="opt.key"
+          type="button"
+          :class="[
+            'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border',
+            odcCategoryFilter === opt.key
+              ? 'border-transparent text-white'
+              : 'border-border bg-background text-muted hover:bg-muted/40',
+          ]"
+          :style="odcCategoryFilter === opt.key ? { backgroundColor: opt.color } : undefined"
+          @click="setOdcCategory(opt.key)"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
+
+      <div class="grid items-start gap-6 xl:grid-cols-2">
       <Card class="p-5">
         <div class="mb-4">
           <div class="flex items-center gap-2">
@@ -369,13 +531,18 @@ onMounted(async () => {
             <h3 class="text-sm font-semibold text-foreground">Statistik ODC</h3>
           </div>
           <p class="mt-1 text-xs text-muted">
-            On-Progress vs Clear per ODC — diurutkan dari total clear terbanyak
+            <template v-if="odcCategoryFilter === 'all'">
+              On-Progress vs Clear per ODC — diurutkan dari total clear terbanyak
+            </template>
+            <template v-else>
+              {{ activeOdcCategory.label }} per ODC — diurutkan dari clear terbanyak
+            </template>
           </p>
         </div>
-        <div v-if="odcStats.length" class="overflow-x-auto">
+        <div v-if="filteredOdcStats.length" class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
-              <tr class="border-b border-border text-left text-xs text-muted">
+              <tr v-if="odcCategoryFilter === 'all'" class="border-b border-border text-left text-xs text-muted">
                 <th class="pb-2 pr-2" rowspan="2">#</th>
                 <th class="pb-2 pr-3" rowspan="2">ODC</th>
                 <th class="pb-1 pr-2 text-center text-[#EF4444]" colspan="2">Komplain</th>
@@ -384,7 +551,7 @@ onMounted(async () => {
                 <th class="pb-1 pr-2 text-center text-[#E67E22]" colspan="2">Dismantle</th>
                 <th class="pb-2 text-right" rowspan="2">Total Clear</th>
               </tr>
-              <tr class="border-b border-border text-left text-[10px] text-muted">
+              <tr v-if="odcCategoryFilter === 'all'" class="border-b border-border text-left text-[10px] text-muted">
                 <th class="pb-2 pr-2 text-right font-medium">OP</th>
                 <th class="pb-2 pr-2 text-right font-medium">Clear</th>
                 <th class="pb-2 pr-2 text-right font-medium">OP</th>
@@ -393,6 +560,20 @@ onMounted(async () => {
                 <th class="pb-2 pr-2 text-right font-medium">Clear</th>
                 <th class="pb-2 pr-2 text-right font-medium">OP</th>
                 <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+              </tr>
+              <tr v-else class="border-b border-border text-left text-xs text-muted">
+                <th class="pb-2 pr-2">#</th>
+                <th class="pb-2 pr-3">ODC</th>
+                <th
+                  v-if="activeOdcCategory.openKey"
+                  class="pb-2 pr-2 text-right"
+                >
+                  OP
+                </th>
+                <th class="pb-2 pr-2 text-right" :style="{ color: activeOdcCategory.color }">
+                  Clear
+                </th>
+                <th class="pb-2 text-right">Total</th>
               </tr>
             </thead>
             <tbody>
@@ -403,15 +584,29 @@ onMounted(async () => {
               >
                 <td class="py-2.5 pr-2">{{ rankLabel(odcPage, idx) }}</td>
                 <td class="py-2.5 pr-3 font-medium text-foreground">{{ row.odc_name }}</td>
-                <td class="py-2.5 pr-2 text-right text-warning">{{ row.complaints_open }}</td>
-                <td class="py-2.5 pr-2 text-right">{{ row.complaints_clear }}</td>
-                <td class="py-2.5 pr-2 text-right text-warning">{{ row.tickets_open }}</td>
-                <td class="py-2.5 pr-2 text-right">{{ row.tickets_clear }}</td>
-                <td class="py-2.5 pr-2 text-right text-warning">{{ row.noc_updates_open }}</td>
-                <td class="py-2.5 pr-2 text-right">{{ row.noc_updates_clear }}</td>
-                <td class="py-2.5 pr-2 text-right text-warning">{{ row.dismantles_open }}</td>
-                <td class="py-2.5 pr-2 text-right">{{ row.dismantles_clear }}</td>
-                <td class="py-2.5 text-right font-semibold">{{ row.total }}</td>
+                <template v-if="odcCategoryFilter === 'all'">
+                  <td class="py-2.5 pr-2 text-right text-warning">{{ row.complaints_open }}</td>
+                  <td class="py-2.5 pr-2 text-right">{{ row.complaints_clear }}</td>
+                  <td class="py-2.5 pr-2 text-right text-warning">{{ row.tickets_open }}</td>
+                  <td class="py-2.5 pr-2 text-right">{{ row.tickets_clear }}</td>
+                  <td class="py-2.5 pr-2 text-right text-warning">{{ row.noc_updates_open }}</td>
+                  <td class="py-2.5 pr-2 text-right">{{ row.noc_updates_clear }}</td>
+                  <td class="py-2.5 pr-2 text-right text-warning">{{ row.dismantles_open }}</td>
+                  <td class="py-2.5 pr-2 text-right">{{ row.dismantles_clear }}</td>
+                  <td class="py-2.5 text-right font-semibold">{{ row.total }}</td>
+                </template>
+                <template v-else>
+                  <td
+                    v-if="activeOdcCategory.openKey"
+                    class="py-2.5 pr-2 text-right text-warning"
+                  >
+                    {{ odcClearValue(row, activeOdcCategory.openKey) }}
+                  </td>
+                  <td class="py-2.5 pr-2 text-right">
+                    {{ odcClearValue(row, activeOdcCategory.clearKey) }}
+                  </td>
+                  <td class="py-2.5 text-right font-semibold">{{ odcRowMetric(row) }}</td>
+                </template>
               </tr>
             </tbody>
           </table>
@@ -425,19 +620,24 @@ onMounted(async () => {
             Selanjutnya
           </Button>
         </div>
-        <p v-else-if="!odcStats.length" class="py-8 text-center text-sm text-muted">Belum ada data ODC di periode ini.</p>
+        <p v-else-if="!filteredOdcStats.length" class="py-8 text-center text-sm text-muted">
+          Belum ada data ODC untuk filter ini.
+        </p>
       </Card>
 
       <ChartCard
         title="Performa ODC per Kategori"
-        subtitle="Stacked bar — clear per ODC (top 20)"
+        :subtitle="stackedOdcSubtitle"
         :categories="stackedOdc.categories"
         :series="stackedOdc.series"
         type="bar"
         horizontal
         stacked
-        :height="Math.max(240, (stackedOdc.categories.length || 1) * 42 + 90)"
+        clickable
+        :height="stackedOdcHeight"
+        @point-click="onOdcChartClick"
       />
+      </div>
     </div>
 
     <!-- 5. Heatmap NOC -->

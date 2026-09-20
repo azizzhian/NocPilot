@@ -213,6 +213,10 @@ const showRangeFilter = computed(() =>
   ['complaint', 'noc', 'activation', 'cctv'].includes(activeTab.value),
 )
 
+const showOdcFilter = computed(() =>
+  ['complaint', 'noc', 'activation', 'cctv'].includes(activeTab.value),
+)
+
 const showOdcExportFilter = computed(
   () => activeTab.value === 'complaint' || activeTab.value === 'noc',
 )
@@ -926,7 +930,24 @@ const { connected: pollConnected, start: startPoll, stop: stopPoll } = useDailyE
   handleRealtimeEvent,
 )
 
+function applyRouteQuery() {
+  const q = route.query
+  if (typeof q.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(q.from)) {
+    filterFrom.value = q.from
+  }
+  if (typeof q.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(q.to)) {
+    filterTo.value = q.to
+  }
+  if (typeof q.odc_name === 'string') {
+    filterOdc.value = q.odc_name
+  }
+  if (typeof q.tab === 'string' && allowedTabKeys.value.includes(q.tab)) {
+    activeTab.value = q.tab
+  }
+}
+
 onMounted(() => {
+  applyRouteQuery()
   void load().finally(() => startPoll())
 })
 
@@ -962,7 +983,7 @@ onUnmounted(stopPoll)
                 class="w-full sm:w-48"
               />
             </div>
-            <template v-if="showOdcExportFilter">
+            <template v-if="showOdcFilter">
               <div class="min-w-0 flex-1 sm:flex-none">
                 <label class="mb-1 block text-[11px] text-muted">ODC / Site</label>
                 <Select v-model="filterOdc" class="w-full sm:w-44">
@@ -970,7 +991,13 @@ onUnmounted(stopPoll)
                   <option v-for="o in lookups.odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
                 </Select>
               </div>
-              <Button variant="outline" class="w-full sm:w-auto" :disabled="exporting" @click="exportCurrentTab">
+              <Button
+                v-if="showOdcExportFilter"
+                variant="outline"
+                class="w-full sm:w-auto"
+                :disabled="exporting"
+                @click="exportCurrentTab"
+              >
                 <Download class="h-4 w-4" /> {{ exporting ? 'Export...' : 'Excel' }}
               </Button>
             </template>

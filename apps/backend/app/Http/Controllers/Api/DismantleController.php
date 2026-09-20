@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\DismantleResource;
 use App\Models\Customer;
 use App\Models\Dismantle;
+use App\Models\Location;
 use App\Services\Audit\ActivityLogger;
 use App\Services\Dismantle\DismantleImportService;
 use App\Services\Notification\NotificationService;
@@ -80,6 +81,25 @@ class DismantleController extends Controller
 
         if ($location = trim($request->string('location')->toString())) {
             $query->where('location', $location);
+        }
+
+        if ($odcName = trim($request->string('odc_name')->toString())) {
+            $aliases = Location::query()
+                ->whereHas('odc', fn ($q) => $q->where('name', $odcName))
+                ->pluck('name')
+                ->map(fn ($n) => (string) $n)
+                ->all();
+
+            $query->where(function ($q) use ($odcName, $aliases) {
+                $q->where('location', $odcName)
+                    ->orWhere('area', $odcName)
+                    ->orWhere('location', 'like', '%'.$odcName.'%')
+                    ->orWhere('area', 'like', '%'.$odcName.'%');
+
+                if ($aliases !== []) {
+                    $q->orWhereIn('location', $aliases);
+                }
+            });
         }
 
         $from = $request->string('from')->toString();

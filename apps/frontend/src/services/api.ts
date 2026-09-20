@@ -543,6 +543,7 @@ export const dismantleApi = {
     search?: string
     status?: string
     location?: string
+    odc_name?: string
     from?: string
     to?: string
     page?: number
@@ -550,6 +551,7 @@ export const dismantleApi = {
   stats: (params?: {
     search?: string
     location?: string
+    odc_name?: string
     from?: string
     to?: string
   }) => api.get<Record<string, number>>('/dismantles/stats', { params }),

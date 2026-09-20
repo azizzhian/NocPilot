@@ -903,11 +903,27 @@ class DailyEntryController extends Controller
         $from = $request->string('from', now()->toDateString())->toString();
         $to = $request->string('to', $from)->toString();
         $search = trim($request->string('search')->toString());
+        $odc = trim($request->string('odc_name')->toString()) ?: null;
+
+        $oltNames = $odc ? $this->oltNamesForOdc($odc) : [];
+        $odpNames = $odc ? $this->odpNamesForOdc($odc) : [];
 
         $items = DailyActivation::query()
             ->with(['creator:id,name', 'clearer:id,name'])
             ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
             ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
+            ->when($odc, function ($q) use ($odc, $oltNames, $odpNames) {
+                $q->where(function ($q2) use ($odc, $oltNames, $odpNames) {
+                    if ($oltNames !== []) {
+                        $q2->orWhereIn('olt_name', $oltNames);
+                    }
+                    if ($odpNames !== []) {
+                        $q2->orWhereIn('odp_name', $odpNames);
+                    }
+                    // fallback: exact string match if names coincide
+                    $q2->orWhere('olt_name', $odc)->orWhere('odp_name', $odc);
+                });
+            })
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->limit(500)
@@ -922,11 +938,16 @@ class DailyEntryController extends Controller
         $from = $request->string('from', now()->toDateString())->toString();
         $to = $request->string('to', $from)->toString();
         $search = trim($request->string('search')->toString());
+        $odc = trim($request->string('odc_name')->toString()) ?: null;
+
+        $customerNames = $odc ? $this->customerNamesForOdc($odc) : [];
 
         $items = DailyCctvSetup::query()
             ->with(['creator:id,name', 'clearer:id,name'])
             ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
             ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
+            ->when($odc && $customerNames !== [], fn ($q) => $q->whereIn('customer_name', $customerNames))
+            ->when($odc && $customerNames === [], fn ($q) => $q->whereRaw('1 = 0'))
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->limit(500)
@@ -934,6 +955,36 @@ class DailyEntryController extends Controller
             ->map(fn (DailyCctvSetup $c) => $this->entrySerializer->serialize($c, $to));
 
         return response()->json(['data' => $items]);
+    }
+
+    /** @return list<string> */
+    protected function oltNamesForOdc(string $odcName): array
+    {
+        return Olt::query()
+            ->whereHas('odc', fn ($q) => $q->where('name', $odcName))
+            ->pluck('name')
+            ->map(fn ($n) => (string) $n)
+            ->all();
+    }
+
+    /** @return list<string> */
+    protected function odpNamesForOdc(string $odcName): array
+    {
+        return Odp::query()
+            ->whereHas('odc', fn ($q) => $q->where('name', $odcName))
+            ->pluck('name')
+            ->map(fn ($n) => (string) $n)
+            ->all();
+    }
+
+    /** @return list<string> */
+    protected function customerNamesForOdc(string $odcName): array
+    {
+        return Customer::query()
+            ->whereHas('odc', fn ($q) => $q->where('name', $odcName))
+            ->pluck('name')
+            ->map(fn ($n) => (string) $n)
+            ->all();
     }
 
     public function exportNocUpdates(Request $request)
