@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import Card from '@/components/ui/Card.vue'
@@ -48,6 +48,11 @@ const form = ref({
   status: 'On-Progress',
 })
 
+const odcFilterLabel = computed(() =>
+  odcNameFilter.value === '__none__' || odcNameFilter.value.toLowerCase() === 'tanpa odc'
+    ? 'Tanpa ODC'
+    : odcNameFilter.value,
+)
 const statusTabs = [
   { key: 'all', label: 'Semua' },
   { key: 'Pending', label: 'Pending' },
@@ -274,8 +279,9 @@ onMounted(() => {
       </Card>
     </div>
 
-    <div v-if="odcNameFilter" class="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm text-foreground">
-      Filter ODC dari dashboard: <span class="font-semibold">{{ odcNameFilter }}</span>
+    <div v-if="odcNameFilter" class="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-foreground">
+      Filter ODC dari dashboard: <span class="font-semibold">{{ odcFilterLabel }}</span>
+      <span v-if="odcNameFilter === '__none__'" class="text-muted"> — lokasi kosong, isi lokasi agar ter-map ke ODC.</span>
       <button type="button" class="ml-2 text-xs text-primary underline" @click="odcNameFilter = ''">Hapus</button>
     </div>
 

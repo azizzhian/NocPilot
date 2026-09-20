@@ -808,6 +808,7 @@ class DailyEntryController extends Controller
         $to = $request->string('to', $from)->toString();
         $odc = trim($request->string('odc_name')->toString()) ?: null;
         $search = trim($request->string('search')->toString());
+        $unmapped = $this->isUnmappedOdcFilter($odc);
 
         $rows = DailyComplaint::query()
             ->with(['creator:id,name', 'clearer:id,name'])
@@ -818,9 +819,13 @@ class DailyEntryController extends Controller
                         ->orWhere('problem', 'like', "%{$search}%")
                         ->orWhere('location_label', 'like', "%{$search}%");
                 });
-            }, function ($q) use ($from, $to, $odc) {
-                $q->whereBetween('report_date', [$from, $to])
-                    ->when($odc, fn ($q2) => $q2->where('odc_name', $odc));
+            }, function ($q) use ($from, $to, $odc, $unmapped) {
+                $q->whereBetween('report_date', [$from, $to]);
+                if ($unmapped) {
+                    $this->scopeEmptyOdcName($q);
+                } elseif ($odc) {
+                    $q->where('odc_name', $odc);
+                }
             })
             ->orderBy('report_date')
             ->orderBy('id')
@@ -855,6 +860,7 @@ class DailyEntryController extends Controller
         $to = $request->string('to', $from)->toString();
         $odc = trim($request->string('odc_name')->toString()) ?: null;
         $search = trim($request->string('search')->toString());
+        $unmapped = $this->isUnmappedOdcFilter($odc);
 
         $items = DailyComplaint::query()
             ->with(['creator:id,name', 'clearer:id,name', 'customer:id,name,customer_code,odc_id'])
@@ -866,9 +872,13 @@ class DailyEntryController extends Controller
                         ->orWhere('problem', 'like', "%{$search}%")
                         ->orWhere('location_label', 'like', "%{$search}%");
                 });
-            }, function ($q) use ($from, $to, $odc) {
-                $q->where(fn ($q2) => $this->forDateRangeOrStillOpen($q2, $from, $to))
-                    ->when($odc, fn ($q2) => $q2->where('odc_name', $odc));
+            }, function ($q) use ($from, $to, $odc, $unmapped) {
+                $q->where(fn ($q2) => $this->forDateRangeOrStillOpen($q2, $from, $to));
+                if ($unmapped) {
+                    $this->scopeEmptyOdcName($q);
+                } elseif ($odc) {
+                    $q->where('odc_name', $odc);
+                }
             })
             ->orderByDesc('report_date')
             ->orderByDesc('id')
@@ -884,11 +894,13 @@ class DailyEntryController extends Controller
         $from = $request->string('from', now()->toDateString())->toString();
         $to = $request->string('to', $from)->toString();
         $odc = trim($request->string('odc_name')->toString()) ?: null;
+        $unmapped = $this->isUnmappedOdcFilter($odc);
 
         $items = DailyNocUpdate::query()
             ->with(['creator:id,name', 'clearer:id,name'])
             ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
-            ->when($odc, fn ($q) => $q->where('odc_name', $odc))
+            ->when($unmapped, fn ($q) => $this->scopeEmptyOdcName($q))
+            ->when(! $unmapped && $odc, fn ($q) => $q->where('odc_name', $odc))
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->limit(500)
@@ -904,15 +916,17 @@ class DailyEntryController extends Controller
         $to = $request->string('to', $from)->toString();
         $search = trim($request->string('search')->toString());
         $odc = trim($request->string('odc_name')->toString()) ?: null;
+        $unmapped = $this->isUnmappedOdcFilter($odc);
 
-        $oltNames = $odc ? $this->oltNamesForOdc($odc) : [];
-        $odpNames = $odc ? $this->odpNamesForOdc($odc) : [];
+        $oltNames = (! $unmapped && $odc) ? $this->oltNamesForOdc($odc) : [];
+        $odpNames = (! $unmapped && $odc) ? $this->odpNamesForOdc($odc) : [];
 
         $items = DailyActivation::query()
             ->with(['creator:id,name', 'clearer:id,name'])
             ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
             ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
-            ->when($odc, function ($q) use ($odc, $oltNames, $odpNames) {
+            ->when($unmapped, fn ($q) => $this->scopeActivationUnmapped($q))
+            ->when(! $unmapped && $odc, function ($q) use ($odc, $oltNames, $odpNames) {
                 $q->where(function ($q2) use ($odc, $oltNames, $odpNames) {
                     if ($oltNames !== []) {
                         $q2->orWhereIn('olt_name', $oltNames);
@@ -920,8 +934,8 @@ class DailyEntryController extends Controller
                     if ($odpNames !== []) {
                         $q2->orWhereIn('odp_name', $odpNames);
                     }
-                    // fallback: exact string match if names coincide
-                    $q2->orWhere('olt_name', $odc)->orWhere('odp_name', $odc);
+                    $q2->orWhereRaw('LOWER(TRIM(olt_name)) = ?', [mb_strtolower($odc)])
+                        ->orWhereRaw('LOWER(TRIM(odp_name)) = ?', [mb_strtolower($odc)]);
                 });
             })
             ->orderByDesc('report_date')
@@ -939,15 +953,17 @@ class DailyEntryController extends Controller
         $to = $request->string('to', $from)->toString();
         $search = trim($request->string('search')->toString());
         $odc = trim($request->string('odc_name')->toString()) ?: null;
+        $unmapped = $this->isUnmappedOdcFilter($odc);
 
-        $customerNames = $odc ? $this->customerNamesForOdc($odc) : [];
+        $customerNames = (! $unmapped && $odc) ? $this->customerNamesForOdc($odc) : [];
 
         $items = DailyCctvSetup::query()
             ->with(['creator:id,name', 'clearer:id,name'])
             ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
             ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
-            ->when($odc && $customerNames !== [], fn ($q) => $q->whereIn('customer_name', $customerNames))
-            ->when($odc && $customerNames === [], fn ($q) => $q->whereRaw('1 = 0'))
+            ->when($unmapped, fn ($q) => $this->scopeCctvUnmapped($q))
+            ->when(! $unmapped && $odc && $customerNames !== [], fn ($q) => $q->whereIn('customer_name', $customerNames))
+            ->when(! $unmapped && $odc && $customerNames === [], fn ($q) => $q->whereRaw('1 = 0'))
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->limit(500)
@@ -955,6 +971,96 @@ class DailyEntryController extends Controller
             ->map(fn (DailyCctvSetup $c) => $this->entrySerializer->serialize($c, $to));
 
         return response()->json(['data' => $items]);
+    }
+
+    protected function isUnmappedOdcFilter(?string $odc): bool
+    {
+        if ($odc === null || $odc === '') {
+            return false;
+        }
+
+        $key = mb_strtolower(trim($odc));
+
+        return $key === '__none__' || $key === 'tanpa odc';
+    }
+
+    /**
+     * @param  \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>  $query
+     */
+    protected function scopeEmptyOdcName($query): void
+    {
+        $query->where(function ($q) {
+            $q->whereNull('odc_name')
+                ->orWhere('odc_name', '')
+                ->orWhereRaw("TRIM(odc_name) = ''");
+        });
+    }
+
+    /**
+     * Aktivasi tanpa map OLT→ODC maupun ODP→ODC.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\DailyActivation>  $query
+     */
+    protected function scopeActivationUnmapped($query): void
+    {
+        $mappedOlts = Olt::query()
+            ->whereNotNull('odc_id')
+            ->pluck('name')
+            ->map(fn ($n) => mb_strtolower(trim((string) $n)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $mappedOdps = Odp::query()
+            ->whereNotNull('odc_id')
+            ->pluck('name')
+            ->map(fn ($n) => mb_strtolower(trim((string) $n)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $query->where(function ($q) use ($mappedOlts, $mappedOdps) {
+            $q->where(function ($qOlt) use ($mappedOlts) {
+                $qOlt->whereNull('olt_name')->orWhere('olt_name', '')->orWhereRaw("TRIM(olt_name) = ''");
+                if ($mappedOlts !== []) {
+                    $ph = implode(',', array_fill(0, count($mappedOlts), '?'));
+                    $qOlt->orWhereRaw("LOWER(TRIM(olt_name)) NOT IN ($ph)", $mappedOlts);
+                }
+            })->where(function ($qOdp) use ($mappedOdps) {
+                $qOdp->whereNull('odp_name')->orWhere('odp_name', '')->orWhereRaw("TRIM(odp_name) = ''");
+                if ($mappedOdps !== []) {
+                    $ph = implode(',', array_fill(0, count($mappedOdps), '?'));
+                    $qOdp->orWhereRaw("LOWER(TRIM(odp_name)) NOT IN ($ph)", $mappedOdps);
+                }
+            });
+        });
+    }
+
+    /**
+     * CCTV yang customer-nya belum punya ODC di master pelanggan.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\DailyCctvSetup>  $query
+     */
+    protected function scopeCctvUnmapped($query): void
+    {
+        $mappedCustomers = Customer::query()
+            ->whereNotNull('odc_id')
+            ->pluck('name')
+            ->map(fn ($n) => mb_strtolower(trim((string) $n)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $query->where(function ($q) use ($mappedCustomers) {
+            $q->whereNull('customer_name')->orWhere('customer_name', '')->orWhereRaw("TRIM(customer_name) = ''");
+            if ($mappedCustomers !== []) {
+                $ph = implode(',', array_fill(0, count($mappedCustomers), '?'));
+                $q->orWhereRaw("LOWER(TRIM(customer_name)) NOT IN ($ph)", $mappedCustomers);
+            }
+        });
     }
 
     /** @return list<string> */
@@ -992,11 +1098,13 @@ class DailyEntryController extends Controller
         $from = $request->string('from', now()->toDateString())->toString();
         $to = $request->string('to', $from)->toString();
         $odc = trim($request->string('odc_name')->toString()) ?: null;
+        $unmapped = $this->isUnmappedOdcFilter($odc);
 
         $rows = DailyNocUpdate::query()
             ->with(['creator:id,name', 'clearer:id,name'])
             ->whereBetween('report_date', [$from, $to])
-            ->when($odc, fn ($q) => $q->where('odc_name', $odc))
+            ->when($unmapped, fn ($q) => $this->scopeEmptyOdcName($q))
+            ->when(! $unmapped && $odc, fn ($q) => $q->where('odc_name', $odc))
             ->orderBy('report_date')
             ->orderBy('id')
             ->get()

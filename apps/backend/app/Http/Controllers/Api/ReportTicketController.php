@@ -45,7 +45,7 @@ class ReportTicketController extends Controller
         }
 
         if ($odc = trim($request->string('odc_name')->toString())) {
-            $query->where('odc_name', $odc);
+            $this->applyOdcNameFilter($query, $odc);
         }
 
         return ReportTicketResource::collection($query->paginate(20));
@@ -137,7 +137,7 @@ class ReportTicketController extends Controller
             $query->whereDate('opened_at', '<=', $to);
         }
         if ($odc = trim($request->string('odc_name')->toString())) {
-            $query->where('odc_name', $odc);
+            $this->applyOdcNameFilter($query, $odc);
         }
         if ($status = $request->string('status')->toString()) {
             if ($status !== '' && $status !== 'all') {
@@ -184,6 +184,25 @@ class ReportTicketController extends Controller
             'closed_at' => 'nullable|date',
             'notes' => 'nullable|string',
         ]);
+    }
+
+    /**
+     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\ReportTicket>  $query
+     */
+    private function applyOdcNameFilter($query, string $odc): void
+    {
+        $key = mb_strtolower(trim($odc));
+        if ($key === '__none__' || $key === 'tanpa odc') {
+            $query->where(function ($q) {
+                $q->whereNull('odc_name')
+                    ->orWhere('odc_name', '')
+                    ->orWhereRaw("TRIM(odc_name) = ''");
+            });
+
+            return;
+        }
+
+        $query->where('odc_name', $odc);
     }
 
     private function syncClearFields(ReportTicket $ticket, string $status, int $userId, ?string $previous): void

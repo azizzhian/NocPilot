@@ -256,7 +256,10 @@ function onOdcChartClick(payload: {
     from: fromDate.value,
     to: toDate.value,
   }
-  if (odc && odc.toLowerCase() !== 'tanpa odc') {
+  if (odc.toLowerCase() === 'tanpa odc') {
+    // Filter khusus: data yang belum ter-map ke ODC (untuk revisi)
+    query.odc_name = '__none__'
+  } else if (odc) {
     query.odc_name = odc
   }
 

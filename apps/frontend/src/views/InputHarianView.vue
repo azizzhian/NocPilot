@@ -956,6 +956,13 @@ onUnmounted(stopPoll)
 
 <template>
   <AppLayout :title="pageTitle" :subtitle="pageSubtitle">
+    <div
+      v-if="filterOdc === '__none__'"
+      class="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-foreground"
+    >
+      Menampilkan data <span class="font-semibold">Tanpa ODC</span> (belum ter-map) — revisi OLT/ODP/ODC agar terhitung benar di dashboard.
+      <button type="button" class="ml-2 text-xs text-primary underline" @click="filterOdc = ''">Hapus filter</button>
+    </div>
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <p class="text-sm text-muted">
           Operasional NOC · {{ pageTitle }}
@@ -988,6 +995,7 @@ onUnmounted(stopPoll)
                 <label class="mb-1 block text-[11px] text-muted">ODC / Site</label>
                 <Select v-model="filterOdc" class="w-full sm:w-44">
                   <option value="">Semua ODC</option>
+                  <option value="__none__">Tanpa ODC</option>
                   <option v-for="o in lookups.odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
                 </Select>
               </div>

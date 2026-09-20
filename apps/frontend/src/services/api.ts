@@ -844,9 +844,9 @@ export const dailyEntryApi = {
     api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/complaints', { params }),
   listNocUpdates: (params: { from: string; to: string; odc_name?: string }) =>
     api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/noc-updates', { params }),
-  listActivations: (params: { from: string; to: string; search?: string }) =>
+  listActivations: (params: { from: string; to: string; search?: string; odc_name?: string }) =>
     api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/activations', { params }),
-  listCctvSetups: (params: { from: string; to: string; search?: string }) =>
+  listCctvSetups: (params: { from: string; to: string; search?: string; odc_name?: string }) =>
     api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/cctv', { params }),
   exportComplaints: (params: { from: string; to: string; odc_name?: string; search?: string }) =>
     downloadFile('/daily-entry/export/complaints', `komplain-${params.from}-${params.to}.xlsx`, params),

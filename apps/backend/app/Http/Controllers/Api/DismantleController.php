@@ -84,22 +84,32 @@ class DismantleController extends Controller
         }
 
         if ($odcName = trim($request->string('odc_name')->toString())) {
-            $aliases = Location::query()
-                ->whereHas('odc', fn ($q) => $q->where('name', $odcName))
-                ->pluck('name')
-                ->map(fn ($n) => (string) $n)
-                ->all();
+            $key = mb_strtolower($odcName);
+            if ($key === '__none__' || $key === 'tanpa odc') {
+                // Dashboard "Tanpa ODC" = lokasi kosong
+                $query->where(function ($q) {
+                    $q->whereNull('location')
+                        ->orWhere('location', '')
+                        ->orWhereRaw("TRIM(location) = ''");
+                });
+            } else {
+                $aliases = Location::query()
+                    ->whereHas('odc', fn ($q) => $q->where('name', $odcName))
+                    ->pluck('name')
+                    ->map(fn ($n) => (string) $n)
+                    ->all();
 
-            $query->where(function ($q) use ($odcName, $aliases) {
-                $q->where('location', $odcName)
-                    ->orWhere('area', $odcName)
-                    ->orWhere('location', 'like', '%'.$odcName.'%')
-                    ->orWhere('area', 'like', '%'.$odcName.'%');
+                $query->where(function ($q) use ($odcName, $aliases) {
+                    $q->where('location', $odcName)
+                        ->orWhere('area', $odcName)
+                        ->orWhere('location', 'like', '%'.$odcName.'%')
+                        ->orWhere('area', 'like', '%'.$odcName.'%');
 
-                if ($aliases !== []) {
-                    $q->orWhereIn('location', $aliases);
-                }
-            });
+                    if ($aliases !== []) {
+                        $q->orWhereIn('location', $aliases);
+                    }
+                });
+            }
         }
 
         $from = $request->string('from')->toString();

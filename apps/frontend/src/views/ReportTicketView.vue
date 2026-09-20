@@ -276,6 +276,14 @@ onMounted(async () => {
       {{ error }}
     </div>
 
+    <div
+      v-if="odcName === '__none__'"
+      class="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-foreground"
+    >
+      Menampilkan ticket <span class="font-semibold">Tanpa ODC</span> — isi ODC/Site untuk revisi.
+      <button type="button" class="ml-2 text-xs text-primary underline" @click="odcName = ''">Hapus filter</button>
+    </div>
+
     <div class="mb-4 flex flex-wrap items-end gap-3">
       <SearchInput v-model="search" placeholder="Cari nama / ID / lokasi..." class="max-w-sm" />
       <DateRangePicker v-model:from="fromDate" v-model:to="toDate" class="w-64" />
@@ -283,6 +291,7 @@ onMounted(async () => {
         <label class="mb-1 block text-[11px] text-muted">ODC / Site</label>
         <Select v-model="odcName" class="w-44">
           <option value="">Semua ODC</option>
+          <option value="__none__">Tanpa ODC</option>
           <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
         </Select>
       </div>
