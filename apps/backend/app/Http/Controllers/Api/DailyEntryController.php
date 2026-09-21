@@ -921,11 +921,10 @@ class DailyEntryController extends Controller
         $oltNames = (! $unmapped && $odc) ? $this->oltNamesForOdc($odc) : [];
         $odpNames = (! $unmapped && $odc) ? $this->odpNamesForOdc($odc) : [];
 
-        $items = DailyActivation::query()
+        $query = DailyActivation::query()
             ->with(['creator:id,name', 'clearer:id,name'])
             ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
             ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
-            ->when($unmapped, fn ($q) => $this->scopeActivationUnmapped($q))
             ->when(! $unmapped && $odc, function ($q) use ($odc, $oltNames, $odpNames) {
                 $q->where(function ($q2) use ($odc, $oltNames, $odpNames) {
                     if ($oltNames !== []) {
@@ -939,10 +938,21 @@ class DailyEntryController extends Controller
                 });
             })
             ->orderByDesc('report_date')
-            ->orderByDesc('id')
-            ->limit(500)
-            ->get()
-            ->map(fn (DailyActivation $a) => $this->entrySerializer->serialize($a, $to));
+            ->orderByDesc('id');
+
+        // Filter Tanpa ODC di PHP — sama persis dengan DashboardController::activationCountsByOdc
+        if ($unmapped) {
+            $oltMap = $this->oltNameToOdcMap();
+            $odpMap = $this->odpNameToOdcMap();
+            $items = $query->limit(3000)->get()
+                ->filter(fn (DailyActivation $a) => $this->activationIsTanpaOdc($a, $oltMap, $odpMap))
+                ->take(500)
+                ->values()
+                ->map(fn (DailyActivation $a) => $this->entrySerializer->serialize($a, $to));
+        } else {
+            $items = $query->limit(500)->get()
+                ->map(fn (DailyActivation $a) => $this->entrySerializer->serialize($a, $to));
+        }
 
         return response()->json(['data' => $items]);
     }
@@ -957,18 +967,26 @@ class DailyEntryController extends Controller
 
         $customerNames = (! $unmapped && $odc) ? $this->customerNamesForOdc($odc) : [];
 
-        $items = DailyCctvSetup::query()
+        $query = DailyCctvSetup::query()
             ->with(['creator:id,name', 'clearer:id,name'])
             ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
             ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
-            ->when($unmapped, fn ($q) => $this->scopeCctvUnmapped($q))
             ->when(! $unmapped && $odc && $customerNames !== [], fn ($q) => $q->whereIn('customer_name', $customerNames))
             ->when(! $unmapped && $odc && $customerNames === [], fn ($q) => $q->whereRaw('1 = 0'))
             ->orderByDesc('report_date')
-            ->orderByDesc('id')
-            ->limit(500)
-            ->get()
-            ->map(fn (DailyCctvSetup $c) => $this->entrySerializer->serialize($c, $to));
+            ->orderByDesc('id');
+
+        if ($unmapped) {
+            $customerMap = $this->customerNameToOdcMap();
+            $items = $query->limit(3000)->get()
+                ->filter(fn (DailyCctvSetup $c) => $this->cctvIsTanpaOdc($c, $customerMap))
+                ->take(500)
+                ->values()
+                ->map(fn (DailyCctvSetup $c) => $this->entrySerializer->serialize($c, $to));
+        } else {
+            $items = $query->limit(500)->get()
+                ->map(fn (DailyCctvSetup $c) => $this->entrySerializer->serialize($c, $to));
+        }
 
         return response()->json(['data' => $items]);
     }
@@ -997,70 +1015,108 @@ class DailyEntryController extends Controller
     }
 
     /**
-     * Aktivasi tanpa map OLT→ODC maupun ODP→ODC.
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\DailyActivation>  $query
+     * Sama dengan DashboardController: strip suffix (…), lowercase.
      */
-    protected function scopeActivationUnmapped($query): void
+    protected function normalizeLookupName(string $value): string
     {
-        $mappedOlts = Olt::query()
-            ->whereNotNull('odc_id')
-            ->pluck('name')
-            ->map(fn ($n) => mb_strtolower(trim((string) $n)))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
+        $value = trim($value);
+        $value = preg_replace('/\s*\([^)]*\)\s*$/u', '', $value) ?? $value;
 
-        $mappedOdps = Odp::query()
-            ->whereNotNull('odc_id')
-            ->pluck('name')
-            ->map(fn ($n) => mb_strtolower(trim((string) $n)))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
-        $query->where(function ($q) use ($mappedOlts, $mappedOdps) {
-            $q->where(function ($qOlt) use ($mappedOlts) {
-                $qOlt->whereNull('olt_name')->orWhere('olt_name', '')->orWhereRaw("TRIM(olt_name) = ''");
-                if ($mappedOlts !== []) {
-                    $ph = implode(',', array_fill(0, count($mappedOlts), '?'));
-                    $qOlt->orWhereRaw("LOWER(TRIM(olt_name)) NOT IN ($ph)", $mappedOlts);
-                }
-            })->where(function ($qOdp) use ($mappedOdps) {
-                $qOdp->whereNull('odp_name')->orWhere('odp_name', '')->orWhereRaw("TRIM(odp_name) = ''");
-                if ($mappedOdps !== []) {
-                    $ph = implode(',', array_fill(0, count($mappedOdps), '?'));
-                    $qOdp->orWhereRaw("LOWER(TRIM(odp_name)) NOT IN ($ph)", $mappedOdps);
-                }
-            });
-        });
+        return mb_strtolower(trim($value));
     }
 
     /**
-     * CCTV yang customer-nya belum punya ODC di master pelanggan.
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\DailyCctvSetup>  $query
+     * @return array<string, string> olt name (lowercase) → odc name
      */
-    protected function scopeCctvUnmapped($query): void
+    protected function oltNameToOdcMap(): array
     {
-        $mappedCustomers = Customer::query()
+        $cache = [];
+        Olt::query()
+            ->with('odc:id,name')
             ->whereNotNull('odc_id')
-            ->pluck('name')
-            ->map(fn ($n) => mb_strtolower(trim((string) $n)))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
+            ->get(['id', 'name', 'odc_id'])
+            ->each(function (Olt $olt) use (&$cache): void {
+                $oltKey = mb_strtolower(trim((string) $olt->name));
+                $odcName = trim((string) ($olt->odc?->name ?? ''));
+                if ($oltKey !== '' && $odcName !== '') {
+                    $cache[$oltKey] = $odcName;
+                }
+            });
 
-        $query->where(function ($q) use ($mappedCustomers) {
-            $q->whereNull('customer_name')->orWhere('customer_name', '')->orWhereRaw("TRIM(customer_name) = ''");
-            if ($mappedCustomers !== []) {
-                $ph = implode(',', array_fill(0, count($mappedCustomers), '?'));
-                $q->orWhereRaw("LOWER(TRIM(customer_name)) NOT IN ($ph)", $mappedCustomers);
-            }
-        });
+        return $cache;
+    }
+
+    /**
+     * @return array<string, string> odp name (lowercase) → odc name
+     */
+    protected function odpNameToOdcMap(): array
+    {
+        $cache = [];
+        Odp::query()
+            ->with('odc:id,name')
+            ->get(['id', 'name', 'odc_id'])
+            ->each(function (Odp $odp) use (&$cache): void {
+                $odpKey = mb_strtolower(trim((string) $odp->name));
+                $odcName = trim((string) ($odp->odc?->name ?? ''));
+                if ($odpKey !== '' && $odcName !== '') {
+                    $cache[$odpKey] = $odcName;
+                }
+            });
+
+        return $cache;
+    }
+
+    /**
+     * @return array<string, string> customer name (normalized) → odc name atau "Tanpa ODC"
+     */
+    protected function customerNameToOdcMap(): array
+    {
+        $cache = [];
+        Customer::query()
+            ->with('odc:id,name')
+            ->get(['id', 'name', 'odc_id'])
+            ->each(function (Customer $customer) use (&$cache): void {
+                $key = $this->normalizeLookupName((string) $customer->name);
+                if ($key === '') {
+                    return;
+                }
+                $odcName = trim((string) ($customer->odc?->name ?? ''));
+                $cache[$key] = $odcName !== '' ? $odcName : 'Tanpa ODC';
+            });
+
+        return $cache;
+    }
+
+    /**
+     * @param  array<string, string>  $oltMap
+     * @param  array<string, string>  $odpMap
+     */
+    protected function activationIsTanpaOdc(DailyActivation $row, array $oltMap, array $odpMap): bool
+    {
+        $oltKey = $this->normalizeLookupName((string) ($row->olt_name ?? ''));
+        $odpKey = $this->normalizeLookupName((string) ($row->odp_name ?? ''));
+
+        if ($oltKey !== '' && isset($oltMap[$oltKey])) {
+            return false;
+        }
+        if ($odpKey !== '' && isset($odpMap[$odpKey])) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @param  array<string, string>  $customerMap
+     */
+    protected function cctvIsTanpaOdc(DailyCctvSetup $row, array $customerMap): bool
+    {
+        $lookup = $this->normalizeLookupName((string) ($row->customer_name ?? ''));
+        if ($lookup === '' || ! isset($customerMap[$lookup])) {
+            return true;
+        }
+
+        return $customerMap[$lookup] === 'Tanpa ODC';
     }
 
     /** @return list<string> */
