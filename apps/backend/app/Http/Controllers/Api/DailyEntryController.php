@@ -650,16 +650,52 @@ class DailyEntryController extends Controller
 
     protected function validateActivation(Request $request): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'report_date' => 'required|date',
             'customer_name' => 'required|string|max:255',
             'package_name' => 'nullable|string|max:255',
-            'olt_name' => 'nullable|string|max:255',
+            'olt_name' => 'required|string|max:255',
             'odp_name' => 'nullable|string|max:255',
             'port_onu' => 'nullable|string|max:100',
             'status' => 'required|in:On-Progress,Clear',
             'notes' => 'nullable|string',
         ]);
+
+        $canonicalOlt = $this->resolveOltName($data['olt_name']);
+        if ($canonicalOlt === null) {
+            throw ValidationException::withMessages([
+                'olt_name' => 'OLT harus dipilih dari data master OLT (menu Jaringan → OLT).',
+            ]);
+        }
+        $data['olt_name'] = $canonicalOlt;
+
+        return $data;
+    }
+
+    /**
+     * Cocokkan nama OLT ke master (case-insensitive + strip suffix "(...)").
+     */
+    protected function resolveOltName(?string $name): ?string
+    {
+        $raw = trim((string) $name);
+        if ($raw === '') {
+            return null;
+        }
+
+        $key = mb_strtolower($raw);
+        $normalized = preg_replace('/\s*\([^)]*\)\s*$/u', '', $raw) ?? $raw;
+        $normalized = mb_strtolower(trim($normalized));
+
+        $match = Olt::query()
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->first(function (Olt $olt) use ($key, $normalized) {
+                $n = mb_strtolower(trim((string) $olt->name));
+
+                return $n === $key || ($normalized !== '' && $n === $normalized);
+            });
+
+        return $match?->name;
     }
 
     protected function validateCctv(Request $request): array

@@ -494,6 +494,7 @@ function resetActivationForm(closeModal = true) {
 function applyActivationPaste() {
   const parsed = parseActivationText(activationPasteText.value)
   const filled: string[] = []
+  const warnings: string[] = []
   if (parsed.customer_name) {
     activationForm.value.customer_name = parsed.customer_name
     filled.push('Nama')
@@ -503,8 +504,14 @@ function applyActivationPaste() {
     filled.push('Paket')
   }
   if (parsed.olt_name) {
-    activationForm.value.olt_name = parsed.olt_name
-    filled.push('OLT')
+    const resolved = resolveOltFromMaster(parsed.olt_name)
+    if (resolved) {
+      activationForm.value.olt_name = resolved
+      filled.push('OLT')
+    } else {
+      activationForm.value.olt_name = ''
+      warnings.push(`OLT "${parsed.olt_name}" tidak ada di master`)
+    }
   }
   if (parsed.odp_name) {
     activationForm.value.odp_name = parsed.odp_name
@@ -518,19 +525,37 @@ function applyActivationPaste() {
     activationForm.value.status = parsed.status
     filled.push('Status')
   }
-  if (!filled.length) {
+  if (!filled.length && !warnings.length) {
     activationPasteHint.value = 'Tidak ada field yang dikenali. Pastikan format Label: nilai.'
     return
   }
-  activationPasteHint.value = `Terisi: ${filled.join(', ')}`
-  showToast(`Form diisi dari teks (${filled.length} field).`)
+  activationPasteHint.value = [
+    filled.length ? `Terisi: ${filled.join(', ')}` : '',
+    warnings.length ? warnings.join('; ') : '',
+  ].filter(Boolean).join(' · ')
+  if (filled.length) {
+    showToast(`Form diisi dari teks (${filled.length} field).`)
+  }
 }
+
+/** Cocokkan nama OLT ke master (case-insensitive). */
+function resolveOltFromMaster(raw: string): string | null {
+  const key = raw.trim().toLowerCase().replace(/\s*\([^)]*\)\s*$/u, '').trim()
+  if (!key) return null
+  const match = lookups.value.olts.find((o) => {
+    const n = String(o.name ?? '').trim().toLowerCase()
+    return n === key || n === raw.trim().toLowerCase()
+  })
+  return match ? String(match.name) : null
+}
+
 function openEditActivation(item: DailyEntryItem) {
   editingActivationId.value = item.id
+  const resolvedOlt = item.olt_name ? resolveOltFromMaster(item.olt_name) : null
   activationForm.value = {
     customer_name: item.customer_name ?? '',
     package_name: item.package_name ?? '',
-    olt_name: item.olt_name ?? '',
+    olt_name: resolvedOlt ?? '',
     odp_name: item.odp_name ?? '',
     port_onu: item.port_onu ?? '',
     status: item.status,
@@ -538,11 +563,24 @@ function openEditActivation(item: DailyEntryItem) {
   }
   activeTab.value = 'activation'
   formModalOpen.value = true
+  if (item.olt_name && !resolvedOlt) {
+    error.value = `OLT "${item.olt_name}" tidak ada di master — pilih OLT yang valid sebelum simpan.`
+  }
 }
 async function submitActivation() {
   saving.value = true
   error.value = ''
   try {
+    if (!activationForm.value.olt_name.trim()) {
+      error.value = 'OLT wajib dipilih dari data master.'
+      return
+    }
+    const resolved = resolveOltFromMaster(activationForm.value.olt_name)
+    if (!resolved) {
+      error.value = 'OLT harus sesuai data master OLT.'
+      return
+    }
+    activationForm.value.olt_name = resolved
     const payload = {
       report_date: reportDateForSave(editingActivationId.value, data.value?.activations),
       ...activationForm.value,
@@ -557,7 +595,8 @@ async function submitActivation() {
     showToast('Aktivasi berhasil disimpan.')
   } catch (e: unknown) {
     const err = e as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } }
-    error.value = err.response?.data?.errors?.customer_name?.[0]
+    error.value = err.response?.data?.errors?.olt_name?.[0]
+      ?? err.response?.data?.errors?.customer_name?.[0]
       ?? err.response?.data?.message ?? 'Gagal menyimpan aktivasi.'
   } finally {
     saving.value = false
@@ -1257,17 +1296,18 @@ onUnmounted(stopPoll)
           </datalist>
         </div>
         <div>
-          <label class="mb-1.5 block text-sm font-medium text-foreground">OLT</label>
-          <Input
-            v-model="activationForm.olt_name"
-            list="activation-olt-suggestions"
-            placeholder="Contoh: Pacitan"
-          />
-          <datalist id="activation-olt-suggestions">
-            <option v-for="o in lookups.olts" :key="o.id" :value="o.name" />
-          </datalist>
-          <p v-if="lookups.olts.length === 0" class="mt-1 text-xs text-muted">
-            Belum ada data OLT — bisa ketik manual atau tambahkan di menu Jaringan → OLT.
+          <label class="mb-1.5 block text-sm font-medium text-foreground">OLT <span class="text-danger">*</span></label>
+          <Select v-model="activationForm.olt_name" required>
+            <option value="">Pilih OLT dari master</option>
+            <option v-for="o in lookups.olts" :key="o.id" :value="o.name">
+              {{ o.name }}{{ o.pop_name ? ` · ${o.pop_name}` : '' }}
+            </option>
+          </Select>
+          <p v-if="lookups.olts.length === 0" class="mt-1 text-xs text-danger">
+            Belum ada data OLT — tambahkan dulu di menu Jaringan → OLT.
+          </p>
+          <p v-else class="mt-1 text-xs text-muted">
+            Wajib sesuai master OLT agar terhitung di Performa ODC.
           </p>
         </div>
         <div>
