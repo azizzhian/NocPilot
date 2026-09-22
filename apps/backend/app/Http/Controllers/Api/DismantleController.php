@@ -10,6 +10,7 @@ use App\Models\Location;
 use App\Services\Audit\ActivityLogger;
 use App\Services\Dismantle\DismantleImportService;
 use App\Services\Notification\NotificationService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -74,7 +75,7 @@ class DismantleController extends Controller
 
         if ($includeStatus) {
             $status = $request->string('status')->toString();
-            if ($status !== '' && $status !== 'all') {
+            if ($status !== '' && $status !== 'all' && ! $this->isClearMode($request)) {
                 $query->where('status', $status);
             }
         }
@@ -112,14 +113,52 @@ class DismantleController extends Controller
             }
         }
 
+        if ($this->isClearMode($request)) {
+            // Samakan dashboard dismantleClears: Clear by closed_at
+            $query->where('status', 'Clear');
+            $this->applyClearDateFilter($query, $request);
+        } else {
+            $from = $request->string('from')->toString();
+            $to = $request->string('to')->toString();
+            if ($from !== '') {
+                $query->whereDate('opened_at', '>=', $from);
+            }
+            if ($to !== '') {
+                $query->whereDate('opened_at', '<=', $to);
+            }
+        }
+    }
+
+    private function isClearMode(Request $request): bool
+    {
+        return mb_strtolower(trim($request->string('mode')->toString())) === 'clear';
+    }
+
+    /**
+     * Samakan DashboardController dismantleClears.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\Dismantle>  $query
+     */
+    private function applyClearDateFilter($query, Request $request): void
+    {
         $from = $request->string('from')->toString();
         $to = $request->string('to')->toString();
-        if ($from !== '') {
-            $query->whereDate('opened_at', '>=', $from);
+        if ($from === '' && $to === '') {
+            return;
         }
-        if ($to !== '') {
-            $query->whereDate('opened_at', '<=', $to);
-        }
+
+        $fromDate = $from !== '' ? $from : $to;
+        $toDate = $to !== '' ? $to : $from;
+        $fromStart = Carbon::parse($fromDate)->startOfDay();
+        $toEnd = Carbon::parse($toDate)->endOfDay();
+
+        $query->where(function ($q) use ($fromDate, $toDate, $fromStart, $toEnd) {
+            $q->whereBetween('closed_at', [$fromDate, $toDate])
+                ->orWhere(function ($q2) use ($fromStart, $toEnd) {
+                    $q2->whereNull('closed_at')
+                        ->whereBetween('updated_at', [$fromStart, $toEnd]);
+                });
+        });
     }
 
     public function store(Request $request): JsonResponse

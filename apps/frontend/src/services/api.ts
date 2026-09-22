@@ -546,6 +546,7 @@ export const dismantleApi = {
     odc_name?: string
     from?: string
     to?: string
+    mode?: string
     page?: number
   }) => api.get<PaginatedResponse<DismantleItem>>('/dismantles', { params }),
   stats: (params?: {
@@ -554,6 +555,7 @@ export const dismantleApi = {
     odc_name?: string
     from?: string
     to?: string
+    mode?: string
   }) => api.get<Record<string, number>>('/dismantles/stats', { params }),
   locations: () => api.get<{ data: string[] }>('/dismantles/locations'),
   create: (data: Record<string, unknown>) => api.post('/dismantles', data),
@@ -840,17 +842,17 @@ export const dailyEntryApi = {
   destroy: (type: string, id: number) => api.delete(`/daily-entry/${type}/${id}`),
   updateStatus: (type: string, id: number, status: string) =>
     api.patch(`/daily-entry/${type}/${id}/status`, { status }),
-  listComplaints: (params: { from: string; to: string; odc_name?: string; search?: string }) =>
+  listComplaints: (params: { from: string; to: string; odc_name?: string; search?: string; mode?: string }) =>
     api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/complaints', { params }),
-  listNocUpdates: (params: { from: string; to: string; odc_name?: string }) =>
+  listNocUpdates: (params: { from: string; to: string; odc_name?: string; mode?: string }) =>
     api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/noc-updates', { params }),
-  listActivations: (params: { from: string; to: string; search?: string; odc_name?: string }) =>
+  listActivations: (params: { from: string; to: string; search?: string; odc_name?: string; mode?: string }) =>
     api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/activations', { params }),
-  listCctvSetups: (params: { from: string; to: string; search?: string; odc_name?: string }) =>
+  listCctvSetups: (params: { from: string; to: string; search?: string; odc_name?: string; mode?: string }) =>
     api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/cctv', { params }),
-  exportComplaints: (params: { from: string; to: string; odc_name?: string; search?: string }) =>
+  exportComplaints: (params: { from: string; to: string; odc_name?: string; search?: string; mode?: string }) =>
     downloadFile('/daily-entry/export/complaints', `komplain-${params.from}-${params.to}.xlsx`, params),
-  exportNocUpdates: (params: { from: string; to: string; odc_name?: string }) =>
+  exportNocUpdates: (params: { from: string; to: string; odc_name?: string; mode?: string }) =>
     downloadFile('/daily-entry/export/noc-updates', `update-noc-${params.from}-${params.to}.xlsx`, params),
 }
 

@@ -32,6 +32,7 @@ const filterFrom = ref(todayInput())
 const filterTo = ref(todayInput())
 const filterOdc = ref('')
 const filterSearch = ref('')
+const filterMode = ref('')
 const exporting = ref(false)
 const reportModalOpen = ref(false)
 const loading = ref(true)
@@ -102,6 +103,7 @@ function filterParams() {
     to: filterTo.value || date.value,
     odc_name: filterOdc.value || undefined,
     search: filterSearch.value.trim() || undefined,
+    mode: filterMode.value || undefined,
   }
 }
 
@@ -254,7 +256,7 @@ watch(activeTab, () => {
 })
 
 let filterTimeout: ReturnType<typeof setTimeout>
-watch([filterFrom, filterTo, filterOdc, filterSearch], () => {
+watch([filterFrom, filterTo, filterOdc, filterSearch, filterMode], () => {
   if (!showRangeFilter.value) return
   clearTimeout(filterTimeout)
   filterTimeout = setTimeout(() => void refreshFilteredLists(), 350)
@@ -941,6 +943,9 @@ function applyRouteQuery() {
   if (typeof q.odc_name === 'string') {
     filterOdc.value = q.odc_name
   }
+  if (typeof q.mode === 'string' && q.mode.toLowerCase() === 'clear') {
+    filterMode.value = 'clear'
+  }
   if (typeof q.tab === 'string' && allowedTabKeys.value.includes(q.tab)) {
     activeTab.value = q.tab
   }
@@ -962,6 +967,13 @@ onUnmounted(stopPoll)
     >
       Menampilkan data <span class="font-semibold">Tanpa ODC</span> (belum ter-map) — revisi OLT/ODP/ODC agar terhitung benar di dashboard.
       <button type="button" class="ml-2 text-xs text-primary underline" @click="filterOdc = ''">Hapus filter</button>
+    </div>
+    <div
+      v-if="filterMode === 'clear'"
+      class="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm text-foreground"
+    >
+      Filter dari dashboard: data <span class="font-semibold">Clear</span> menurut tanggal clear (bukan tanggal buat).
+      <button type="button" class="ml-2 text-xs text-primary underline" @click="filterMode = ''">Hapus</button>
     </div>
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <p class="text-sm text-muted">

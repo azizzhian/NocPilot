@@ -22,6 +22,7 @@ const statusFilter = ref('all')
 const fromDate = ref('')
 const toDate = ref('')
 const odcName = ref('')
+const clearMode = ref(false)
 const currentPage = ref(1)
 const lastPage = ref(1)
 const odcs = ref<{ id: number; name: string }[]>([])
@@ -76,10 +77,11 @@ function statusVariant(status: string) {
 function listParams() {
   return {
     search: search.value || undefined,
-    status: statusFilter.value,
+    status: clearMode.value ? 'all' : statusFilter.value,
     from: fromDate.value || undefined,
     to: toDate.value || undefined,
     odc_name: odcName.value || undefined,
+    mode: clearMode.value ? 'clear' : undefined,
   }
 }
 
@@ -229,7 +231,7 @@ async function confirmDelete() {
 }
 
 let searchTimeout: ReturnType<typeof setTimeout>
-watch([search, statusFilter, fromDate, toDate, odcName], () => {
+watch([search, statusFilter, fromDate, toDate, odcName, clearMode], () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => load(1), 400)
 })
@@ -244,6 +246,10 @@ function applyRouteQuery() {
   }
   if (typeof q.odc_name === 'string') {
     odcName.value = q.odc_name
+  }
+  if (typeof q.mode === 'string' && q.mode.toLowerCase() === 'clear') {
+    clearMode.value = true
+    statusFilter.value = 'all'
   }
 }
 
@@ -282,6 +288,13 @@ onMounted(async () => {
     >
       Menampilkan ticket <span class="font-semibold">Tanpa ODC</span> — isi ODC/Site untuk revisi.
       <button type="button" class="ml-2 text-xs text-primary underline" @click="odcName = ''">Hapus filter</button>
+    </div>
+    <div
+      v-if="clearMode"
+      class="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm text-foreground"
+    >
+      Filter dari dashboard: ticket <span class="font-semibold">Clear/Closed</span> menurut tanggal clear.
+      <button type="button" class="ml-2 text-xs text-primary underline" @click="clearMode = false">Hapus</button>
     </div>
 
     <div class="mb-4 flex flex-wrap items-end gap-3">

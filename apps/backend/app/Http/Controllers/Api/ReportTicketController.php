@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ReportTicketResource;
 use App\Models\ReportTicket;
 use App\Services\Audit\ActivityLogger;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -29,19 +30,19 @@ class ReportTicketController extends Controller
             });
         }
 
-        if ($status = $request->string('status')->toString()) {
-            if ($status !== 'all') {
-                $query->where('status', $status);
-            }
-        }
+        $clearMode = $this->isClearMode($request);
 
-        $from = $request->string('from')->toString();
-        $to = $request->string('to')->toString();
-        if ($from !== '') {
-            $query->whereDate('opened_at', '>=', $from);
-        }
-        if ($to !== '') {
-            $query->whereDate('opened_at', '<=', $to);
+        if ($clearMode) {
+            // Samakan dengan dashboard ticketClears: Clear/Closed by cleared_at
+            $query->whereIn('status', ['Clear', 'Closed']);
+            $this->applyClearDateFilter($query, $request);
+        } else {
+            if ($status = $request->string('status')->toString()) {
+                if ($status !== 'all') {
+                    $query->where('status', $status);
+                }
+            }
+            $this->applyOpenedDateFilter($query, $request);
         }
 
         if ($odc = trim($request->string('odc_name')->toString())) {
@@ -128,21 +129,22 @@ class ReportTicketController extends Controller
             ->orderBy('opened_at')
             ->orderBy('id');
 
-        $from = $request->string('from')->toString();
-        $to = $request->string('to')->toString();
-        if ($from !== '') {
-            $query->whereDate('opened_at', '>=', $from);
+        $clearMode = $this->isClearMode($request);
+
+        if ($clearMode) {
+            $query->whereIn('status', ['Clear', 'Closed']);
+            $this->applyClearDateFilter($query, $request);
+        } else {
+            $this->applyOpenedDateFilter($query, $request);
+            if ($status = $request->string('status')->toString()) {
+                if ($status !== '' && $status !== 'all') {
+                    $query->where('status', $status);
+                }
+            }
         }
-        if ($to !== '') {
-            $query->whereDate('opened_at', '<=', $to);
-        }
+
         if ($odc = trim($request->string('odc_name')->toString())) {
             $this->applyOdcNameFilter($query, $odc);
-        }
-        if ($status = $request->string('status')->toString()) {
-            if ($status !== '' && $status !== 'all') {
-                $query->where('status', $status);
-            }
         }
 
         $rows = $query->get()->map(fn (ReportTicket $r) => [
@@ -203,6 +205,53 @@ class ReportTicketController extends Controller
         }
 
         $query->where('odc_name', $odc);
+    }
+
+    private function isClearMode(Request $request): bool
+    {
+        return mb_strtolower(trim($request->string('mode')->toString())) === 'clear';
+    }
+
+    /**
+     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\ReportTicket>  $query
+     */
+    private function applyOpenedDateFilter($query, Request $request): void
+    {
+        $from = $request->string('from')->toString();
+        $to = $request->string('to')->toString();
+        if ($from !== '') {
+            $query->whereDate('opened_at', '>=', $from);
+        }
+        if ($to !== '') {
+            $query->whereDate('opened_at', '<=', $to);
+        }
+    }
+
+    /**
+     * Samakan DashboardController ticketClears.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\ReportTicket>  $query
+     */
+    private function applyClearDateFilter($query, Request $request): void
+    {
+        $from = $request->string('from')->toString();
+        $to = $request->string('to')->toString();
+        if ($from === '' && $to === '') {
+            return;
+        }
+
+        $fromDate = $from !== '' ? $from : $to;
+        $toDate = $to !== '' ? $to : $from;
+        $fromStart = Carbon::parse($fromDate)->startOfDay();
+        $toEnd = Carbon::parse($toDate)->endOfDay();
+
+        $query->where(function ($q) use ($fromStart, $toEnd, $fromDate, $toDate) {
+            $q->whereBetween('cleared_at', [$fromStart, $toEnd])
+                ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                    $q2->whereNull('cleared_at')
+                        ->whereBetween('closed_at', [$fromDate, $toDate]);
+                });
+        });
     }
 
     private function syncClearFields(ReportTicket $ticket, string $status, int $userId, ?string $previous): void

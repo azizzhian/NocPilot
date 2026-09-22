@@ -20,6 +20,7 @@ const search = ref('')
 const statusFilter = ref('all')
 const locationFilter = ref('')
 const odcNameFilter = ref('')
+const clearMode = ref(false)
 const fromDate = ref('')
 const toDate = ref('')
 const currentPage = ref(1)
@@ -75,11 +76,12 @@ async function load(page = currentPage.value) {
     const [listRes, statsRes] = await Promise.all([
       dismantleApi.list({
         search: search.value || undefined,
-        status: statusFilter.value,
+        status: clearMode.value ? 'all' : statusFilter.value,
         location: locationFilter.value || undefined,
         odc_name: odcNameFilter.value || undefined,
         from: fromDate.value || undefined,
         to: toDate.value || undefined,
+        mode: clearMode.value ? 'clear' : undefined,
         page,
       }),
       dismantleApi.stats({
@@ -88,6 +90,7 @@ async function load(page = currentPage.value) {
         odc_name: odcNameFilter.value || undefined,
         from: fromDate.value || undefined,
         to: toDate.value || undefined,
+        mode: clearMode.value ? 'clear' : undefined,
       }),
     ])
     items.value = listRes.data.data
@@ -234,7 +237,7 @@ async function handleImportFile(e: Event) {
 }
 
 let searchTimeout: ReturnType<typeof setTimeout>
-watch([search, statusFilter, locationFilter, odcNameFilter, fromDate, toDate], () => {
+watch([search, statusFilter, locationFilter, odcNameFilter, fromDate, toDate, clearMode], () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => load(1), 400)
 })
@@ -252,6 +255,10 @@ function applyRouteQuery() {
   }
   if (typeof q.location === 'string') {
     locationFilter.value = q.location
+  }
+  if (typeof q.mode === 'string' && q.mode.toLowerCase() === 'clear') {
+    clearMode.value = true
+    statusFilter.value = 'all'
   }
 }
 
@@ -279,10 +286,22 @@ onMounted(() => {
       </Card>
     </div>
 
-    <div v-if="odcNameFilter" class="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-foreground">
-      Filter ODC dari dashboard: <span class="font-semibold">{{ odcFilterLabel }}</span>
-      <span v-if="odcNameFilter === '__none__'" class="text-muted"> — lokasi kosong, isi lokasi agar ter-map ke ODC.</span>
-      <button type="button" class="ml-2 text-xs text-primary underline" @click="odcNameFilter = ''">Hapus</button>
+    <div v-if="odcNameFilter || clearMode" class="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-foreground">
+      <template v-if="odcNameFilter">
+        Filter ODC dari dashboard: <span class="font-semibold">{{ odcFilterLabel }}</span>
+        <span v-if="odcNameFilter === '__none__'" class="text-muted"> — lokasi kosong, isi lokasi agar ter-map ke ODC.</span>
+      </template>
+      <template v-if="clearMode">
+        <span v-if="odcNameFilter"> · </span>
+        Mode <span class="font-semibold">Clear</span> (tanggal close, bukan open).
+      </template>
+      <button
+        type="button"
+        class="ml-2 text-xs text-primary underline"
+        @click="odcNameFilter = ''; clearMode = false"
+      >
+        Hapus
+      </button>
     </div>
 
     <div class="mb-4 flex flex-wrap items-end gap-3">

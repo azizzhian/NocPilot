@@ -159,6 +159,44 @@ class DailyEntryController extends Controller
         });
     }
 
+    /**
+     * Samakan dashboard *Clears: status Clear + cleared_at (atau report_date jika cleared_at null).
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>  $query
+     */
+    protected function forClearedInRange($query, string $from, string $to): void
+    {
+        $fromStart = Carbon::parse($from)->startOfDay();
+        $toEnd = Carbon::parse($to)->endOfDay();
+
+        $query->where(function ($q) {
+            $q->whereRaw('LOWER(status) = ?', [strtolower(ReportStatus::CLEAR)]);
+        })->where(function ($q) use ($from, $to, $fromStart, $toEnd) {
+            $q->whereBetween('cleared_at', [$fromStart, $toEnd])
+                ->orWhere(function ($q2) use ($from, $to) {
+                    $q2->whereNull('cleared_at')
+                        ->whereBetween('report_date', [$from, $to]);
+                });
+        });
+    }
+
+    protected function isClearMode(Request $request): bool
+    {
+        return mb_strtolower(trim($request->string('mode')->toString())) === 'clear';
+    }
+
+    /**
+     * @param  \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>  $query
+     */
+    protected function applyListDateFilter($query, Request $request, string $from, string $to): void
+    {
+        if ($this->isClearMode($request)) {
+            $this->forClearedInRange($query, $from, $to);
+        } else {
+            $this->forDateRangeOrStillOpen($query, $from, $to);
+        }
+    }
+
     public function complaintHistory(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -872,8 +910,8 @@ class DailyEntryController extends Controller
                         ->orWhere('problem', 'like', "%{$search}%")
                         ->orWhere('location_label', 'like', "%{$search}%");
                 });
-            }, function ($q) use ($from, $to, $odc, $unmapped) {
-                $q->where(fn ($q2) => $this->forDateRangeOrStillOpen($q2, $from, $to));
+            }, function ($q) use ($from, $to, $odc, $unmapped, $request) {
+                $q->where(fn ($q2) => $this->applyListDateFilter($q2, $request, $from, $to));
                 if ($unmapped) {
                     $this->scopeEmptyOdcName($q);
                 } elseif ($odc) {
@@ -898,7 +936,7 @@ class DailyEntryController extends Controller
 
         $items = DailyNocUpdate::query()
             ->with(['creator:id,name', 'clearer:id,name'])
-            ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
+            ->where(fn ($q) => $this->applyListDateFilter($q, $request, $from, $to))
             ->when($unmapped, fn ($q) => $this->scopeEmptyOdcName($q))
             ->when(! $unmapped && $odc, fn ($q) => $q->where('odc_name', $odc))
             ->orderByDesc('report_date')
@@ -923,7 +961,7 @@ class DailyEntryController extends Controller
 
         $query = DailyActivation::query()
             ->with(['creator:id,name', 'clearer:id,name'])
-            ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
+            ->where(fn ($q) => $this->applyListDateFilter($q, $request, $from, $to))
             ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
             ->when(! $unmapped && $odc, function ($q) use ($odc, $oltNames, $odpNames) {
                 $q->where(function ($q2) use ($odc, $oltNames, $odpNames) {
@@ -969,7 +1007,7 @@ class DailyEntryController extends Controller
 
         $query = DailyCctvSetup::query()
             ->with(['creator:id,name', 'clearer:id,name'])
-            ->where(fn ($q) => $this->forDateRangeOrStillOpen($q, $from, $to))
+            ->where(fn ($q) => $this->applyListDateFilter($q, $request, $from, $to))
             ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
             ->when(! $unmapped && $odc && $customerNames !== [], fn ($q) => $q->whereIn('customer_name', $customerNames))
             ->when(! $unmapped && $odc && $customerNames === [], fn ($q) => $q->whereRaw('1 = 0'))

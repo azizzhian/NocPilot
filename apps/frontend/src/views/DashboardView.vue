@@ -255,6 +255,8 @@ function onOdcChartClick(payload: {
     ...(dest.query ?? {}),
     from: fromDate.value,
     to: toDate.value,
+    // Chart stacked = clear per ODC → list harus filter by tanggal clear
+    mode: 'clear',
   }
   if (odc.toLowerCase() === 'tanpa odc') {
     // Filter khusus: data yang belum ter-map ke ODC (untuk revisi)
