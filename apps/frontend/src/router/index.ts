@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 import { permissionForPath } from '@/data/navigation'
 
 const router = createRouter({
@@ -74,9 +75,14 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
+  const app = useAppStore()
 
   if (auth.token && !auth.user) {
     await auth.fetchUser()
+  }
+
+  if (auth.token) {
+    await app.fetchSidebarFavorites()
   }
 
   if (to.meta.guest) {
@@ -90,7 +96,9 @@ router.beforeEach(async (to) => {
     (typeof to.meta.permission === 'string' ? to.meta.permission : undefined)
     ?? permissionForPath(to.path)
 
-  if (permission && !auth.can(permission)) {
+  const favorited = app.sidebarFavoritePaths.includes(to.path)
+
+  if (permission && !auth.can(permission) && !favorited) {
     // Redirect to first allowed overview page
     if (auth.can('dashboard.view')) return '/'
     if (auth.can('monitoring.view')) return '/monitoring'

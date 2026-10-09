@@ -389,7 +389,7 @@ onMounted(async () => {
       <ChartCard
         v-if="showClearByType && charts"
         title="Persentase Penyelesaian"
-        subtitle="Komplain · Aktivasi · Ticket · Dismantle · CCTV"
+        subtitle="Clear + On-Progress · Komplain · Aktivasi · Ticket · Dismantle · CCTV"
         :categories="charts.clear_by_type.categories"
         :series="charts.clear_by_type.series"
         :colors="charts.clear_by_type.colors"
@@ -406,7 +406,7 @@ onMounted(async () => {
           <Award class="h-4 w-4 text-primary" />
           <div>
             <h3 class="text-sm font-semibold text-foreground">Lencana</h3>
-            <p class="text-xs text-muted">Top performer per kategori</p>
+            <p class="text-xs text-muted">Top performer per kategori (Clear + On-Progress)</p>
           </div>
         </div>
         <div v-if="specialists.length" class="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
@@ -429,7 +429,7 @@ onMounted(async () => {
     <div v-if="!loading && showClearByNoc" class="mt-6">
       <ChartCard
         title="Performa NOC per Kategori"
-        subtitle="Stacked bar — pembagian kerja tiap orang"
+        subtitle="Stacked bar — pembagian kerja (Clear + On-Progress) tiap orang"
         :categories="stacked.categories"
         :series="stacked.series"
         type="bar"
@@ -447,7 +447,7 @@ onMounted(async () => {
             <Trophy class="h-4 w-4 text-primary" />
             <h3 class="text-sm font-semibold text-foreground">Leaderboard</h3>
           </div>
-          <p class="mt-1 text-xs text-muted">On-Progress vs Clear per kategori — ranking by total clear</p>
+          <p class="mt-1 text-xs text-muted">On-Progress vs Clear per kategori — ranking by total (Clear + On-Progress)</p>
         </div>
         <div v-if="nocPerformance.length" class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -460,7 +460,7 @@ onMounted(async () => {
                 <th class="pb-1 pr-2 text-center text-[#3498DB]" colspan="2">Ticket</th>
                 <th class="pb-2 pr-2 text-right text-[#9B59B6]" rowspan="2">CCTV</th>
                 <th class="pb-2 pr-2 text-right text-[#E67E22]" rowspan="2">Dismantle</th>
-                <th class="pb-2 text-right" rowspan="2">Total Clear</th>
+                <th class="pb-2 text-right" rowspan="2">Total (C+OP)</th>
               </tr>
               <tr class="border-b border-border text-left text-[10px] text-muted">
                 <th class="pb-2 pr-2 text-right font-medium">OP</th>
@@ -497,7 +497,7 @@ onMounted(async () => {
 
       <ChartCard
         title="Kontribusi"
-        :subtitle="`Persentase total clear — ${periodLabel || 'periode'}`"
+        :subtitle="`Persentase total (Clear + On-Progress) — ${periodLabel || 'periode'}`"
         :categories="contribution.categories"
         :series="contribution.series"
         :colors="contribution.colors"
@@ -692,7 +692,7 @@ onMounted(async () => {
       <div class="mb-4">
         <h3 class="text-sm font-semibold text-foreground">Detail Performa Seluruh NOC</h3>
         <p class="text-xs text-muted">
-          OP = On-Progress · Clear = selesai · Rata-rata/hari dari {{ periodDays }} hari (berdasarkan total clear)
+          OP = On-Progress · Clear = selesai · Rata-rata/hari dari {{ periodDays }} hari (berdasarkan total Clear + On-Progress)
         </p>
       </div>
       <div v-if="nocPerformance.length" class="overflow-x-auto">
@@ -705,7 +705,7 @@ onMounted(async () => {
               <th class="pb-1 pr-2 text-center" colspan="2">Ticket</th>
               <th class="pb-2 pr-2 text-right" rowspan="2">CCTV</th>
               <th class="pb-2 pr-2 text-right" rowspan="2">Dismantle</th>
-              <th class="pb-2 pr-2 text-right" rowspan="2">Total Clear</th>
+              <th class="pb-2 pr-2 text-right" rowspan="2">Total (C+OP)</th>
               <th class="pb-2 text-right" rowspan="2">Rata²/Hari</th>
             </tr>
             <tr class="border-b border-border text-left text-[10px] text-muted">

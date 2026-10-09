@@ -375,7 +375,8 @@ class DashboardController extends Controller
                 $nocClear = (int) ($nocClears->get($id)?->total ?? 0);
                 $nocOpen = (int) ($nocOpens->get($id)?->total ?? 0);
                 $cctv = max($cctvClear, (int) ($cctvInputs->get($id)?->total ?? 0));
-                $total = $activationsClear + $complaintsClear + $dismantlesClear + $ticketsClear + $cctvClear + $nocClear;
+                $total = $activationsClear + $complaintsClear + $dismantlesClear + $ticketsClear + $cctvClear + $nocClear
+                    + $activationsOpen + $complaintsOpen + $ticketsOpen + $dismantlesOpen + $cctvOpen + $nocOpen;
 
                 return [
                     'user_id' => (int) $id,
@@ -1400,16 +1401,18 @@ class DashboardController extends Controller
      */
     protected function categoryKpis(array $summary, array $nocPerformance): array
     {
-        $top = function (string $field) use ($nocPerformance): ?array {
-            $best = collect($nocPerformance)->sortByDesc($field)->first();
-            if (! $best || (int) ($best[$field] ?? 0) <= 0) {
+        $top = function (string $clearField, ?string $openField = null) use ($nocPerformance): ?array {
+            $combined = fn (array $row): int => (int) ($row[$clearField] ?? 0)
+                + ($openField !== null ? (int) ($row[$openField] ?? 0) : 0);
+            $best = collect($nocPerformance)->sortByDesc($combined)->first();
+            if (! $best || $combined($best) <= 0) {
                 return null;
             }
 
             return [
                 'user_id' => (int) $best['user_id'],
                 'name' => (string) $best['name'],
-                'count' => (int) $best[$field],
+                'count' => $combined($best),
             ];
         };
 
@@ -1423,7 +1426,7 @@ class DashboardController extends Controller
                 'split_status' => true,
                 'color' => 'danger',
                 'icon' => 'ticket',
-                'top' => $top('complaints_clear'),
+                'top' => $top('complaints_clear', 'complaints_open'),
             ],
             [
                 'key' => 'activations',
@@ -1434,7 +1437,7 @@ class DashboardController extends Controller
                 'split_status' => true,
                 'color' => 'success',
                 'icon' => 'activation',
-                'top' => $top('activations_clear'),
+                'top' => $top('activations_clear', 'activations_open'),
             ],
             [
                 'key' => 'tickets',
@@ -1445,7 +1448,7 @@ class DashboardController extends Controller
                 'split_status' => true,
                 'color' => 'info',
                 'icon' => 'ticket',
-                'top' => $top('tickets_clear'),
+                'top' => $top('tickets_clear', 'tickets_open'),
             ],
             [
                 'key' => 'dismantles',
@@ -1456,7 +1459,7 @@ class DashboardController extends Controller
                 'split_status' => true,
                 'color' => 'warning',
                 'icon' => 'dismantle',
-                'top' => $top('dismantles_clear'),
+                'top' => $top('dismantles_clear', 'dismantles_open'),
             ],
             [
                 'key' => 'cctv',
@@ -1467,7 +1470,7 @@ class DashboardController extends Controller
                 'split_status' => true,
                 'color' => 'primary',
                 'icon' => 'cctv',
-                'top' => $top('cctv_clear') ?? $top('cctv'),
+                'top' => $top('cctv_clear', 'cctv_open'),
             ],
             [
                 'key' => 'noc_updates',
@@ -1478,7 +1481,7 @@ class DashboardController extends Controller
                 'split_status' => true,
                 'color' => 'info',
                 'icon' => 'noc',
-                'top' => $top('noc_updates_clear'),
+                'top' => $top('noc_updates_clear', 'noc_updates_open'),
             ],
         ];
     }
@@ -1489,32 +1492,33 @@ class DashboardController extends Controller
      */
     protected function specialistBadges(array $nocPerformance): array
     {
-        $pick = function (string $field, string $title, string $emoji, string $color) use ($nocPerformance): ?array {
-            $best = collect($nocPerformance)->sortByDesc($field)->first();
-            if (! $best || (int) ($best[$field] ?? 0) <= 0) {
+        $pick = function (string $clearField, string $openField, string $title, string $emoji, string $color) use ($nocPerformance): ?array {
+            $combined = fn (array $row): int => (int) ($row[$clearField] ?? 0) + (int) ($row[$openField] ?? 0);
+            $best = collect($nocPerformance)->sortByDesc($combined)->first();
+            if (! $best || $combined($best) <= 0) {
                 return null;
             }
 
             return [
-                'key' => $field,
+                'key' => $clearField,
                 'title' => $title,
                 'emoji' => $emoji,
                 'color' => $color,
                 'name' => (string) $best['name'],
-                'count' => (int) $best[$field],
-                'unit' => str_contains($field, 'activation') ? 'Aktivasi'
-                    : (str_contains($field, 'complaint') ? 'Clear'
-                    : (str_contains($field, 'ticket') ? 'Ticket'
-                    : (str_contains($field, 'cctv') ? 'CCTV' : 'Dismantle'))),
+                'count' => $combined($best),
+                'unit' => str_contains($clearField, 'activation') ? 'Aktivasi'
+                    : (str_contains($clearField, 'complaint') ? 'Komplain'
+                    : (str_contains($clearField, 'ticket') ? 'Ticket'
+                    : (str_contains($clearField, 'cctv') ? 'CCTV' : 'Dismantle'))),
             ];
         };
 
         return array_values(array_filter([
-            $pick('complaints_clear', 'King of Komplain', '👑', 'danger'),
-            $pick('activations_clear', 'Aktivator Terbaik', '⚡', 'success'),
-            $pick('tickets_clear', 'Ticket Master', '📦', 'info'),
-            $pick('cctv_clear', 'CCTV Expert', '📹', 'primary') ?? $pick('cctv', 'CCTV Expert', '📹', 'primary'),
-            $pick('dismantles_clear', 'Dismantle Hero', '🛠', 'warning'),
+            $pick('complaints_clear', 'complaints_open', 'King of Komplain', '👑', 'danger'),
+            $pick('activations_clear', 'activations_open', 'Aktivator Terbaik', '⚡', 'success'),
+            $pick('tickets_clear', 'tickets_open', 'Ticket Master', '📦', 'info'),
+            $pick('cctv_clear', 'cctv_open', 'CCTV Expert', '📹', 'primary'),
+            $pick('dismantles_clear', 'dismantles_open', 'Dismantle Hero', '🛠', 'warning'),
         ]));
     }
 
@@ -1537,27 +1541,27 @@ class DashboardController extends Controller
             'series' => [
                 [
                     'name' => 'Komplain',
-                    'data' => array_map(fn ($row) => (int) $row['complaints_clear'], $rows),
+                    'data' => array_map(fn ($row) => (int) $row['complaints_clear'] + (int) ($row['complaints_open'] ?? 0), $rows),
                     'color' => '#EF4444',
                 ],
                 [
                     'name' => 'Aktivasi',
-                    'data' => array_map(fn ($row) => (int) $row['activations_clear'], $rows),
+                    'data' => array_map(fn ($row) => (int) $row['activations_clear'] + (int) ($row['activations_open'] ?? 0), $rows),
                     'color' => '#22C55E',
                 ],
                 [
                     'name' => 'Ticket',
-                    'data' => array_map(fn ($row) => (int) $row['tickets_clear'], $rows),
+                    'data' => array_map(fn ($row) => (int) $row['tickets_clear'] + (int) ($row['tickets_open'] ?? 0), $rows),
                     'color' => '#3498DB',
                 ],
                 [
                     'name' => 'Dismantle',
-                    'data' => array_map(fn ($row) => (int) $row['dismantles_clear'], $rows),
+                    'data' => array_map(fn ($row) => (int) $row['dismantles_clear'] + (int) ($row['dismantles_open'] ?? 0), $rows),
                     'color' => '#E67E22',
                 ],
                 [
                     'name' => 'CCTV',
-                    'data' => array_map(fn ($row) => (int) ($row['cctv_clear'] ?? $row['cctv'] ?? 0), $rows),
+                    'data' => array_map(fn ($row) => (int) ($row['cctv_clear'] ?? $row['cctv'] ?? 0) + (int) ($row['cctv_open'] ?? 0), $rows),
                     'color' => '#9B59B6',
                 ],
             ],
@@ -1600,7 +1604,7 @@ class DashboardController extends Controller
         $clearByNoc = [
             'categories' => $names,
             'series' => [[
-                'name' => 'Total Clear',
+                'name' => 'Total (Clear + On-Progress)',
                 'data' => array_map(fn ($row) => (int) $row['total'], $rows),
                 'color' => '#22C55E',
             ]],
@@ -1609,13 +1613,13 @@ class DashboardController extends Controller
         $clearByType = [
             'categories' => ['Komplain', 'Aktivasi', 'Ticket', 'Dismantle', 'CCTV'],
             'series' => [[
-                'name' => 'Clear',
+                'name' => 'Clear + On-Progress',
                 'data' => [
-                    (int) $summary['complaints_clear'],
-                    (int) $summary['activations_clear'],
-                    (int) ($summary['tickets_clear'] ?? 0),
-                    (int) $summary['dismantles_clear'],
-                    (int) ($summary['cctv_clear'] ?? 0),
+                    (int) $summary['complaints_clear'] + (int) ($summary['complaints_open'] ?? 0),
+                    (int) $summary['activations_clear'] + (int) ($summary['activations_open'] ?? 0),
+                    (int) ($summary['tickets_clear'] ?? 0) + (int) ($summary['tickets_open'] ?? 0),
+                    (int) $summary['dismantles_clear'] + (int) ($summary['dismantles_open'] ?? 0),
+                    (int) ($summary['cctv_clear'] ?? 0) + (int) ($summary['cctv_open'] ?? 0),
                 ],
                 'color' => '#4F46E5',
             ]],

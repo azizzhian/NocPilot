@@ -40,7 +40,7 @@ const favorites = computed(() => {
   const byPath = new Map(navigation.flatMap((s) => s.items).map((i) => [i.to, i]))
   return appStore.sidebarFavoritePaths
     .map((path) => byPath.get(path))
-    .filter((item): item is NavItem => Boolean(item && filterByAccess([item]).length))
+    .filter((item): item is NavItem => Boolean(item))
 })
 
 function badgeForItem(to: string): number | undefined {

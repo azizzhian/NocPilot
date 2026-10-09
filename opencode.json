@@ -1,0 +1,27 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["HANDOFF.md", "CHANGELOG.md"],
+  "permission": {
+    "edit": "ask",
+    "bash": {
+      "*": "ask",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git show*": "allow",
+      "composer test*": "allow",
+      "npm run build:web*": "allow",
+      "git push*": "deny",
+      "git reset --hard*": "deny",
+      "git clean*": "deny",
+      "php artisan migrate:fresh*": "deny",
+      "php artisan migrate:refresh*": "deny",
+      "php artisan migrate:reset*": "deny",
+      "php artisan migrate --seed*": "deny",
+      "php artisan db:wipe*": "deny",
+      "php artisan db:seed*": "deny",
+      "*scripts/deploy.sh*": "deny",
+      "*scripts/install.sh*": "deny"
+    }
+  }
+}

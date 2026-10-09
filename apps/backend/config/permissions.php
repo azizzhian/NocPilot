@@ -69,7 +69,7 @@ return [
             'dashboard.view', 'monitoring.view',
             'complaint.view', 'activation.view', 'dismantle.view',
             'ticket.view', 'ticket.manage',
-            'customer.view', 'network.view',
+            'customer.view',
             'report.generate', 'report.view',
             'dashboard.widget.kpis', 'dashboard.widget.clear_by_type',
             'dashboard.widget.clear_by_noc', 'dashboard.widget.noc_performance',
