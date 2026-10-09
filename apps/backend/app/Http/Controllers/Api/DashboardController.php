@@ -197,6 +197,16 @@ class DashboardController extends Controller
             'activations_open' => $odcName
                 ? 0
                 : DailyActivation::query()
+                    ->whereBetween('report_date', [$fromDate, $toDate])
+                    ->where(function ($q) {
+                        $q->whereNull('status')
+                            ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+                    })
+                    ->when($userId, fn ($q) => $q->where('created_by', $userId))
+                    ->count(),
+            'activations_open_all' => $odcName
+                ? 0
+                : DailyActivation::query()
                     ->whereDate('report_date', '<=', $toDate)
                     ->where(function ($q) {
                         $q->whereNull('status')
@@ -211,6 +221,15 @@ class DashboardController extends Controller
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
             'complaints_open' => DailyComplaint::query()
+                ->whereBetween('report_date', [$fromDate, $toDate])
+                ->where(function ($q) {
+                    $q->whereNull('status')
+                        ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+                })
+                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+                ->when($userId, fn ($q) => $q->where('created_by', $userId))
+                ->count(),
+            'complaints_open_all' => DailyComplaint::query()
                 ->whereDate('report_date', '<=', $toDate)
                 ->where(function ($q) {
                     $q->whereNull('status')
@@ -221,12 +240,16 @@ class DashboardController extends Controller
                 ->count(),
             'complaints_clear' => $this->countClearsInRange(DailyComplaint::class, $from, $to, $userId, $odcName),
             'dismantles' => $this->countDismantleOpenedInRange($from, $to, $userId, $odcName),
-            'dismantles_open' => $this->countDismantleOpens($toDate, $userId, $odcName),
+            'dismantles_open' => $this->countDismantleOpens($fromDate, $toDate, $userId, $odcName),
+            'dismantles_open_all' => $this->countDismantleOpensUpTo($toDate, $userId, $odcName),
             'dismantles_clear' => $this->countDismantleClears($from, $to, $userId, $odcName),
             'cctv' => (clone $cctv)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
             'cctv_open' => $odcName
+                ? 0
+                : $this->countOpensInRange(DailyCctvSetup::class, $fromDate, $toDate, $userId),
+            'cctv_open_all' => $odcName
                 ? 0
                 : $this->countOpensUpTo(DailyCctvSetup::class, $toDate, $userId),
             'cctv_clear' => $odcName
@@ -236,6 +259,18 @@ class DashboardController extends Controller
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
             'tickets_open' => ReportTicket::query()
+                ->where('status', 'On-Progress')
+                ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
+                    $q->whereBetween('opened_at', [$fromDate, $toDate])
+                        ->orWhere(function ($q2) use ($from, $to) {
+                            $q2->whereNull('opened_at')
+                                ->whereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
+                        });
+                })
+                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+                ->when($userId, fn ($q) => $q->where('created_by', $userId))
+                ->count(),
+            'tickets_open_all' => ReportTicket::query()
                 ->where('status', 'On-Progress')
                 ->where(function ($q) use ($to, $toDate) {
                     $q->whereDate('opened_at', '<=', $toDate)
@@ -260,7 +295,8 @@ class DashboardController extends Controller
             'noc_updates' => (clone $nocUpdates)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
-            'noc_updates_open' => $this->countOpensUpTo(DailyNocUpdate::class, $toDate, $userId, $odcName),
+            'noc_updates_open' => $this->countOpensInRange(DailyNocUpdate::class, $fromDate, $toDate, $userId, $odcName),
+            'noc_updates_open_all' => $this->countOpensUpTo(DailyNocUpdate::class, $toDate, $userId, $odcName),
             'noc_updates_clear' => $this->countClearsInRange(DailyNocUpdate::class, $from, $to, $userId, $odcName),
         ];
     }
@@ -288,7 +324,7 @@ class DashboardController extends Controller
             ? collect()
             : $this->groupOpens(DailyActivation::class, $fromDate, $toDate);
         $complaintOpens = $this->groupOpens(DailyComplaint::class, $fromDate, $toDate, $odcName);
-        $dismantleOpens = $this->groupDismantleOpens($toDate, $odcName);
+        $dismantleOpens = $this->groupDismantleOpens($fromDate, $toDate, $odcName);
         $cctvOpens = $odcName
             ? collect()
             : $this->groupOpens(DailyCctvSetup::class, $fromDate, $toDate);
@@ -314,9 +350,12 @@ class DashboardController extends Controller
             ->select('created_by', DB::raw('COUNT(*) as total'))
             ->whereNotNull('created_by')
             ->where('status', 'On-Progress')
-            ->where(function ($q) use ($to, $toDate) {
-                $q->whereDate('opened_at', '<=', $toDate)
-                    ->orWhere('created_at', '<=', $to->copy()->endOfDay());
+            ->where(function ($q) use ($from, $to, $fromDate, $toDate) {
+                $q->whereBetween('opened_at', [$fromDate, $toDate])
+                    ->orWhere(function ($q2) use ($from, $to) {
+                        $q2->whereNull('opened_at')
+                            ->whereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
+                    });
             })
             ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
             ->groupBy('created_by')
@@ -1169,6 +1208,28 @@ class DashboardController extends Controller
     }
 
     protected function countDismantleOpens(
+        string $fromDate,
+        string $toDate,
+        ?int $userId = null,
+        ?string $odcName = null,
+    ): int {
+        return Dismantle::query()
+            ->whereIn('status', ['Pending', 'On-Progress'])
+            ->where(function ($q) use ($fromDate, $toDate) {
+                $q->whereBetween('opened_at', [$fromDate, $toDate])
+                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                        $q2->whereNull('opened_at')
+                            ->whereBetween('created_at', [$fromDate, $toDate]);
+                    });
+            })
+            ->when($userId, fn ($q) => $q->where(function ($q2) use ($userId) {
+                $q2->where('created_by', $userId)->orWhere('assigned_to', $userId);
+            }))
+            ->when($odcName, fn ($q) => $this->scopeDismantleByOdc($q, $odcName))
+            ->count();
+    }
+
+    protected function countDismantleOpensUpTo(
         string $toDate,
         ?int $userId = null,
         ?string $odcName = null,
@@ -1244,16 +1305,16 @@ class DashboardController extends Controller
             ->keyBy('cleared_by');
     }
 
-    protected function groupDismantleOpens(string $toDate, ?string $odcName = null)
+    protected function groupDismantleOpens(string $fromDate, string $toDate, ?string $odcName = null)
     {
         return Dismantle::query()
             ->select(DB::raw('COALESCE(assigned_to, created_by) as created_by'), DB::raw('COUNT(*) as total'))
             ->whereIn('status', ['Pending', 'On-Progress'])
-            ->where(function ($q) use ($toDate) {
-                $q->whereDate('opened_at', '<=', $toDate)
-                    ->orWhere(function ($q2) use ($toDate) {
+            ->where(function ($q) use ($fromDate, $toDate) {
+                $q->whereBetween('opened_at', [$fromDate, $toDate])
+                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
                         $q2->whereNull('opened_at')
-                            ->whereDate('created_at', '<=', $toDate);
+                            ->whereBetween('created_at', [$fromDate, $toDate]);
                     });
             })
             ->where(function ($q) {
@@ -1287,7 +1348,30 @@ class DashboardController extends Controller
     }
 
     /**
-     * On-Progress termasuk backlog (report_date ≤ sampai).
+     * Item yang dibuat dalam periode (report_date antara dari–sampai) dan masih On-Progress.
+     *
+     * @param  class-string  $model
+     */
+    protected function countOpensInRange(
+        string $model,
+        string $fromDate,
+        string $toDate,
+        ?int $userId = null,
+        ?string $odcName = null,
+    ): int {
+        return $model::query()
+            ->whereBetween('report_date', [$fromDate, $toDate])
+            ->where(function ($q) {
+                $q->whereNull('status')
+                    ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->when($userId, fn ($q) => $q->where('created_by', $userId))
+            ->count();
+    }
+
+    /**
+     * Semua item yang masih On-Progress (termasuk backlog, report_date ≤ sampai).
      *
      * @param  class-string  $model
      */
@@ -1361,7 +1445,7 @@ class DashboardController extends Controller
             ->keyBy('cleared_by');
     }
 
-    /** Item masih On-Progress (termasuk dari hari sebelumnya), diatribusikan ke yang input.
+    /** Item yang dibuat dalam periode (report_date antara dari–sampai) dan masih On-Progress, diatribusikan ke yang input.
      *
      * @param  class-string  $model
      */
@@ -1369,7 +1453,7 @@ class DashboardController extends Controller
     {
         return $model::query()
             ->select('created_by', DB::raw('COUNT(*) as total'))
-            ->whereDate('report_date', '<=', $toDate)
+            ->whereBetween('report_date', [$fromDate, $toDate])
             ->whereNotNull('created_by')
             ->where(function ($q) {
                 $q->whereNull('status')
@@ -1421,7 +1505,7 @@ class DashboardController extends Controller
                 'key' => 'complaints',
                 'label' => 'Komplain',
                 'value' => (int) $summary['complaints'],
-                'open' => (int) ($summary['complaints_open'] ?? 0),
+                'open' => (int) ($summary['complaints_open_all'] ?? 0),
                 'clear' => (int) $summary['complaints_clear'],
                 'split_status' => true,
                 'color' => 'danger',
@@ -1432,7 +1516,7 @@ class DashboardController extends Controller
                 'key' => 'activations',
                 'label' => 'Aktivasi',
                 'value' => (int) $summary['activations'],
-                'open' => (int) ($summary['activations_open'] ?? 0),
+                'open' => (int) ($summary['activations_open_all'] ?? 0),
                 'clear' => (int) $summary['activations_clear'],
                 'split_status' => true,
                 'color' => 'success',
@@ -1443,7 +1527,7 @@ class DashboardController extends Controller
                 'key' => 'tickets',
                 'label' => 'Ticket',
                 'value' => (int) ($summary['tickets'] ?? 0),
-                'open' => (int) ($summary['tickets_open'] ?? 0),
+                'open' => (int) ($summary['tickets_open_all'] ?? 0),
                 'clear' => (int) ($summary['tickets_clear'] ?? 0),
                 'split_status' => true,
                 'color' => 'info',
@@ -1454,7 +1538,7 @@ class DashboardController extends Controller
                 'key' => 'dismantles',
                 'label' => 'Dismantle',
                 'value' => (int) $summary['dismantles'],
-                'open' => (int) ($summary['dismantles_open'] ?? 0),
+                'open' => (int) ($summary['dismantles_open_all'] ?? 0),
                 'clear' => (int) ($summary['dismantles_clear'] ?? 0),
                 'split_status' => true,
                 'color' => 'warning',
@@ -1465,7 +1549,7 @@ class DashboardController extends Controller
                 'key' => 'cctv',
                 'label' => 'CCTV',
                 'value' => (int) $summary['cctv'],
-                'open' => (int) ($summary['cctv_open'] ?? 0),
+                'open' => (int) ($summary['cctv_open_all'] ?? 0),
                 'clear' => (int) ($summary['cctv_clear'] ?? 0),
                 'split_status' => true,
                 'color' => 'primary',
@@ -1476,7 +1560,7 @@ class DashboardController extends Controller
                 'key' => 'noc_updates',
                 'label' => 'Update NOC',
                 'value' => (int) ($summary['noc_updates'] ?? 0),
-                'open' => (int) ($summary['noc_updates_open'] ?? 0),
+                'open' => (int) ($summary['noc_updates_open_all'] ?? 0),
                 'clear' => (int) ($summary['noc_updates_clear'] ?? 0),
                 'split_status' => true,
                 'color' => 'info',
