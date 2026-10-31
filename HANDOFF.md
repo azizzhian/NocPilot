@@ -4,12 +4,12 @@ Catatan tugas yang **sedang berjalan**, dipakai bergantian oleh Cursor dan OpenC
 Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan oleh `/worklog` saat tugas tuntas
 (ringkasannya dipindah ke `CHANGELOG.md`). Keputusan permanen ditulis di `AGENTS.md`, bukan di sini.
 
-- **Terakhir diperbarui**: 2026-10-09 oleh OpenCode
+- **Terakhir diperbarui**: 2026-10-31 oleh OpenCode
 - **Commit dasar**: `f7d4ca9` (Required OLT)
 
 ## Tugas sekarang
 
-- Performa NOC: `total` kini menghitung Clear **dan** On-Progress (Komplain, Aktivasi, Ticket, Dismantle, CCTV, Update NOC).
+- Perbaikan KPI card Aktivasi/CCTV di dashboard saat filter ODC dipilih: sebelumnya `summaryForRange` memaksa 0 karena kolom `odc_name` tidak ada. Kini aktivasi dipetakan via `olt_name` → `Olt.odc_id` / fallback `odp_name` → `Odp.odc_id`, CCTV via `customer_name` → `Customer.odc_id`, memakai helper `dailySummaryByOdc` (period-based open + kumulatif `open_all` + clear, ikut filter NOC).
 - **On-Progress period-based** (performa/presentasi/lencana): hanya item yang dibuat dalam rentang filter (`report_date` antara from–to), bukan backlog kumulatif. **Kecuali KPI card atas** yang tetap menampilkan SEMUA item masih On-Progress (kumulatif `<= to`, field `*_open_all`).
 - Role `noc` kehilangan permission `network.view` → menu JARINGAN (Router MikroTik, OLT, ONU, POP, ODC, ODP, Lokasi, Network Inventory) tak lagi tampil untuk role noc.
 - Favorit sidebar kini **global & bisa dibuka semua role**: `Sidebar.vue` tidak lagi memfilter favorit dengan permission, dan router guard memperbolehkan navigasi ke path yang ada di daftar favorit walau tanpa permission (admin mengontrol lewat `/settings`).
@@ -24,11 +24,13 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 - `php -l` + `npm run build:web` lolos.
 - `network.view` dihapus dari `role_defaults['noc']` (`config/permissions.php`) + migration `2026_10_09_000000_remove_network_view_from_noc_role.php` (revoke dari role `noc` di DB, down = give back). Migration sudah dijalankan & terverifikasi (`has network.view: false`).
 - Favorit global: `Sidebar.vue:favorites` tidak difilter `filterByAccess`; `router/index.ts:beforeEach` meng-await `fetchSidebarFavorites()` lalu mengizinkan `to.path` yang ada di `sidebarFavoritePaths` walau user tidak punya permission halaman tsb. `npm run build:web` lolos.
+- KPI card Aktivasi/CCTV saat filter ODC: `summaryForRange` tidak lagi memaksa 0; helper `dailySummaryByOdc` memetakan aktivasi via OLT/ODP dan CCTV via nama pelanggan, menghitung input period, `open` period, `open_all` kumulatif, dan clear via `cleared_at`. Angka KPI kini sama dengan `odc_stats` (contoh SOBRAH Jul–Sep: activations_clear 2). `php -l` + `composer test` lolos.
 
 ## Langkah berikutnya
 
 - Verifikasi manual: login user `noc` → favorit OLT (yang dicentang admin di `/settings`) muncul & bisa dibuka; section JARINGAN tetap tidak muncul.
 - Verifikasi manual dashboard: On-Progress di performa/donut/stacked/lencana hanya dari item periode tsb.
+- Verifikasi manual KPI Aktivasi/CCTV dengan filter ODC (mis. SOBRAH, Jul–Sep) → Clear/On-Progress harus sama dengan tabel Statistik ODC, bukan 0.
 - (Opsional) Terapkan period-based open yang sama ke `odcPerformance` / `stacked_by_odc` (masih `<= to`) bila statistik ODC harus konsisten dengan performa-per-user.
 - (Perlu keputusan) Karena API jaringan tidak ber-middleware permission, noc yang membuka favorit OLT otomatis bisa **tambah/edit/hapus** data OLT. Bila ingin read-only, perlu gate tambahan (`network.manage`) di UI.
 

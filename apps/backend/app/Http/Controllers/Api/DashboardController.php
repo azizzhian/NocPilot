@@ -164,10 +164,6 @@ class DashboardController extends Controller
 
         $activations = DailyActivation::query()
             ->whereBetween('report_date', [$fromDate, $toDate]);
-        // Aktivasi belum punya odc_name — jika filter ODC aktif, anggap 0
-        if ($odcName) {
-            $activations->whereRaw('1 = 0');
-        }
 
         $complaints = DailyComplaint::query()
             ->whereBetween('report_date', [$fromDate, $toDate])
@@ -175,9 +171,6 @@ class DashboardController extends Controller
 
         $cctv = DailyCctvSetup::query()
             ->whereBetween('report_date', [$fromDate, $toDate]);
-        if ($odcName) {
-            $cctv->whereRaw('1 = 0');
-        }
 
         $nocUpdates = DailyNocUpdate::query()
             ->whereBetween('report_date', [$fromDate, $toDate])
@@ -190,12 +183,54 @@ class DashboardController extends Controller
             })
             ->when($odcName, fn ($q) => $q->where('odc_name', $odcName));
 
+        // Aktivasi & CCTV dipetakan ke ODC lewat OLT/ODP/nama pelanggan (sama seperti statistik ODC).
+        $oltMap = $this->oltNameToOdcMap();
+        $odpMap = $this->odpNameToOdcMap();
+        $customerMap = $this->customerNameToOdcMap();
+
+        $activationCounts = $odcName
+            ? $this->dailySummaryByOdc(
+                DailyActivation::class,
+                function ($row) use ($oltMap, $odpMap) {
+                    $oltKey = $this->normalizeLookupName((string) ($row->olt_name ?? ''));
+                    $odpKey = $this->normalizeLookupName((string) ($row->odp_name ?? ''));
+
+                    return ($oltKey !== '' && isset($oltMap[$oltKey]))
+                        ? $oltMap[$oltKey]
+                        : (($odpKey !== '' && isset($odpMap[$odpKey])) ? $odpMap[$odpKey] : 'Tanpa ODC');
+                },
+                $from,
+                $to,
+                $userId,
+                $odcName,
+                ['olt_name', 'odp_name'],
+            )
+            : null;
+
+        $cctvCounts = $odcName
+            ? $this->dailySummaryByOdc(
+                DailyCctvSetup::class,
+                function ($row) use ($customerMap) {
+                    $key = $this->normalizeLookupName((string) ($row->customer_name ?? ''));
+
+                    return ($key !== '' && isset($customerMap[$key])) ? $customerMap[$key] : 'Tanpa ODC';
+                },
+                $from,
+                $to,
+                $userId,
+                $odcName,
+                ['customer_name'],
+            )
+            : null;
+
         return [
-            'activations' => (clone $activations)
-                ->when($userId, fn ($q) => $q->where('created_by', $userId))
-                ->count(),
+            'activations' => $odcName
+                ? (int) ($activationCounts['value'] ?? 0)
+                : (clone $activations)
+                    ->when($userId, fn ($q) => $q->where('created_by', $userId))
+                    ->count(),
             'activations_open' => $odcName
-                ? 0
+                ? (int) ($activationCounts['open'] ?? 0)
                 : DailyActivation::query()
                     ->whereBetween('report_date', [$fromDate, $toDate])
                     ->where(function ($q) {
@@ -205,7 +240,7 @@ class DashboardController extends Controller
                     ->when($userId, fn ($q) => $q->where('created_by', $userId))
                     ->count(),
             'activations_open_all' => $odcName
-                ? 0
+                ? (int) ($activationCounts['open_all'] ?? 0)
                 : DailyActivation::query()
                     ->whereDate('report_date', '<=', $toDate)
                     ->where(function ($q) {
@@ -215,7 +250,7 @@ class DashboardController extends Controller
                     ->when($userId, fn ($q) => $q->where('created_by', $userId))
                     ->count(),
             'activations_clear' => $odcName
-                ? 0
+                ? (int) ($activationCounts['clear'] ?? 0)
                 : $this->countClearsInRange(DailyActivation::class, $from, $to, $userId),
             'complaints' => (clone $complaints)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
@@ -243,17 +278,19 @@ class DashboardController extends Controller
             'dismantles_open' => $this->countDismantleOpens($fromDate, $toDate, $userId, $odcName),
             'dismantles_open_all' => $this->countDismantleOpensUpTo($toDate, $userId, $odcName),
             'dismantles_clear' => $this->countDismantleClears($from, $to, $userId, $odcName),
-            'cctv' => (clone $cctv)
-                ->when($userId, fn ($q) => $q->where('created_by', $userId))
-                ->count(),
+            'cctv' => $odcName
+                ? (int) ($cctvCounts['value'] ?? 0)
+                : (clone $cctv)
+                    ->when($userId, fn ($q) => $q->where('created_by', $userId))
+                    ->count(),
             'cctv_open' => $odcName
-                ? 0
+                ? (int) ($cctvCounts['open'] ?? 0)
                 : $this->countOpensInRange(DailyCctvSetup::class, $fromDate, $toDate, $userId),
             'cctv_open_all' => $odcName
-                ? 0
+                ? (int) ($cctvCounts['open_all'] ?? 0)
                 : $this->countOpensUpTo(DailyCctvSetup::class, $toDate, $userId),
             'cctv_clear' => $odcName
-                ? 0
+                ? (int) ($cctvCounts['clear'] ?? 0)
                 : $this->countClearsInRange(DailyCctvSetup::class, $from, $to, $userId),
             'tickets' => (clone $tickets)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
@@ -299,6 +336,78 @@ class DashboardController extends Controller
             'noc_updates_open_all' => $this->countOpensUpTo(DailyNocUpdate::class, $toDate, $userId, $odcName),
             'noc_updates_clear' => $this->countClearsInRange(DailyNocUpdate::class, $from, $to, $userId, $odcName),
         ];
+    }
+
+    /**
+     * Ringkasan aktivasi/CCTV untuk satu ODC (dipetakan dari nama OLT/ODP/pelanggan).
+     * Input & On-Progress period-based; On-Progress kumulatif (`open_all`) dan Clear memakai aturan
+     * yang sama dengan summaryForRange tanpa filter ODC.
+     *
+     * @param  class-string  $modelClass
+     * @param  callable(object): string  $resolveOdcName
+     * @param  list<string>  $lookupColumns
+     * @return array{value: int, open: int, open_all: int, clear: int}
+     */
+    protected function dailySummaryByOdc(
+        string $modelClass,
+        callable $resolveOdcName,
+        Carbon $from,
+        Carbon $to,
+        ?int $userId,
+        string $odcName,
+        array $lookupColumns = [],
+    ): array {
+        $fromDate = $from->toDateString();
+        $toDate = $to->toDateString();
+        $fromStart = $from->copy()->startOfDay();
+        $toEnd = $to->copy()->endOfDay();
+
+        $counts = ['value' => 0, 'open' => 0, 'open_all' => 0, 'clear' => 0];
+
+        $rows = $modelClass::query()
+            ->select(array_merge(['status', 'report_date', 'created_by', 'cleared_by', 'cleared_at'], $lookupColumns))
+            ->where(function ($q) use ($toDate, $fromStart, $toEnd) {
+                $q->whereDate('report_date', '<=', $toDate)
+                    ->orWhereBetween('cleared_at', [$fromStart, $toEnd]);
+            })
+            ->cursor();
+
+        foreach ($rows as $row) {
+            if ($resolveOdcName($row) !== $odcName) {
+                continue;
+            }
+
+            $reportDate = $row->report_date?->toDateString();
+            $inPeriod = $reportDate !== null && $reportDate >= $fromDate && $reportDate <= $toDate;
+            $upToTo = $reportDate !== null && $reportDate <= $toDate;
+            $isClear = ReportStatus::isClear($row->status);
+            $createdByMe = $userId === null || ($row->created_by !== null && (int) $row->created_by === $userId);
+            $clearedByMe = $userId === null || ($row->cleared_by !== null && (int) $row->cleared_by === $userId);
+
+            if ($createdByMe) {
+                if ($inPeriod) {
+                    $counts['value']++;
+                    if (! $isClear) {
+                        $counts['open']++;
+                    }
+                }
+                if ($upToTo && ! $isClear) {
+                    $counts['open_all']++;
+                }
+            }
+
+            if ($clearedByMe && $isClear) {
+                if ($row->cleared_at !== null) {
+                    if ($row->cleared_at->between($fromStart, $toEnd)) {
+                        $counts['clear']++;
+                    }
+                } elseif ($inPeriod) {
+                    $counts['clear']++;
+                }
+            }
+        }
+
+        return $counts;
     }
 
     /** @return array<int, array<string, mixed>> */
