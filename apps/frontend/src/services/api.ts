@@ -561,6 +561,15 @@ export const dismantleApi = {
   create: (data: Record<string, unknown>) => api.post('/dismantles', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/dismantles/${id}`, data),
   destroy: (id: number) => api.delete(`/dismantles/${id}`),
+  exportExcel: (params?: {
+    search?: string
+    status?: string
+    location?: string
+    odc_name?: string
+    from?: string
+    to?: string
+    mode?: string
+  }) => downloadFile('/dismantles/export', 'dismantle.xlsx', params),
   importCsv: (file: File) => {
     const formData = new FormData()
     formData.append('file', file)

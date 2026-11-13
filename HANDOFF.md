@@ -9,6 +9,7 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 
 ## Tugas sekarang
 
+- **Export Excel Dismantle** (permintaan user, 2026-11-13): tombol "Export Excel" di `/report/dismantle` mengunduh `dismantle-{from|all}-{to|all}.xlsx` lewat endpoint baru `GET /dismantles/export` (`DismantleController::export`). Kolom: Referensi, Lokasi, ID Pel, Nama Pelanggan, Status, Open Ticket, Close Ticket, Input oleh, Close oleh, Catatan. Filter mengikuti list: search, status (kecuali mode clear), location, odc_name (termasuk Tanpa ODC), from/to (open, atau closed_at bila `mode=clear`).
 - **Export Excel Report Ticket 500** (2026-11-13): `ReportTicketController::export` memakai `$from`/`$to` untuk nama file tanpa dideklarasikan → ErrorException. Ditambahkan `$from`/`$to` dari request sebelum label file. `php -l` lolos.
 - **Export Excel Aktivasi** (permintaan user, 2026-11-13): tombol "Excel" kini muncul juga di tab Aktivasi (halaman `/aktivasi`) dan mengunduh `aktivasi-{from}-{to}.xlsx` lewat endpoint baru `GET /daily-entry/export/activations` (`DailyEntryController::exportActivations`). Kolom: Tanggal, Nama Pelanggan, Paket, OLT, ODP, Port ONU, Status, Catatan, Input oleh, Clear oleh. Filter mengikuti list: `mode` (carry-over / clear), `search` nama, dan ODC via `olt_name`/`odp_name` (termasuk "Tanpa ODC" di PHP, sama seperti `listActivations`).
 - (Sebelumnya) Perbaikan KPI card Aktivasi/CCTV di dashboard saat filter ODC dipilih: sebelumnya `summaryForRange` memaksa 0 karena kolom `odc_name` tidak ada. Kini aktivasi dipetakan via `olt_name` → `Olt.odc_id` / fallback `odp_name` → `Odp.odc_id`, CCTV via `customer_name` → `Customer.odc_id`, memakai helper `dailySummaryByOdc` (period-based open + kumulatif `open_all` + clear, ikut filter NOC).
@@ -40,6 +41,10 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 
 - `apps/backend/app/Http/Controllers/Api/DailyEntryController.php` (tambah `exportActivations`)
 - `apps/backend/app/Http/Controllers/Api/ReportTicketController.php` (deklarasi `$from`/`$to` di `export`)
+- `apps/backend/app/Http/Controllers/Api/DismantleController.php` (tambah `export`)
+- `apps/backend/routes/api.php` (route `dismantles/export`)
+- `apps/frontend/src/services/api.ts` (tambah `dismantleApi.exportExcel`)
+- `apps/frontend/src/views/DismantleView.vue` (tombol Export Excel)
 - `apps/backend/routes/api.php` (route `daily-entry/export/activations`)
 - `apps/frontend/src/services/api.ts` (tambah `dailyEntryApi.exportActivations`)
 - `apps/frontend/src/views/InputHarianView.vue` (tombol Excel untuk tab aktivasi)

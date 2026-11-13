@@ -33,6 +33,36 @@ class DismantleController extends Controller
         return DismantleResource::collection($query->paginate(15));
     }
 
+    public function export(Request $request)
+    {
+        $query = Dismantle::query()->with(['creator:id,name', 'clearer:id,name'])->latest();
+        $this->applyFilters($query, $request, includeStatus: true);
+
+        $rows = $query->get()->map(fn (Dismantle $d) => [
+            $d->reference,
+            $d->location,
+            $d->customer_code,
+            $d->customer_name,
+            $d->status,
+            $d->opened_at?->toDateString(),
+            $d->closed_at?->toDateString(),
+            $d->creator?->name,
+            $d->clearer?->name,
+            $d->notes,
+        ]);
+
+        $from = $request->string('from')->toString();
+        $to = $request->string('to')->toString();
+        $labelFrom = $from !== '' ? $from : 'all';
+        $labelTo = $to !== '' ? $to : 'all';
+
+        return \App\Support\ExcelExport::download(
+            'dismantle-'.$labelFrom.'-'.$labelTo.'.xlsx',
+            ['Referensi', 'Lokasi', 'ID Pel', 'Nama Pelanggan', 'Status', 'Open Ticket', 'Close Ticket', 'Input oleh', 'Close oleh', 'Catatan'],
+            $rows,
+        );
+    }
+
     public function stats(Request $request): JsonResponse
     {
         $query = Dismantle::query();

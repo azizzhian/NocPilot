@@ -37,6 +37,7 @@ const deleting = ref(false)
 const reportModalOpen = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
+const exporting = ref(false)
 const importModalOpen = ref(false)
 const importResult = ref<{ success: number; skipped: number; failed: number; errors: string[] } | null>(null)
 
@@ -191,6 +192,26 @@ async function confirmDelete() {
   }
 }
 
+async function exportExcel() {
+  exporting.value = true
+  error.value = ''
+  try {
+    await dismantleApi.exportExcel({
+      search: search.value || undefined,
+      status: clearMode.value ? 'all' : statusFilter.value,
+      location: locationFilter.value || undefined,
+      odc_name: odcNameFilter.value || undefined,
+      from: fromDate.value || undefined,
+      to: toDate.value || undefined,
+      mode: clearMode.value ? 'clear' : undefined,
+    })
+  } catch {
+    error.value = 'Gagal export Excel.'
+  } finally {
+    exporting.value = false
+  }
+}
+
 function triggerImport() {
   fileInput.value?.click()
 }
@@ -338,6 +359,9 @@ onMounted(() => {
         <input ref="fileInput" type="file" accept=".csv,.txt" class="hidden" @change="handleImportFile" />
         <Button variant="outline" :disabled="importing" @click="downloadTemplate">
           <Download class="h-4 w-4" /> Template
+        </Button>
+        <Button variant="outline" :disabled="exporting" @click="exportExcel">
+          <Download class="h-4 w-4" /> {{ exporting ? 'Export...' : 'Export Excel' }}
         </Button>
         <Button variant="outline" :disabled="importing" @click="triggerImport">
           <Upload class="h-4 w-4" /> {{ importing ? 'Mengimpor...' : 'Import CSV' }}
