@@ -12,7 +12,7 @@ import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 import Modal from '@/components/ui/Modal.vue'
 import SectionReportModal from '@/components/report/SectionReportModal.vue'
 import { dismantleApi, locationApi, type DismantleItem } from '@/services/api'
-import { todayInput } from '@/lib/date-input'
+import { todayInput, formatTimeId } from '@/lib/date-input'
 import { Plus, Pencil, Trash2, FileText, Upload, Download } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -410,8 +410,14 @@ onMounted(() => {
             <td class="py-3 pr-4">
               <Badge :variant="statusVariant(item.status)">{{ item.status }}</Badge>
             </td>
-            <td class="py-3 pr-4">{{ item.opened_at || '—' }}</td>
-            <td class="py-3 pr-4">{{ item.closed_at || '—' }}</td>
+            <td class="py-3 pr-4 text-xs">
+              {{ item.opened_at || '—' }}
+              <span class="block text-[11px] text-muted">{{ formatTimeId(item.created_at) || '' }}</span>
+            </td>
+            <td class="py-3 pr-4 text-xs">
+              {{ item.closed_at || '—' }}
+              <span class="block text-[11px] text-muted">{{ formatTimeId(item.cleared_at) || '' }}</span>
+            </td>
             <td class="py-3">
               <div class="flex gap-1">
                 <button type="button" class="rounded-lg p-1.5 text-muted hover:bg-muted" @click="openEdit(item)">

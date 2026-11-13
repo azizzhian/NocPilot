@@ -917,13 +917,15 @@ class DailyEntryController extends Controller
                 $r->status,
                 $r->start_problem?->toDateString(),
                 $r->end_problem?->toDateString(),
+                $r->created_at?->format('H:i'),
+                $r->cleared_at?->format('H:i'),
                 $r->creator?->name,
                 $r->clearer?->name,
             ]);
 
         return \App\Support\ExcelExport::download(
             'komplain-'.$from.'-'.$to.'.xlsx',
-            ['Tanggal', 'Tipe', 'Kode', 'Nama', 'ODC/Site', 'Lokasi', 'Problem', 'Action', 'Shift', 'Status', 'Start Problem', 'End Problem', 'Input oleh', 'Clear oleh'],
+            ['Tanggal', 'Tipe', 'Kode', 'Nama', 'ODC/Site', 'Lokasi', 'Problem', 'Action', 'Shift', 'Status', 'Start Problem', 'End Problem', 'Jam Open', 'Jam Close', 'Input oleh', 'Clear oleh'],
             $rows,
         );
     }
@@ -1079,13 +1081,15 @@ class DailyEntryController extends Controller
             $a->port_onu,
             $a->status,
             $a->notes,
+            $a->created_at?->format('H:i'),
+            $a->cleared_at?->format('H:i'),
             $a->creator?->name,
             $a->clearer?->name,
         ]);
 
         return \App\Support\ExcelExport::download(
             'aktivasi-'.$from.'-'.$to.'.xlsx',
-            ['Tanggal', 'Nama Pelanggan', 'Paket', 'OLT', 'ODP', 'Port ONU', 'Status', 'Catatan', 'Input oleh', 'Clear oleh'],
+            ['Tanggal', 'Nama Pelanggan', 'Paket', 'OLT', 'ODP', 'Port ONU', 'Status', 'Catatan', 'Jam Open', 'Jam Close', 'Input oleh', 'Clear oleh'],
             $rows,
         );
     }

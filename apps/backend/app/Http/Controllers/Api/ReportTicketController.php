@@ -157,6 +157,8 @@ class ReportTicketController extends Controller
             $r->problem,
             $r->action,
             $r->status,
+            $r->created_at?->format('H:i'),
+            $r->cleared_at?->format('H:i'),
             $r->creator?->name,
             $r->clearer?->name,
         ]);
@@ -169,7 +171,7 @@ class ReportTicketController extends Controller
 
         return \App\Support\ExcelExport::download(
             'report-ticket-'.$labelFrom.'-'.$labelTo.'.xlsx',
-            ['Opened', 'Closed', 'ODC/Site', 'Lokasi', 'Kode', 'Nama', 'Problem', 'Action', 'Status', 'Input oleh', 'Close oleh'],
+            ['Opened', 'Closed', 'ODC/Site', 'Lokasi', 'Kode', 'Nama', 'Problem', 'Action', 'Status', 'Jam Open', 'Jam Close', 'Input oleh', 'Close oleh'],
             $rows,
         );
     }

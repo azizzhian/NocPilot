@@ -599,6 +599,8 @@ export interface ReportTicketItem {
   notes: string | null
   creator_name?: string | null
   clearer_name?: string | null
+  cleared_at?: string | null
+  created_at?: string | null
 }
 
 export const reportTicketApi = {

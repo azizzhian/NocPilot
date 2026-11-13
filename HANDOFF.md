@@ -9,6 +9,7 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 
 ## Tugas sekarang
 
+- **Jam Open / Jam Close di export + list** (permintaan user, 2026-11-13): semua export (Komplain, Report Ticket, Aktivasi, Dismantle) kini punya kolom **Jam Open** (`created_at`) dan **Jam Close** (`cleared_at`) format `H:i`. Tampilan list juga menampilkan jam: kartu komplain (`ComplaintDataList`), daftar aktivasi (`InputHarianView`), tabel ticket & dismantle. Helper baru `formatTimeId()` di `lib/date-input.ts`. `ReportTicketResource` kini mengekspos `cleared_at`.
 - **Export Excel Dismantle** (permintaan user, 2026-11-13): tombol "Export Excel" di `/report/dismantle` mengunduh `dismantle-{from|all}-{to|all}.xlsx` lewat endpoint baru `GET /dismantles/export` (`DismantleController::export`). Kolom: Referensi, Lokasi, ID Pel, Nama Pelanggan, Status, Open Ticket, Close Ticket, Input oleh, Close oleh, Catatan. Filter mengikuti list: search, status (kecuali mode clear), location, odc_name (termasuk Tanpa ODC), from/to (open, atau closed_at bila `mode=clear`).
 - **Export Excel Report Ticket 500** (2026-11-13): `ReportTicketController::export` memakai `$from`/`$to` untuk nama file tanpa dideklarasikan → ErrorException. Ditambahkan `$from`/`$to` dari request sebelum label file. `php -l` lolos.
 - **Export Excel Aktivasi** (permintaan user, 2026-11-13): tombol "Excel" kini muncul juga di tab Aktivasi (halaman `/aktivasi`) dan mengunduh `aktivasi-{from}-{to}.xlsx` lewat endpoint baru `GET /daily-entry/export/activations` (`DailyEntryController::exportActivations`). Kolom: Tanggal, Nama Pelanggan, Paket, OLT, ODP, Port ONU, Status, Catatan, Input oleh, Clear oleh. Filter mengikuti list: `mode` (carry-over / clear), `search` nama, dan ODC via `olt_name`/`odp_name` (termasuk "Tanpa ODC" di PHP, sama seperti `listActivations`).
@@ -45,6 +46,11 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 - `apps/backend/routes/api.php` (route `dismantles/export`)
 - `apps/frontend/src/services/api.ts` (tambah `dismantleApi.exportExcel`)
 - `apps/frontend/src/views/DismantleView.vue` (tombol Export Excel)
+- `apps/frontend/src/lib/date-input.ts` (helper `formatTimeId`)
+- `apps/frontend/src/components/daily/ComplaintDataList.vue` (jam open/close)
+- `apps/frontend/src/views/ReportTicketView.vue` (jam open/close)
+- `apps/backend/app/Http/Resources/ReportTicketResource.php` (`cleared_at`)
+- `apps/backend/app/Http/Controllers/Api/DailyEntryController.php`, `ReportTicketController.php`, `DismantleController.php` (kolom Jam Open/Close)
 - `apps/backend/routes/api.php` (route `daily-entry/export/activations`)
 - `apps/frontend/src/services/api.ts` (tambah `dailyEntryApi.exportActivations`)
 - `apps/frontend/src/views/InputHarianView.vue` (tombol Excel untuk tab aktivasi)

@@ -13,7 +13,7 @@ import Modal from '@/components/ui/Modal.vue'
 import Textarea from '@/components/ui/Textarea.vue'
 import SectionReportModal from '@/components/report/SectionReportModal.vue'
 import { reportTicketApi, odcApi, locationApi, type ReportTicketItem } from '@/services/api'
-import { todayInput } from '@/lib/date-input'
+import { todayInput, formatTimeId } from '@/lib/date-input'
 import { Plus, Pencil, Trash2, Download, FileText } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -366,9 +366,15 @@ onMounted(async () => {
             <td class="py-3 pr-3 font-medium">{{ item.customer_name }}</td>
             <td class="py-3 pr-3 max-w-[12rem] truncate">{{ item.problem || '—' }}</td>
             <td class="py-3 pr-3"><Badge :variant="statusVariant(item.status)">{{ item.status }}</Badge></td>
-            <td class="py-3 pr-3 text-xs text-muted">{{ item.opened_at || '—' }}</td>
+            <td class="py-3 pr-3 text-xs text-muted">
+              {{ item.opened_at || '—' }}
+              <span class="block text-[11px] text-muted/80">{{ formatTimeId(item.created_at) || '—' }}</span>
+            </td>
             <td class="py-3 pr-3 text-xs text-foreground">{{ item.creator_name || '—' }}</td>
-            <td class="py-3 pr-3 text-xs text-muted">{{ item.closed_at || '—' }}</td>
+            <td class="py-3 pr-3 text-xs text-muted">
+              {{ item.closed_at || '—' }}
+              <span class="block text-[11px] text-muted/80">{{ formatTimeId(item.cleared_at) || '—' }}</span>
+            </td>
             <td class="py-3 pr-3 text-xs text-foreground">{{ item.clearer_name || '—' }}</td>
             <td class="py-3">
               <div class="flex gap-1">

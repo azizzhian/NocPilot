@@ -46,6 +46,8 @@ class DismantleController extends Controller
             $d->status,
             $d->opened_at?->toDateString(),
             $d->closed_at?->toDateString(),
+            $d->created_at?->format('H:i'),
+            $d->cleared_at?->format('H:i'),
             $d->creator?->name,
             $d->clearer?->name,
             $d->notes,
@@ -58,7 +60,7 @@ class DismantleController extends Controller
 
         return \App\Support\ExcelExport::download(
             'dismantle-'.$labelFrom.'-'.$labelTo.'.xlsx',
-            ['Referensi', 'Lokasi', 'ID Pel', 'Nama Pelanggan', 'Status', 'Open Ticket', 'Close Ticket', 'Input oleh', 'Close oleh', 'Catatan'],
+            ['Referensi', 'Lokasi', 'ID Pel', 'Nama Pelanggan', 'Status', 'Open Ticket', 'Close Ticket', 'Jam Open', 'Jam Close', 'Input oleh', 'Close oleh', 'Catatan'],
             $rows,
         );
     }

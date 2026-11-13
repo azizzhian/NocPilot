@@ -26,6 +26,7 @@ class ReportTicketResource extends JsonResource
             'creator_name' => $this->creator?->name,
             'cleared_by' => $this->cleared_by,
             'clearer_name' => $this->clearer?->name,
+            'cleared_at' => $this->cleared_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

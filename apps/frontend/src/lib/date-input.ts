@@ -31,6 +31,14 @@ export function formatDateId(value: string): string {
   return `${day} ${MONTHS_SHORT_ID[d.getMonth()]} ${d.getFullYear()}`
 }
 
+/** Format jam "HH:MM" (lokal, 24 jam) dari nilai datetime. Kosong jika bukan datetime. */
+export function formatTimeId(value: string | null | undefined): string {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 /** Konversi nilai tanggal API ke format YYYY-MM-DD untuk input[type=date]. */
 export function toDateInput(value: string | null | undefined): string {
   if (!value) return ''

@@ -161,12 +161,6 @@ function formatTime(value: string | null | undefined) {
   return `${d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })} WIB`
 }
 
-function itemTime(item: DailyEntryItem) {
-  const fromClear = formatTime(item.cleared_at)
-  if (fromClear !== '—') return fromClear
-  return formatTime(item.created_at)
-}
-
 function metaLine(item: DailyEntryItem) {
   const input = item.creator_name?.trim() || '—'
   const clear = item.clearer_name?.trim() || '—'
@@ -407,9 +401,13 @@ watch(
                       <Calendar class="h-3.5 w-3.5 shrink-0" />
                       {{ formatDate(item.start_problem || item.report_date) }}
                     </span>
-                    <span class="inline-flex items-center gap-1.5">
+                    <span class="inline-flex items-center gap-1.5" title="Jam open (input)">
                       <Clock class="h-3.5 w-3.5 shrink-0" />
-                      {{ itemTime(item) }}
+                      Open {{ formatTime(item.created_at) }}
+                    </span>
+                    <span class="inline-flex items-center gap-1.5" title="Jam close (clear)">
+                      <Check class="h-3.5 w-3.5 shrink-0" />
+                      Close {{ formatTime(item.cleared_at) }}
                     </span>
                   </div>
                 </div>
@@ -554,9 +552,13 @@ watch(
                       <Calendar class="h-3.5 w-3.5 shrink-0" />
                       {{ formatDate(item.start_problem || item.report_date) }}
                     </span>
-                    <span class="inline-flex items-center gap-1.5">
+                    <span class="inline-flex items-center gap-1.5" title="Jam open (input)">
                       <Clock class="h-3.5 w-3.5 shrink-0" />
-                      {{ itemTime(item) }}
+                      Open {{ formatTime(item.created_at) }}
+                    </span>
+                    <span class="inline-flex items-center gap-1.5" title="Jam close (clear)">
+                      <Check class="h-3.5 w-3.5 shrink-0" />
+                      Close {{ formatTime(item.cleared_at) }}
                     </span>
                   </div>
                 </div>

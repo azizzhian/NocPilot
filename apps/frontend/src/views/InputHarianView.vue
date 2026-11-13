@@ -21,10 +21,10 @@ import SectionReportModal from '@/components/report/SectionReportModal.vue'
 import { dailyEntryApi, type DailyEntryData, type DailyEntryItem } from '@/services/api'
 import type { ReportSection } from '@/services/api'
 import { useDailyEntryPoll, type DailyEntryRealtimeEvent } from '@/composables/useDailyEntryPoll'
-import { toDateInput, todayInput } from '@/lib/date-input'
+import { toDateInput, todayInput, formatTimeId } from '@/lib/date-input'
 import { parseActivationText } from '@/lib/parse-activation-text'
 import { cn } from '@/lib/utils'
-import { Pencil, Trash2, Plus, Download, FileText } from 'lucide-vue-next'
+import { Pencil, Trash2, Plus, Download, FileText, Clock, Check } from 'lucide-vue-next'
 
 const route = useRoute()
 const date = ref(todayInput())
@@ -1165,6 +1165,14 @@ onUnmounted(stopPoll)
                 · OLT: {{ item.olt_name || '—' }}
                 · ODP: {{ item.odp_name || '—' }}
                 · Port: {{ item.port_onu || '—' }}
+              </p>
+              <p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+                <span class="inline-flex items-center gap-1" title="Jam open (input)">
+                  <Clock class="h-3.5 w-3.5 shrink-0" /> Open {{ formatTimeId(item.created_at) || '—' }}
+                </span>
+                <span class="inline-flex items-center gap-1" title="Jam close (clear)">
+                  <Check class="h-3.5 w-3.5 shrink-0" /> Close {{ formatTimeId(item.cleared_at) || '—' }}
+                </span>
               </p>
               <DailyNocAttribution :creator-name="item.creator_name" :clearer-name="item.clearer_name" :status="item.status" />
               <DailyStatusBadge :status="item.status" type="activation" :id="item.id" @mark-clear="({ type, id }) => markItemClear(type, id)" />
