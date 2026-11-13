@@ -9,7 +9,9 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 
 ## Tugas sekarang
 
-- Perbaikan KPI card Aktivasi/CCTV di dashboard saat filter ODC dipilih: sebelumnya `summaryForRange` memaksa 0 karena kolom `odc_name` tidak ada. Kini aktivasi dipetakan via `olt_name` → `Olt.odc_id` / fallback `odp_name` → `Odp.odc_id`, CCTV via `customer_name` → `Customer.odc_id`, memakai helper `dailySummaryByOdc` (period-based open + kumulatif `open_all` + clear, ikut filter NOC).
+- **Export Excel Report Ticket 500** (2026-11-13): `ReportTicketController::export` memakai `$from`/`$to` untuk nama file tanpa dideklarasikan → ErrorException. Ditambahkan `$from`/`$to` dari request sebelum label file. `php -l` lolos.
+- **Export Excel Aktivasi** (permintaan user, 2026-11-13): tombol "Excel" kini muncul juga di tab Aktivasi (halaman `/aktivasi`) dan mengunduh `aktivasi-{from}-{to}.xlsx` lewat endpoint baru `GET /daily-entry/export/activations` (`DailyEntryController::exportActivations`). Kolom: Tanggal, Nama Pelanggan, Paket, OLT, ODP, Port ONU, Status, Catatan, Input oleh, Clear oleh. Filter mengikuti list: `mode` (carry-over / clear), `search` nama, dan ODC via `olt_name`/`odp_name` (termasuk "Tanpa ODC" di PHP, sama seperti `listActivations`).
+- (Sebelumnya) Perbaikan KPI card Aktivasi/CCTV di dashboard saat filter ODC dipilih: sebelumnya `summaryForRange` memaksa 0 karena kolom `odc_name` tidak ada. Kini aktivasi dipetakan via `olt_name` → `Olt.odc_id` / fallback `odp_name` → `Odp.odc_id`, CCTV via `customer_name` → `Customer.odc_id`, memakai helper `dailySummaryByOdc` (period-based open + kumulatif `open_all` + clear, ikut filter NOC).
 - **On-Progress period-based** (performa/presentasi/lencana): hanya item yang dibuat dalam rentang filter (`report_date` antara from–to), bukan backlog kumulatif. **Kecuali KPI card atas** yang tetap menampilkan SEMUA item masih On-Progress (kumulatif `<= to`, field `*_open_all`).
 - Role `noc` kehilangan permission `network.view` → menu JARINGAN (Router MikroTik, OLT, ONU, POP, ODC, ODP, Lokasi, Network Inventory) tak lagi tampil untuk role noc.
 - Favorit sidebar kini **global & bisa dibuka semua role**: `Sidebar.vue` tidak lagi memfilter favorit dengan permission, dan router guard memperbolehkan navigasi ke path yang ada di daftar favorit walau tanpa permission (admin mengontrol lewat `/settings`).
@@ -35,6 +37,12 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 - (Perlu keputusan) Karena API jaringan tidak ber-middleware permission, noc yang membuka favorit OLT otomatis bisa **tambah/edit/hapus** data OLT. Bila ingin read-only, perlu gate tambahan (`network.manage`) di UI.
 
 ## File disentuh
+
+- `apps/backend/app/Http/Controllers/Api/DailyEntryController.php` (tambah `exportActivations`)
+- `apps/backend/app/Http/Controllers/Api/ReportTicketController.php` (deklarasi `$from`/`$to` di `export`)
+- `apps/backend/routes/api.php` (route `daily-entry/export/activations`)
+- `apps/frontend/src/services/api.ts` (tambah `dailyEntryApi.exportActivations`)
+- `apps/frontend/src/views/InputHarianView.vue` (tombol Excel untuk tab aktivasi)
 
 - `apps/backend/app/Http/Controllers/Api/DashboardController.php`
 - `apps/frontend/src/views/DashboardView.vue`

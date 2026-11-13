@@ -854,6 +854,8 @@ export const dailyEntryApi = {
     downloadFile('/daily-entry/export/complaints', `komplain-${params.from}-${params.to}.xlsx`, params),
   exportNocUpdates: (params: { from: string; to: string; odc_name?: string; mode?: string }) =>
     downloadFile('/daily-entry/export/noc-updates', `update-noc-${params.from}-${params.to}.xlsx`, params),
+  exportActivations: (params: { from: string; to: string; odc_name?: string; search?: string; mode?: string }) =>
+    downloadFile('/daily-entry/export/activations', `aktivasi-${params.from}-${params.to}.xlsx`, params),
 }
 
 export interface ReportTemplateMeta {

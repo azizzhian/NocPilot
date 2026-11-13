@@ -83,6 +83,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/complaint-history', [DailyEntryController::class, 'complaintHistory']);
             Route::get('/export/complaints', [DailyEntryController::class, 'exportComplaints']);
             Route::get('/export/noc-updates', [DailyEntryController::class, 'exportNocUpdates']);
+            Route::get('/export/activations', [DailyEntryController::class, 'exportActivations']);
             Route::get('/list/complaints', [DailyEntryController::class, 'listComplaints']);
             Route::get('/list/noc-updates', [DailyEntryController::class, 'listNocUpdates']);
             Route::get('/list/activations', [DailyEntryController::class, 'listActivations']);

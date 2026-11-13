@@ -1031,6 +1031,65 @@ class DailyEntryController extends Controller
         return response()->json(['data' => $items]);
     }
 
+    public function exportActivations(Request $request)
+    {
+        $from = $request->string('from', now()->toDateString())->toString();
+        $to = $request->string('to', $from)->toString();
+        $search = trim($request->string('search')->toString());
+        $odc = trim($request->string('odc_name')->toString()) ?: null;
+        $unmapped = $this->isUnmappedOdcFilter($odc);
+
+        $oltNames = (! $unmapped && $odc) ? $this->oltNamesForOdc($odc) : [];
+        $odpNames = (! $unmapped && $odc) ? $this->odpNamesForOdc($odc) : [];
+
+        $query = DailyActivation::query()
+            ->with(['creator:id,name', 'clearer:id,name'])
+            ->where(fn ($q) => $this->applyListDateFilter($q, $request, $from, $to))
+            ->when($search !== '', fn ($q) => $q->where('customer_name', 'like', "%{$search}%"))
+            ->when(! $unmapped && $odc, function ($q) use ($odc, $oltNames, $odpNames) {
+                $q->where(function ($q2) use ($odc, $oltNames, $odpNames) {
+                    if ($oltNames !== []) {
+                        $q2->orWhereIn('olt_name', $oltNames);
+                    }
+                    if ($odpNames !== []) {
+                        $q2->orWhereIn('odp_name', $odpNames);
+                    }
+                    $q2->orWhereRaw('LOWER(TRIM(olt_name)) = ?', [mb_strtolower($odc)])
+                        ->orWhereRaw('LOWER(TRIM(odp_name)) = ?', [mb_strtolower($odc)]);
+                });
+            })
+            ->orderBy('report_date')
+            ->orderBy('id');
+
+        $items = $query->get();
+
+        // Filter Tanpa ODC di PHP — sama dengan listActivations & dashboard
+        if ($unmapped) {
+            $oltMap = $this->oltNameToOdcMap();
+            $odpMap = $this->odpNameToOdcMap();
+            $items = $items->filter(fn (DailyActivation $a) => $this->activationIsTanpaOdc($a, $oltMap, $odpMap))->values();
+        }
+
+        $rows = $items->map(fn (DailyActivation $a) => [
+            $a->report_date?->toDateString(),
+            $a->customer_name,
+            $a->package_name,
+            $a->olt_name,
+            $a->odp_name,
+            $a->port_onu,
+            $a->status,
+            $a->notes,
+            $a->creator?->name,
+            $a->clearer?->name,
+        ]);
+
+        return \App\Support\ExcelExport::download(
+            'aktivasi-'.$from.'-'.$to.'.xlsx',
+            ['Tanggal', 'Nama Pelanggan', 'Paket', 'OLT', 'ODP', 'Port ONU', 'Status', 'Catatan', 'Input oleh', 'Clear oleh'],
+            $rows,
+        );
+    }
+
     public function listCctvSetups(Request $request): JsonResponse
     {
         $from = $request->string('from', now()->toDateString())->toString();

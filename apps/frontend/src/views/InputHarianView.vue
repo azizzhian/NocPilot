@@ -220,7 +220,7 @@ const showOdcFilter = computed(() =>
 )
 
 const showOdcExportFilter = computed(
-  () => activeTab.value === 'complaint' || activeTab.value === 'noc',
+  () => activeTab.value === 'complaint' || activeTab.value === 'noc' || activeTab.value === 'activation',
 )
 
 const showNameSearch = computed(
@@ -420,6 +420,8 @@ async function exportCurrentTab() {
       await dailyEntryApi.exportComplaints(params)
     } else if (activeTab.value === 'noc') {
       await dailyEntryApi.exportNocUpdates(params)
+    } else if (activeTab.value === 'activation') {
+      await dailyEntryApi.exportActivations(params)
     }
   } catch {
     error.value = 'Gagal export Excel.'

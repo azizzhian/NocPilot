@@ -161,6 +161,9 @@ class ReportTicketController extends Controller
             $r->clearer?->name,
         ]);
 
+        $from = $request->string('from')->toString();
+        $to = $request->string('to')->toString();
+
         $labelFrom = $from !== '' ? $from : 'all';
         $labelTo = $to !== '' ? $to : 'all';
 
