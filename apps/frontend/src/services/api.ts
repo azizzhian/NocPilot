@@ -163,6 +163,54 @@ export interface DashboardStats {
       pct: number
     }>
   }
+  complaint_performance?: {
+    summary: {
+      total: number
+      open: number
+      open_all: number
+      in_progress: number
+      waiting: number
+      clear: number
+      avg_minutes: number | null
+      auto_cleared: number
+      repeat: number
+      categories: Record<string, number>
+      sla: ComplaintSlaSummary
+    }
+    rows: Array<{
+      user_id: number
+      name: string
+      total: number
+      open: number
+      in_progress: number
+      waiting: number
+      clear: number
+      auto_cleared: number
+      avg_minutes: number | null
+      categories: Record<string, number>
+      sla: ComplaintSlaSummary
+    }>
+  }
+  gamas_summary?: {
+    summary: {
+      total: number
+      open_all: number
+      clear: number
+    }
+    by_kind: Array<{
+      kind: string
+      label: string
+      total: number
+      open: number
+      clear: number
+    }>
+    by_odc: Array<{
+      odc_name: string
+      total: number
+      open: number
+      clear: number
+    }>
+  }
   charts: {
     clear_by_noc: {
       categories: string[]
@@ -201,6 +249,7 @@ export interface DashboardStats {
   nav_badges: {
     monitoring: number
     input_harian: number
+    gamas: number
     activations: number
     dismantles: number
   }
@@ -232,6 +281,7 @@ export const dashboardApi = {
     from?: string
     to?: string
     user_id?: number
+    shift?: number
     odc_name?: string
     complaint_odc_name?: string
     client_share_source?: 'all' | 'complaint' | 'ticket'
@@ -731,6 +781,18 @@ export interface DailyEntryItem {
   complaint_count_90d?: number | null
   /** Open item dari tanggal sebelum hari yang sedang dilihat */
   is_carryover?: boolean
+  /** Alur komplain baru: NOC selesai menangani, menunggu konfirmasi pelanggan (auto-clear 30 mnt) */
+  handled_at?: string | null
+  handled_by?: number | null
+  auto_cleared?: boolean
+  /** Durasi input → clear (menit) */
+  handling_minutes?: number | null
+  performance_category?: string | null
+  parent_complaint_id?: number | null
+  complaint_group_id?: number | null
+  /** Sisa waktu auto-clear (menit), hanya untuk status Menunggu Konfirmasi */
+  waiting_minutes_left?: number
+  is_repeat?: boolean
 }
 
 export interface ComplaintHistoryItem {
@@ -801,6 +863,23 @@ export interface DailyEntryPackageLookup {
   speed_mbps?: number | null
 }
 
+export interface ComplaintSlaSummary {
+  clear: number
+  within_60: number
+  percent: number | null
+}
+
+export type ComplaintFilterParams = {
+  from: string
+  to: string
+  odc_name?: string
+  search?: string
+  mode?: string
+  user_id?: number
+  shift?: number
+  status?: string
+}
+
 export interface DailyEntryData {
   date: string
   activations: DailyEntryItem[]
@@ -817,7 +896,11 @@ export interface DailyEntryData {
     packages: DailyEntryPackageLookup[]
   }
   status_options: string[]
+  /** Opsi status khusus komplain (termasuk "Menunggu Konfirmasi") */
+  complaint_status_options?: string[]
   summary: { activations: number; complaints: number; dismantles: number }
+  /** SLA komplain sesuai filter aktif (dari GET /daily-entry/list/complaints). */
+  sla?: ComplaintSlaSummary
 }
 
 export const dailyEntryApi = {
@@ -853,20 +936,94 @@ export const dailyEntryApi = {
   destroy: (type: string, id: number) => api.delete(`/daily-entry/${type}/${id}`),
   updateStatus: (type: string, id: number, status: string) =>
     api.patch(`/daily-entry/${type}/${id}/status`, { status }),
-  listComplaints: (params: { from: string; to: string; odc_name?: string; search?: string; mode?: string }) =>
-    api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/complaints', { params }),
+  listComplaints: (params: ComplaintFilterParams) =>
+    api.get<{ data: DailyEntryItem[]; sla: ComplaintSlaSummary }>('/daily-entry/list/complaints', { params }),
   listNocUpdates: (params: { from: string; to: string; odc_name?: string; mode?: string }) =>
     api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/noc-updates', { params }),
   listActivations: (params: { from: string; to: string; search?: string; odc_name?: string; mode?: string }) =>
     api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/activations', { params }),
   listCctvSetups: (params: { from: string; to: string; search?: string; odc_name?: string; mode?: string }) =>
     api.get<{ data: DailyEntryItem[] }>('/daily-entry/list/cctv', { params }),
-  exportComplaints: (params: { from: string; to: string; odc_name?: string; search?: string; mode?: string }) =>
+  exportComplaints: (params: ComplaintFilterParams) =>
     downloadFile('/daily-entry/export/complaints', `komplain-${params.from}-${params.to}.xlsx`, params),
+  exportComplaintsRecap: (params: ComplaintFilterParams) =>
+    downloadFile('/daily-entry/export/complaints-recap', `komplain-rekap-${params.from}-${params.to}.xlsx`, params),
   exportNocUpdates: (params: { from: string; to: string; odc_name?: string; mode?: string }) =>
     downloadFile('/daily-entry/export/noc-updates', `update-noc-${params.from}-${params.to}.xlsx`, params),
   exportActivations: (params: { from: string; to: string; odc_name?: string; search?: string; mode?: string }) =>
     downloadFile('/daily-entry/export/activations', `aktivasi-${params.from}-${params.to}.xlsx`, params),
+}
+
+export interface DailyGamasItem {
+  id: number
+  report_date: string
+  gamas_kind: string
+  location_label: string
+  impact?: string | null
+  odc_name?: string | null
+  problem?: string | null
+  action?: string | null
+  start_problem?: string | null
+  end_problem?: string | null
+  status: string
+  shift?: number | null
+  created_by?: number | null
+  creator_name?: string | null
+  cleared_by?: number | null
+  clearer_name?: string | null
+  cleared_at?: string | null
+  created_at?: string | null
+  /** Open item dari tanggal sebelum rentang yang sedang dilihat */
+  is_carryover?: boolean
+}
+
+export interface GamasUpdate {
+  id: number
+  daily_gamas_id: number
+  update_text: string
+  created_by: number | null
+  author_name: string | null
+  created_at: string | null
+}
+
+export interface GamasStatsResponse {
+  summary: { total: number; open_all: number; clear: number }
+  by_kind: Array<{ kind: string; label: string; total: number; open: number; clear: number }>
+  by_odc: Array<{ odc_name: string; total: number; open: number; clear: number }>
+}
+
+export type GamasListParams = {
+  from: string
+  to: string
+  odc_name?: string
+  search?: string
+  status?: string
+  mode?: string
+}
+
+export const gamasApi = {
+  list: (params: GamasListParams) =>
+    api.get<{ data: DailyGamasItem[] }>('/gamas', { params }),
+  stats: (params: { from: string; to: string }) =>
+    api.get<GamasStatsResponse>('/gamas/stats', { params }),
+  create: (data: Record<string, unknown>) => api.post('/gamas', data),
+  update: (id: number, data: Record<string, unknown>) => api.put(`/gamas/${id}`, data),
+  updates: (id: number) => api.get<{ data: GamasUpdate[] }>(`/gamas/${id}/updates`),
+  storeUpdate: (id: number, update_text: string) =>
+    api.post<{ message: string; data: GamasUpdate }>(`/gamas/${id}/updates`, { update_text }),
+  destroy: (id: number) => api.delete(`/gamas/${id}`),
+  updateStatus: (id: number, status: string) => api.patch(`/gamas/${id}/status`, { status }),
+  exportExcel: (params: GamasListParams) =>
+    downloadFile('/gamas/export', `gamas-${params.from}-${params.to}.xlsx`, params),
+  events: (date?: string, since?: number) =>
+    api.get<{ events: Array<{
+      id: number
+      event: string
+      title: string
+      message: string | null
+      payload: Record<string, unknown>
+      created_at: string | null
+    }>; latest_id: number }>('/gamas/events', { params: { date, since } }),
 }
 
 export interface ReportTemplateMeta {
@@ -907,6 +1064,7 @@ export interface GenerateReportResult {
 
 export type ReportSection =
   | 'complaint'
+  | 'gamas'
   | 'activation'
   | 'cctv'
   | 'noc'

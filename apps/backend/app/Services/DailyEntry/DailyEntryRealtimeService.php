@@ -3,6 +3,7 @@
 namespace App\Services\DailyEntry;
 
 use App\Models\DailyComplaint;
+use App\Models\DailyGamas;
 use App\Services\Realtime\RealtimeService;
 
 class DailyEntryRealtimeService
@@ -10,6 +11,7 @@ class DailyEntryRealtimeService
     public function __construct(
         private RealtimeService $realtime,
         private DailyEntryComplaintSerializer $serializer,
+        private DailyEntrySerializer $entrySerializer,
     ) {}
 
     public function complaintCreated(DailyComplaint $complaint): void
@@ -37,6 +39,61 @@ class DailyEntryRealtimeService
                 'complaint' => $complaintSnapshot,
             ],
             'daily-entry',
+        );
+    }
+
+    public function gamasCreated(DailyGamas $gamas): void
+    {
+        $this->broadcastGamas($gamas, 'created');
+    }
+
+    public function gamasUpdated(DailyGamas $gamas): void
+    {
+        $this->broadcastGamas($gamas, 'updated');
+    }
+
+    /** @param  array<string, mixed>|null  $gamasSnapshot */
+    public function gamasDeleted(int $gamasId, string $reportDate, ?array $gamasSnapshot = null): void
+    {
+        $this->realtime->push(
+            'gamas.deleted',
+            'Gamas dihapus',
+            null,
+            'info',
+            [
+                'action' => 'deleted',
+                'report_date' => $reportDate,
+                'gamas_id' => $gamasId,
+                'gamas' => $gamasSnapshot,
+            ],
+            'gamas',
+        );
+    }
+
+    protected function broadcastGamas(DailyGamas $gamas, string $action): void
+    {
+        $gamas->loadMissing(['creator:id,name', 'clearer:id,name']);
+        $reportDate = $gamas->report_date?->toDateString() ?? today()->toDateString();
+        $serialized = $this->entrySerializer->serialize($gamas, $reportDate);
+        $label = $gamas->displayLabel();
+
+        $title = match ($action) {
+            'created' => "Gamas baru: {$label}",
+            default => "Gamas diperbarui: {$label}",
+        };
+
+        $this->realtime->push(
+            "gamas.{$action}",
+            $title,
+            $gamas->problem,
+            'info',
+            [
+                'action' => $action,
+                'report_date' => $reportDate,
+                'gamas_id' => $gamas->id,
+                'gamas' => $serialized,
+            ],
+            'gamas',
         );
     }
 

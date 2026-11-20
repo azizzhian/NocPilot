@@ -93,7 +93,7 @@ class GenerateReportController extends Controller
         NetworkMonitorReportService $monitorReport,
     ): JsonResponse {
         $data = $request->validate([
-            'section' => 'required|in:complaint,activation,cctv,noc,dismantle,ticket,monitoring',
+            'section' => 'required|in:complaint,gamas,activation,cctv,noc,dismantle,ticket,monitoring',
             'from' => 'nullable|date',
             'to' => 'nullable|date',
             'report_date' => 'nullable|date',
@@ -123,6 +123,7 @@ class GenerateReportController extends Controller
 
         $labels = [
             'complaint' => 'Komplain',
+            'gamas' => 'Gamas',
             'activation' => 'Aktivasi',
             'cctv' => 'CCTV',
             'noc' => 'Update NOC',

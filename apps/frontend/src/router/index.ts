@@ -23,6 +23,16 @@ const router = createRouter({
       },
     },
     {
+      path: '/gamas',
+      name: 'gamas',
+      component: () => import('@/views/GamasView.vue'),
+      meta: {
+        title: 'Gamas',
+        subtitle: 'Input dan pantau gangguan massal harian NOC',
+        permission: 'gamas.view',
+      },
+    },
+    {
       path: '/aktivasi',
       name: 'aktivasi',
       component: () => import('@/views/InputHarianView.vue'),

@@ -39,6 +39,7 @@ const success = ref('')
 
 const sectionLabels: Record<ReportSection, string> = {
   complaint: 'Komplain',
+  gamas: 'Gamas',
   activation: 'Aktivasi',
   cctv: 'CCTV',
   noc: 'Update NOC',

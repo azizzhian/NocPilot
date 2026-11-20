@@ -18,22 +18,29 @@ import Toast from '@/components/ui/Toast.vue'
 import SearchInput from '@/components/ui/SearchInput.vue'
 import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 import SectionReportModal from '@/components/report/SectionReportModal.vue'
-import { dailyEntryApi, type DailyEntryData, type DailyEntryItem } from '@/services/api'
+import { dailyEntryApi, technicianApi, type DailyEntryData, type DailyEntryItem } from '@/services/api'
 import type { ReportSection } from '@/services/api'
 import { useDailyEntryPoll, type DailyEntryRealtimeEvent } from '@/composables/useDailyEntryPoll'
+import { useAuthStore } from '@/stores/auth'
 import { toDateInput, todayInput, formatTimeId } from '@/lib/date-input'
 import { parseActivationText } from '@/lib/parse-activation-text'
 import { cn } from '@/lib/utils'
 import { Pencil, Trash2, Plus, Download, FileText, Clock, Check } from 'lucide-vue-next'
 
 const route = useRoute()
+const auth = useAuthStore()
 const date = ref(todayInput())
 const filterFrom = ref(todayInput())
 const filterTo = ref(todayInput())
 const filterOdc = ref('')
 const filterSearch = ref('')
 const filterMode = ref('')
+const filterUser = ref('')
+const filterShift = ref('')
+const filterStatus = ref('')
+const technicians = ref<{ id: number; name: string }[]>([])
 const exporting = ref(false)
+const exportingRecap = ref(false)
 const reportModalOpen = ref(false)
 const loading = ref(true)
 const saving = ref(false)
@@ -73,12 +80,8 @@ const dismantleForm = ref({
 })
 
 const complaintForm = reactive({
-  complaint_type: 'individual' as 'individual' | 'gamas',
   customer_id: null as number | null,
   customer_code: '',
-  gamas_kind: 'odp' as 'odp' | 'upstream' | 'olt' | 'other',
-  location_label: '',
-  impact: '',
   odc_name: '',
   customer_name: '',
   phone_normalized: '',
@@ -89,12 +92,6 @@ const complaintForm = reactive({
   status: 'On-Progress',
   shift: '' as '' | '1' | '2' | '3',
 })
-const gamasKindOptions = [
-  { value: 'odp', label: 'ODP / Jalur' },
-  { value: 'upstream', label: 'Upstream' },
-  { value: 'olt', label: 'OLT / Site' },
-  { value: 'other', label: 'Lainnya' },
-] as const
 const nocForm = ref({ description: '', odc_name: '', status: 'On-Progress', sort_order: 0 })
 
 function filterParams() {
@@ -104,6 +101,9 @@ function filterParams() {
     odc_name: filterOdc.value || undefined,
     search: filterSearch.value.trim() || undefined,
     mode: filterMode.value || undefined,
+    user_id: filterUser.value ? Number(filterUser.value) : undefined,
+    shift: filterShift.value ? Number(filterShift.value) : undefined,
+    status: filterStatus.value || undefined,
   }
 }
 
@@ -256,7 +256,7 @@ watch(activeTab, () => {
 })
 
 let filterTimeout: ReturnType<typeof setTimeout>
-watch([filterFrom, filterTo, filterOdc, filterSearch, filterMode], () => {
+watch([filterFrom, filterTo, filterOdc, filterSearch, filterMode, filterUser, filterShift, filterStatus], () => {
   if (!showRangeFilter.value) return
   clearTimeout(filterTimeout)
   filterTimeout = setTimeout(() => void refreshFilteredLists(), 350)
@@ -289,6 +289,40 @@ const complaintClearCount = computed(() => {
   }).length ?? 0
 })
 const statusOptions = computed(() => data.value?.status_options ?? ['On-Progress', 'Clear'])
+/** Opsi status khusus form komplain (ada "Menunggu Konfirmasi"). */
+const complaintStatusOptions = computed(
+  () => data.value?.complaint_status_options ?? ['On-Progress', 'Menunggu Konfirmasi', 'Clear'],
+)
+
+const CLEAR_OWNER_MESSAGE = 'Hanya pembuat komplain yang dapat melakukan Clear.'
+const STATUS_OWNER_MESSAGE = 'Hanya pembuat komplain yang dapat mengubah status komplain.'
+
+function isComplaintOwner(item: DailyEntryItem): boolean {
+  const ownerId = item.created_by
+  const userId = auth.user?.id
+  return ownerId != null && userId != null && Number(ownerId) === Number(userId)
+}
+
+const editingComplaint = computed(
+  () => data.value?.complaints.find((c) => c.id === editingComplaintId.value) ?? null,
+)
+const canChangeStatus = computed(() =>
+  !editingComplaintId.value || (editingComplaint.value ? isComplaintOwner(editingComplaint.value) : false),
+)
+const canSubmitStatusChange = computed(() =>
+  canChangeStatus.value || editingComplaint.value?.status === complaintForm.status,
+)
+
+/** Komplain dalam rentang yang sedang menunggu konfirmasi pelanggan (auto-clear 30 mnt). */
+const complaintWaitingCount = computed(() => {
+  const from = filterFrom.value || date.value
+  const to = filterTo.value || date.value
+  return data.value?.complaints.filter((c) => {
+    if (c.status !== 'Menunggu Konfirmasi') return false
+    const d = itemDate(c.report_date)
+    return Boolean(d && d >= from && d <= to)
+  }).length ?? 0
+})
 const lookups = computed(() => data.value?.lookups ?? {
   olts: [],
   sites: [],
@@ -381,6 +415,7 @@ async function refreshFilteredLists() {
     if (allowedTabKeys.value.includes('complaint') && (activeTab.value === 'complaint' || isComplaintOnlyPage.value)) {
       const res = await dailyEntryApi.listComplaints(params)
       data.value.complaints = res.data.data
+      data.value.sla = res.data.sla
       if (data.value.summary) {
         const from = params.from
         const to = params.to
@@ -430,6 +465,20 @@ async function exportCurrentTab() {
   }
 }
 
+async function exportComplaintRecap() {
+  exportingRecap.value = true
+  error.value = ''
+  try {
+    await dailyEntryApi.exportComplaintsRecap(filterParams())
+    showToast('Rekap komplain berhasil diekspor.')
+  } catch {
+    error.value = 'Gagal export rekap komplain.'
+    showToast(error.value, 'error')
+  } finally {
+    exportingRecap.value = false
+  }
+}
+
 function changeDate(e: Event) {
   date.value = (e.target as HTMLInputElement).value
   filterFrom.value = date.value
@@ -460,20 +509,6 @@ function onComplaintCustomerSelect(customer: {
   }
   if (customer.phone) {
     complaintForm.phone_normalized = customer.phone
-  }
-}
-
-function setComplaintType(type: 'individual' | 'gamas') {
-  complaintForm.complaint_type = type
-  if (type === 'gamas') {
-    complaintForm.customer_id = null
-    complaintForm.customer_code = ''
-    complaintForm.customer_name = ''
-    complaintForm.phone_normalized = ''
-  } else {
-    complaintForm.gamas_kind = 'odp'
-    complaintForm.location_label = ''
-    complaintForm.impact = ''
   }
 }
 
@@ -681,12 +716,8 @@ let pollPausedForEdit = false
 function resetComplaintForm(closeModal = true) {
   editingComplaintId.value = null
   Object.assign(complaintForm, {
-    complaint_type: 'individual',
     customer_id: null,
     customer_code: '',
-    gamas_kind: 'odp',
-    location_label: '',
-    impact: '',
     odc_name: '',
     customer_name: '',
     phone_normalized: '',
@@ -704,16 +735,16 @@ function resetComplaintForm(closeModal = true) {
   }
 }
 function openEditComplaint(item: DailyEntryItem) {
+  if (!isComplaintOwner(item)) {
+    error.value = 'Hanya pembuat komplain yang dapat mengedit komplain.'
+    return
+  }
   stopPoll()
   pollPausedForEdit = true
   editingComplaintId.value = item.id
   Object.assign(complaintForm, {
-    complaint_type: (item.complaint_type === 'gamas' ? 'gamas' : 'individual') as 'individual' | 'gamas',
     customer_id: item.customer_id ?? null,
     customer_code: item.customer_code ?? '',
-    gamas_kind: (item.gamas_kind as 'odp' | 'upstream' | 'olt' | 'other') || 'odp',
-    location_label: item.location_label ?? '',
-    impact: item.impact ?? '',
     odc_name: item.odc_name ?? '',
     customer_name: item.customer_name ?? '',
     phone_normalized: item.phone_normalized ?? '',
@@ -762,21 +793,101 @@ function onComplaintUpdated(item: DailyEntryItem) {
 function onNeedActionComplaint(id: number) {
   const item = data.value?.complaints.find(c => c.id === id)
   if (item) openEditComplaint(item)
-  error.value = 'Action/perbaikan wajib diisi sebelum status Clear.'
+  error.value = 'Action/perbaikan wajib diisi sebelum status Menunggu Konfirmasi / Clear.'
+}
+
+// Popup khusus: tombol Clear ditekan sementara Action masih kosong
+// (tanpa membuka form Edit Komplain secara keseluruhan).
+const actionClearOpen = ref(false)
+const actionClearItem = ref<DailyEntryItem | null>(null)
+const actionClearText = ref('')
+const actionClearSaving = ref(false)
+const actionClearError = ref('')
+
+function openActionClear(id: number) {
+  const item = data.value?.complaints.find(c => c.id === id)
+  if (!item || !isComplaintOwner(item)) {
+    error.value = CLEAR_OWNER_MESSAGE
+    return
+  }
+  actionClearItem.value = item
+  actionClearText.value = item.action ?? ''
+  actionClearError.value = ''
+  actionClearOpen.value = true
+}
+
+function closeActionClear() {
+  if (actionClearSaving.value) return
+  actionClearOpen.value = false
+  actionClearItem.value = null
+  actionClearText.value = ''
+  actionClearError.value = ''
+}
+
+/** Satu request: simpan Action + status Clear. Backend menjalankan assertComplaintActionForClear,
+ *  syncClearAttribution, syncHandling, end_problem default, realtime & activity log. */
+async function submitActionClear() {
+  const item = actionClearItem.value
+  if (!item) return
+  if (!isComplaintOwner(item)) {
+    actionClearError.value = CLEAR_OWNER_MESSAGE
+    return
+  }
+  const action = actionClearText.value.trim()
+  if (!action) {
+    actionClearError.value = 'Action wajib diisi.'
+    return
+  }
+  actionClearSaving.value = true
+  actionClearError.value = ''
+  try {
+    const res = await dailyEntryApi.updateComplaint(item.id, {
+      // Payload membawa nilai field saat ini dari kartu — tidak ada penimpaan null/yang tidak disengaja.
+      report_date: item.report_date,
+      customer_id: item.customer_id ?? null,
+      customer_code: item.customer_code ?? '',
+      customer_name: item.customer_name ?? '',
+      phone_normalized: item.phone_normalized ?? null,
+      odc_name: item.odc_name ?? '',
+      problem: item.problem ?? '',
+      shift: item.shift ?? null,
+      start_problem: item.start_problem ? toDateInput(item.start_problem) : null,
+      end_problem: item.end_problem ? toDateInput(item.end_problem) : null,
+      action,
+      status: 'Clear',
+    })
+    upsertComplaintLocally(res.data.data as DailyEntryItem)
+    actionClearOpen.value = false
+    actionClearItem.value = null
+    actionClearText.value = ''
+    showToast('Komplain berhasil di-Clear.')
+  } catch (e: unknown) {
+    // Gagal → status kartu tidak diubah; popup tetap terbuka + notifikasi error.
+    const err = e as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } }
+    actionClearError.value = err.response?.data?.errors?.action?.[0]
+      ?? Object.values(err.response?.data?.errors ?? {}).flat()[0]
+      ?? err.response?.data?.message
+      ?? 'Gagal menyimpan Action & status Clear.'
+    showToast(actionClearError.value, 'error')
+  } finally {
+    actionClearSaving.value = false
+  }
 }
 
 async function submitComplaint() {
-  if (complaintForm.status === 'Clear' && !complaintForm.action?.trim()) {
-    error.value = 'Action/perbaikan wajib diisi sebelum status Clear.'
+  if (!canSubmitStatusChange.value) {
+    error.value = STATUS_OWNER_MESSAGE
     return
   }
-  if (complaintForm.complaint_type === 'individual') {
-    if (!complaintForm.customer_code.trim() || !complaintForm.customer_name.trim()) {
-      error.value = 'Komplain individu wajib isi Nama dan ID Pelanggan.'
-      return
-    }
-  } else if (!complaintForm.location_label.trim()) {
-    error.value = 'Lokasi / jalur gamas wajib diisi.'
+  if (
+    (complaintForm.status === 'Clear' || complaintForm.status === 'Menunggu Konfirmasi')
+    && !complaintForm.action?.trim()
+  ) {
+    error.value = `Action/perbaikan wajib diisi sebelum status ${complaintForm.status}.`
+    return
+  }
+  if (!complaintForm.customer_code.trim() || !complaintForm.customer_name.trim()) {
+    error.value = 'Komplain wajib isi Nama dan ID Pelanggan.'
     return
   }
   saving.value = true
@@ -788,7 +899,6 @@ async function submitComplaint() {
       shift: complaintForm.shift ? Number(complaintForm.shift) : null,
       start_problem: complaintForm.start_problem || null,
       end_problem: complaintForm.end_problem || null,
-      customer_id: complaintForm.complaint_type === 'individual' ? complaintForm.customer_id : null,
     }
     if (editingComplaintId.value) {
       const res = await dailyEntryApi.updateComplaint(editingComplaintId.value, payload)
@@ -863,6 +973,13 @@ function showToast(message: string, variant: 'success' | 'error' = 'success') {
 }
 
 function requestDelete(type: string, id: number, label?: string) {
+  if (type === 'complaint') {
+    const item = data.value?.complaints.find((c) => c.id === id)
+    if (!item || !isComplaintOwner(item)) {
+      error.value = 'Hanya pembuat komplain yang dapat menghapus komplain.'
+      return
+    }
+  }
   deleteTarget.value = { type, id, label: label?.trim() || 'item ini' }
 }
 
@@ -904,8 +1021,12 @@ async function confirmDelete() {
 }
 
 async function markItemClear(type: string, id: number) {
+  await setItemStatus(type, id, 'Clear')
+}
+
+async function setItemStatus(type: string, id: number, status: string) {
   try {
-    const res = await dailyEntryApi.updateStatus(type, id, 'Clear')
+    const res = await dailyEntryApi.updateStatus(type, id, status)
 
     if (type === 'complaint') {
       onComplaintUpdated(res.data.data)
@@ -949,8 +1070,10 @@ function handleRealtimeEvent(event: DailyEntryRealtimeEvent) {
 
   if (payload.action === 'deleted') {
     if (!isInRange && !alreadyInList) return
-    removeItemLocally('complaint', payload.complaint_id)
-    clearEditingIfDeleted('complaint', payload.complaint_id)
+    if (payload.complaint_id) {
+      removeItemLocally('complaint', payload.complaint_id)
+      clearEditingIfDeleted('complaint', payload.complaint_id)
+    }
     return
   }
 
@@ -992,8 +1115,18 @@ function applyRouteQuery() {
   }
 }
 
+async function loadTechnicians() {
+  try {
+    const res = await technicianApi.list()
+    technicians.value = res.data.data.map((t) => ({ id: t.id, name: t.name }))
+  } catch {
+    technicians.value = []
+  }
+}
+
 onMounted(() => {
   applyRouteQuery()
+  void loadTechnicians()
   void load().finally(() => startPoll())
 })
 
@@ -1052,6 +1185,29 @@ onUnmounted(stopPoll)
                   <option v-for="o in lookups.odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
                 </Select>
               </div>
+              <template v-if="activeTab === 'complaint'">
+                <div class="min-w-0 flex-1 sm:flex-none">
+                  <label class="mb-1 block text-[11px] text-muted">NOC</label>
+                  <Select v-model="filterUser" class="w-full sm:w-40">
+                    <option value="">Semua NOC</option>
+                    <option v-for="t in technicians" :key="t.id" :value="String(t.id)">{{ t.name }}</option>
+                  </Select>
+                </div>
+                <div class="min-w-0 flex-1 sm:flex-none">
+                  <label class="mb-1 block text-[11px] text-muted">Shift</label>
+                  <Select v-model="filterShift" class="w-full sm:w-28">
+                    <option value="">Semua shift</option>
+                    <option v-for="s in shiftOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
+                  </Select>
+                </div>
+                <div class="min-w-0 flex-1 sm:flex-none">
+                  <label class="mb-1 block text-[11px] text-muted">Status</label>
+                  <Select v-model="filterStatus" class="w-full sm:w-40">
+                    <option value="">Semua status</option>
+                    <option v-for="s in complaintStatusOptions" :key="s" :value="s">{{ s }}</option>
+                  </Select>
+                </div>
+              </template>
               <Button
                 v-if="showOdcExportFilter"
                 variant="outline"
@@ -1060,6 +1216,15 @@ onUnmounted(stopPoll)
                 @click="exportCurrentTab"
               >
                 <Download class="h-4 w-4" /> {{ exporting ? 'Export...' : 'Excel' }}
+              </Button>
+              <Button
+                v-if="activeTab === 'complaint'"
+                variant="outline"
+                class="w-full sm:w-auto"
+                :disabled="exportingRecap"
+                @click="exportComplaintRecap"
+              >
+                <Download class="h-4 w-4" /> {{ exportingRecap ? 'Export...' : 'Rekap NOC/Shift' }}
               </Button>
             </template>
           </template>
@@ -1084,7 +1249,9 @@ onUnmounted(stopPoll)
         <ComplaintKpiCard
           :today="complaintTodayCount"
           :on-progress="complaintOnProgressCount"
+          :waiting="complaintWaitingCount"
           :clear="complaintClearCount"
+          :sla="data?.sla"
         />
       </div>
       <div v-else-if="!isNocOnlyPage" class="mb-6 grid gap-4 md:grid-cols-3">
@@ -1121,7 +1288,9 @@ onUnmounted(stopPoll)
           @edit="openEditComplaint"
           @delete="(item) => requestDelete('complaint', item.id, item.customer_name)"
           @need-action="onNeedActionComplaint"
+          @clear-needs-action="openActionClear"
           @mark-clear="({ type, id }) => markItemClear(type, id)"
+          @set-status="({ type, id, status }) => setItemStatus(type, id, status)"
         />
 
         <Card v-else>
@@ -1410,97 +1579,33 @@ onUnmounted(stopPoll)
       </form>
 
       <form v-else-if="activeTab === 'complaint'" class="max-h-[70vh] space-y-4 overflow-y-auto pr-1" @submit.prevent="submitComplaint">
-        <div>
-          <label class="mb-1.5 block text-sm font-medium text-foreground">Tipe</label>
-          <div class="flex gap-2 rounded-xl border border-border p-1">
-            <button
-              type="button"
-              :class="[
-                'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition',
-                complaintForm.complaint_type === 'individual' ? 'bg-primary text-white' : 'text-muted hover:bg-muted',
-              ]"
-              @click="setComplaintType('individual')"
-            >
-              Individu
-            </button>
-            <button
-              type="button"
-              :class="[
-                'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition',
-                complaintForm.complaint_type === 'gamas' ? 'bg-primary text-white' : 'text-muted hover:bg-muted',
-              ]"
-              @click="setComplaintType('gamas')"
-            >
-              Gamas
-            </button>
-          </div>
-        </div>
-
-        <template v-if="complaintForm.complaint_type === 'individual'">
-          <CustomerAutocomplete
-            v-model="complaintForm.customer_name"
-            label="Pelanggan *"
-            required
-            @update:model-value="onComplaintNameTyped"
-            @select="onComplaintCustomerSelect"
-          />
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="mb-1.5 block text-sm font-medium text-foreground">ID Pelanggan *</label>
-              <Input
-                v-model="complaintForm.customer_code"
-                required
-                placeholder="Ketik ID pelanggan"
-                @update:model-value="onComplaintCodeTyped"
-              />
-            </div>
-            <div>
-              <label class="mb-1.5 block text-sm font-medium text-foreground">ODC</label>
-              <Select v-model="complaintForm.odc_name">
-                <option value="">— Pilih ODC —</option>
-                <option v-for="o in lookups.odcs" :key="o.id" :value="o.name">
-                  {{ o.name }} ({{ o.code }})
-                </option>
-              </Select>
-            </div>
-          </div>
-        </template>
-
-        <template v-else>
+        <CustomerAutocomplete
+          v-model="complaintForm.customer_name"
+          label="Pelanggan *"
+          required
+          @update:model-value="onComplaintNameTyped"
+          @select="onComplaintCustomerSelect"
+        />
+        <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="mb-1.5 block text-sm font-medium text-foreground">Jenis Gamas *</label>
-            <Select v-model="complaintForm.gamas_kind" class="w-full">
-              <option v-for="k in gamasKindOptions" :key="k.value" :value="k.value">{{ k.label }}</option>
-            </Select>
-          </div>
-          <div>
-            <label class="mb-1.5 block text-sm font-medium text-foreground">Lokasi / Jalur *</label>
+            <label class="mb-1.5 block text-sm font-medium text-foreground">ID Pelanggan *</label>
             <Input
-              v-model="complaintForm.location_label"
+              v-model="complaintForm.customer_code"
               required
-              :placeholder="complaintForm.gamas_kind === 'upstream'
-                ? 'Contoh: Upstream Jiwan · ether11'
-                : complaintForm.gamas_kind === 'odp'
-                  ? 'Contoh: ODP Banyumas 1'
-                  : 'Lokasi / perangkat'"
+              placeholder="Ketik ID pelanggan"
+              @update:model-value="onComplaintCodeTyped"
             />
           </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="mb-1.5 block text-sm font-medium text-foreground">Impact</label>
-              <Input v-model="complaintForm.impact" placeholder="all user / ±10 user" />
-            </div>
-            <div>
-              <label class="mb-1.5 block text-sm font-medium text-foreground">ODC (opsional)</label>
-              <Select v-model="complaintForm.odc_name">
-                <option value="">— Pilih ODC —</option>
-                <option v-for="o in lookups.odcs" :key="o.id" :value="o.name">
-                  {{ o.name }} ({{ o.code }})
-                </option>
-              </Select>
-            </div>
+          <div>
+            <label class="mb-1.5 block text-sm font-medium text-foreground">ODC</label>
+            <Select v-model="complaintForm.odc_name">
+              <option value="">— Pilih ODC —</option>
+              <option v-for="o in lookups.odcs" :key="o.id" :value="o.name">
+                {{ o.name }} ({{ o.code }})
+              </option>
+            </Select>
           </div>
-        </template>
+        </div>
 
         <div>
           <label class="mb-1.5 block text-sm font-medium text-foreground">Shift</label>
@@ -1511,11 +1616,11 @@ onUnmounted(stopPoll)
         </div>
         <div>
           <label class="mb-1.5 block text-sm font-medium text-foreground">Problem</label>
-          <Input v-model="complaintForm.problem" :placeholder="complaintForm.complaint_type === 'gamas' ? 'LOS / link down / dll' : ''" />
+          <Input v-model="complaintForm.problem" />
         </div>
         <div>
           <label class="mb-1.5 block text-sm font-medium text-foreground">Action (wajib jika Clear)</label>
-          <Textarea v-model="complaintForm.action" :rows="2" :placeholder="complaintForm.complaint_type === 'gamas' ? 'Koordinasi dengan tim / vendor' : ''" />
+          <Textarea v-model="complaintForm.action" :rows="2" />
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
@@ -1535,11 +1640,12 @@ onUnmounted(stopPoll)
             />
           </div>
         </div>
-        <div>
+        <div :title="canChangeStatus ? undefined : STATUS_OWNER_MESSAGE">
           <label class="mb-1.5 block text-sm font-medium text-foreground">Status</label>
-          <Select v-model="complaintForm.status">
-            <option v-for="s in statusOptions" :key="s" :value="s">{{ s }}</option>
+          <Select v-model="complaintForm.status" :disabled="!canChangeStatus">
+            <option v-for="s in complaintStatusOptions" :key="s" :value="s">{{ s }}</option>
           </Select>
+          <p v-if="!canChangeStatus" class="mt-1 text-[11px] text-muted">{{ STATUS_OWNER_MESSAGE }}</p>
         </div>
         <div class="flex gap-2">
           <Button type="submit" :disabled="saving">{{ editingComplaintId ? 'Simpan Perubahan' : 'Simpan Komplain' }}</Button>
@@ -1586,6 +1692,38 @@ onUnmounted(stopPoll)
         <Button type="button" variant="outline" :disabled="deleting" @click="deleteTarget = null">Batal</Button>
         <Button type="button" variant="danger" :disabled="deleting" @click="confirmDelete">
           {{ deleting ? 'Menghapus...' : 'Hapus' }}
+        </Button>
+      </template>
+    </Modal>
+
+    <Modal
+      :open="actionClearOpen"
+      title="Action Wajib Diisi"
+      size="sm"
+      @close="closeActionClear"
+    >
+      <p class="text-sm text-muted">
+        Silakan isi tindakan penanganan sebelum mengubah status komplain menjadi Clear.
+      </p>
+      <div class="mt-4">
+        <label for="action-clear-textarea" class="mb-1.5 block text-sm font-medium">
+          Action
+        </label>
+        <Textarea
+          id="action-clear-textarea"
+          v-model="actionClearText"
+          :rows="3"
+          placeholder="Contoh: Reconfig DNS & Soft Reboot"
+          :disabled="actionClearSaving"
+        />
+      </div>
+      <p v-if="actionClearError" class="mt-3 text-sm text-danger">{{ actionClearError }}</p>
+      <template #footer>
+        <Button type="button" variant="outline" :disabled="actionClearSaving" @click="closeActionClear">
+          Batal
+        </Button>
+        <Button type="button" :disabled="actionClearSaving" @click="submitActionClear">
+          {{ actionClearSaving ? 'Menyimpan...' : 'Simpan & Clear' }}
         </Button>
       </template>
     </Modal>

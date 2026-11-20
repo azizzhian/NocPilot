@@ -18,10 +18,21 @@ class DailyEntryComplaintSerializer
         $row = $this->serializer->serialize($complaint);
         $actualDate = $complaint->report_date?->toDateString();
 
+        if ($complaint->auto_cleared && empty($row['clearer_name'])) {
+            $row['clearer_name'] = 'System / Scheduler';
+        }
+
         $row['is_carryover'] = $viewDate
             && $actualDate
             && $actualDate < $viewDate
             && ReportStatus::isOpen($complaint->status);
+
+        $row['waiting_minutes_left'] = $complaint->waitingMinutesLeft();
+        $row['is_repeat'] = (bool) $complaint->parent_complaint_id;
+
+        if ($complaint->handled_at) {
+            $row['handled_at'] = $complaint->handled_at->toIso8601String();
+        }
 
         return $row;
     }

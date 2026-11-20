@@ -9,7 +9,7 @@ use Illuminate\Http\Request;
 
 class DailyEntryEventsController extends Controller
 {
-    private const CHANNEL = 'daily-entry';
+    protected const CHANNEL = 'daily-entry';
 
     public function index(Request $request): JsonResponse
     {
@@ -17,12 +17,12 @@ class DailyEntryEventsController extends Controller
         $since = $request->has('since')
             ? max(0, $request->integer('since'))
             : (int) (RealtimeEvent::query()
-                ->where('channel', self::CHANNEL)
+                ->where('channel', static::CHANNEL)
                 ->where('payload->report_date', $date)
                 ->max('id') ?? 0);
 
         $events = RealtimeEvent::query()
-            ->where('channel', self::CHANNEL)
+            ->where('channel', static::CHANNEL)
             ->where('id', '>', $since)
             ->where('payload->report_date', $date)
             ->orderBy('id')
@@ -30,7 +30,7 @@ class DailyEntryEventsController extends Controller
             ->get();
 
         $latestId = (int) (RealtimeEvent::query()
-            ->where('channel', self::CHANNEL)
+            ->where('channel', static::CHANNEL)
             ->where('payload->report_date', $date)
             ->max('id') ?? $since);
 

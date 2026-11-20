@@ -5,8 +5,10 @@ import type { DailyEntryItem } from '@/services/api'
 export interface DailyEntryRealtimePayload {
   action: 'created' | 'updated' | 'deleted'
   report_date: string
-  complaint_id: number
+  complaint_id?: number
   complaint?: DailyEntryItem | null
+  gamas_id?: number
+  gamas?: DailyEntryItem | null
 }
 
 export interface DailyEntryRealtimeEvent {
@@ -18,11 +20,26 @@ export interface DailyEntryRealtimeEvent {
   created_at: string | null
 }
 
+export interface RealtimeEventsResponse {
+  events: Array<{
+    id: number
+    event: string
+    title: string
+    message: string | null
+    payload: Record<string, unknown>
+    created_at: string | null
+  }>
+  latest_id: number
+}
+
+type EventsFetcher = (date?: string, since?: number) => Promise<{ data: RealtimeEventsResponse }>
+
 const POLL_MS = 3000
 
 export function useDailyEntryPoll(
   date: Ref<string>,
   onEvent: (event: DailyEntryRealtimeEvent) => void,
+  fetchEvents: EventsFetcher = (d, s) => dailyEntryApi.events(d, s),
 ) {
   const connected = ref(false)
   const lastEventId = ref(0)
@@ -43,7 +60,7 @@ export function useDailyEntryPoll(
     polling = true
 
     try {
-      const res = await dailyEntryApi.events(
+      const res = await fetchEvents(
         date.value,
         lastEventId.value > 0 ? lastEventId.value : undefined,
       )

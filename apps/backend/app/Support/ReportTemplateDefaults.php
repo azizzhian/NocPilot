@@ -72,6 +72,23 @@ Status: {{status}}
 {{/items}}
 {{/complaints_by_odc}}
 TPL,
+            'gamas' => <<<'TPL'
+Gangguan Massal (Gamas):
+
+{{#gamas_by_odc}}
+ODC {{odc_name}}:
+
+{{#items}}
+Jenis: {{gamas_kind_label}}
+Lokasi: {{location_label}}
+Impact: {{impact}}
+Problem: {{problem}}
+Action: {{action}}
+Status: {{status}}
+
+{{/items}}
+{{/gamas_by_odc}}
+TPL,
             'activation' => <<<'TPL'
 Aktivasi Pelanggan:
 

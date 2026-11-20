@@ -44,9 +44,10 @@ const favorites = computed(() => {
 })
 
 function badgeForItem(to: string): number | undefined {
-  const map: Record<string, 'monitoring' | 'input_harian' | 'activations' | 'dismantles'> = {
+  const map: Record<string, 'monitoring' | 'input_harian' | 'activations' | 'dismantles' | 'gamas'> = {
     '/monitoring': 'monitoring',
     '/komplain': 'input_harian',
+    '/gamas': 'gamas',
     '/aktivasi': 'activations',
     '/dismantle': 'dismantles',
     '/report/dismantle': 'dismantles',

@@ -4,69 +4,180 @@ Catatan tugas yang **sedang berjalan**, dipakai bergantian oleh Cursor dan OpenC
 Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan oleh `/worklog` saat tugas tuntas
 (ringkasannya dipindah ke `CHANGELOG.md`). Keputusan permanen ditulis di `AGENTS.md`, bukan di sini.
 
-- **Terakhir diperbarui**: 2026-10-31 oleh OpenCode
+- **Terakhir diperbarui**: 2026-11-20 oleh OpenCode
 - **Commit dasar**: `f7d4ca9` (Required OLT)
 
 ## Tugas sekarang
 
-- **Jam Open / Jam Close di export + list** (permintaan user, 2026-11-13): semua export (Komplain, Report Ticket, Aktivasi, Dismantle) kini punya kolom **Jam Open** (`created_at`) dan **Jam Close** (`cleared_at`) format `H:i`. Tampilan list juga menampilkan jam: kartu komplain (`ComplaintDataList`), daftar aktivasi (`InputHarianView`), tabel ticket & dismantle. Helper baru `formatTimeId()` di `lib/date-input.ts`. `ReportTicketResource` kini mengekspos `cleared_at`.
-- **Export Excel Dismantle** (permintaan user, 2026-11-13): tombol "Export Excel" di `/report/dismantle` mengunduh `dismantle-{from|all}-{to|all}.xlsx` lewat endpoint baru `GET /dismantles/export` (`DismantleController::export`). Kolom: Referensi, Lokasi, ID Pel, Nama Pelanggan, Status, Open Ticket, Close Ticket, Input oleh, Close oleh, Catatan. Filter mengikuti list: search, status (kecuali mode clear), location, odc_name (termasuk Tanpa ODC), from/to (open, atau closed_at bila `mode=clear`).
-- **Export Excel Report Ticket 500** (2026-11-13): `ReportTicketController::export` memakai `$from`/`$to` untuk nama file tanpa dideklarasikan → ErrorException. Ditambahkan `$from`/`$to` dari request sebelum label file. `php -l` lolos.
-- **Export Excel Aktivasi** (permintaan user, 2026-11-13): tombol "Excel" kini muncul juga di tab Aktivasi (halaman `/aktivasi`) dan mengunduh `aktivasi-{from}-{to}.xlsx` lewat endpoint baru `GET /daily-entry/export/activations` (`DailyEntryController::exportActivations`). Kolom: Tanggal, Nama Pelanggan, Paket, OLT, ODP, Port ONU, Status, Catatan, Input oleh, Clear oleh. Filter mengikuti list: `mode` (carry-over / clear), `search` nama, dan ODC via `olt_name`/`odp_name` (termasuk "Tanpa ODC" di PHP, sama seperti `listActivations`).
-- (Sebelumnya) Perbaikan KPI card Aktivasi/CCTV di dashboard saat filter ODC dipilih: sebelumnya `summaryForRange` memaksa 0 karena kolom `odc_name` tidak ada. Kini aktivasi dipetakan via `olt_name` → `Olt.odc_id` / fallback `odp_name` → `Odp.odc_id`, CCTV via `customer_name` → `Customer.odc_id`, memakai helper `dailySummaryByOdc` (period-based open + kumulatif `open_all` + clear, ikut filter NOC).
-- **On-Progress period-based** (performa/presentasi/lencana): hanya item yang dibuat dalam rentang filter (`report_date` antara from–to), bukan backlog kumulatif. **Kecuali KPI card atas** yang tetap menampilkan SEMUA item masih On-Progress (kumulatif `<= to`, field `*_open_all`).
-- Role `noc` kehilangan permission `network.view` → menu JARINGAN (Router MikroTik, OLT, ONU, POP, ODC, ODP, Lokasi, Network Inventory) tak lagi tampil untuk role noc.
-- Favorit sidebar kini **global & bisa dibuka semua role**: `Sidebar.vue` tidak lagi memfilter favorit dengan permission, dan router guard memperbolehkan navigasi ke path yang ada di daftar favorit walau tanpa permission (admin mengontrol lewat `/settings`).
+- **Modul Gamas terpisah** (permintaan user, 2026-11-20) — kode **selesai** (backend, frontend, migration sudah `migrate`, `composer test` 7 lolos, `npm run build:web` lolos), tinggal verifikasi manual:
+  - **Tabel baru `daily_gamas`** (`2026_11_20_000000_create_daily_gamas_table.php`): buat tabel (report_date, gamas_kind, location_label, impact, odc_name, problem, action, start/end_problem, status, shift, created_by, cleared_by, cleared_at) → **pindah data** baris `complaint_type='gamas'` dari `daily_complaints` (status `Menunggu Konfirmasi` → `On-Progress`, kolom handling/repeat TIDAK disalin) → **DELETE** baris gamas dari `daily_complaints`. Kolom gamas lama di `daily_complaints` tidak di-drop. Terverifikasi lokal: `gamas: 1`, `complaints gamas-type: 0`.
+  - **Permission** (`2026_11_20_010000_add_gamas_permissions.php`, additive `findOrCreate`): `gamas.view` (administrator, manager, noc, teknisi) + `dashboard.widget.gamas` (administrator, manager, noc). Terverifikasi: 7 baris `role_has_permissions`.
+  - **Backend**: model `DailyGamas`, `GamasController` (index carry-over, stats, store, update, updateStatus, destroy, export Excel), `GamasEventsController` (channel `gamas`, `DailyEntryEventsController::CHANNEL` kini `protected`), `GamasStatsService` (summary + by_kind + by_odc), realtime `DailyEntryRealtimeService::broadcastGamas`, route prefix `/gamas`, nav badge `gamas` di `DashboardController`.
+  - **Report**: section **`gamas` baru** di `GenerateReportController` validasi + label, `ReportTemplateDefaults::sectionBody('gamas')`, `ReportGeneratorService::dailyGamasByOdc`. Keluar dari section komplain.
+  - **Frontend**: menu sidebar "Gamas" (`data/navigation.ts`, Siren, permission `gamas.view`, favorit order 6), route `/gamas` → **`GamasView.vue`** (baru: KPI, rekap per jenis, filter ODC/Tanpa ODC, tabs status, form, "Tandai Clear", delete, Excel, SectionReportModal `gamas`, polling realtime channel `gamas`), `useDailyEntryPoll` digeneralisasi (param `fetchEvents` opsional), badge sidebar `/gamas` → `nav_badges.gamas`, widget **Statistik Gamas** di DashboardView (gate `dashboard.widget.gamas`, payload `gamas_summary`), label `gamas` di `SectionReportModal`.
+  - **Pembersihan dari Komplain**: toggle Individu/Gamas + field gamas dihapus dari form `InputHarianView`; chip/branch `isGamas` dihapus dari `ComplaintDataList`; `validateComplaint` backend memaksa `gamas_kind/location_label/impact = null` dan cabang gamas `attachRepeatRelation` dihapus (individu saja); export komplain tanpa kolom Tipe/Lokasi. KPI komplain otomatis exclude gamas karena datanya sudah pindah.
+  - Alur status gamas sederhana: **On-Progress ↔ Clear** (Clear wajib `action`), TANPA Menunggu Konfirmasi/auto-clear/performa/repeat.
+  - Perbaikan 2026-11-20: jam clear (`formatTimeId(cleared_at)`) sempat salah taruh di sel "Input oleh" → dipindah ke sel "Close oleh"; jam input (`created_at`) juga ditambahkan di sel "Input oleh" (`GamasView.vue`, backend/serializer sudah benar). `npm run build:web` lolos.
+  - **Pill status di kartu Komplain** (permintaan user, 2026-11-20, `ComplaintDataList.vue` saja): 3 tombol pill di bawah nama pelanggan (On-Progress oranye/warning, Menunggu Konfirmasi biru/info, Clear hijau/success) — klik langsung update status via emit `set-status`/`mark-clear` yang sudah ada (TANPA ubah backend/alur). Guard Action wajib tetap (Action kosong → `need-action` → buka form Edit). Pending state (`statusPending`, disabled 6 dtk failsafe) cegah double-click; status kartu hanya berubah setelah respons sukses (gagal → status tetap + toast error dari `InputHarianView.setItemStatus`). Tombol lama "Tandai Selesai"/"Tandai Clear" & badge Clear dihapus; chip hitung mundur auto-clear, performa, Berulang, "dari/Open dari" tetap. Berlaku untuk list `pagedToday` & carry-over `pagedOpen`. `npm run build:web` lolos.
+  - **Popup "Action Wajib Diisi" untuk Clear** (permintaan user, 2026-11-20): pill Clear dengan Action kosong kini emit `clear-needs-action` (bukan `need-action` → form Edit penuh) → `Modal size="sm"` baru di `InputHarianView` (judul "Action Wajib Diisi", pesan, 1 `Textarea` label Action, placeholder "Contoh: Reconfig DNS & Soft Reboot", tombol Batal / Simpan & Clear). `submitActionClear()` → **satu request** `dailyEntryApi.updateComplaint(id, payload-current-item + action + status:Clear)` — backend lama menjalankan validasi Action wajib, `syncClearAttribution`, `syncHandling`, `end_problem` default, realtime & activity log. Sukses → `upsertComplaintLocally` + toast (tanpa reload); gagal → popup tetap + error, status kartu tidak berubah. Payload dibangun dari nilai kartu saat ini (tidak menimpa field dengan null). Clear ber-action tetap `mark-clear` langsung; Menunggu Konfirmasi tanpa Action tetap buka form Edit. Backend/DB tidak diubah. `npm run build:web` lolos.
+
+- **Alur komplain baru + performa penanganan** (permintaan user, 2026-11-19) — kode **selesai** (backend, frontend, migration, test lolos), tinggal verifikasi manual:
+  - Status baru **"Menunggu Konfirmasi"** (`ReportStatus::WAITING_CONFIRMATION`): On-Progress → (NOC klik "Tandai Selesai", wajib isi `action`) → Menunggu Konfirmasi → Clear manual ATAU **auto-clear 30 menit** oleh command `complaint:auto-clear` (jadwal `everyMinute` di `bootstrap/app.php`). Timer dari `handled_at`; auto-clear pakai `handled_by` sebagai `cleared_by` + flag `auto_cleared` + activity log.
+  - **Kategori performa** disimpan saat Clear: `handling_minutes` = `created_at` → `cleared_at` (**termasuk** jeda menunggu konfirmasi) → `performance_category`: 1–30 Cepat / 31–40 Lambat / 41–60 Cukup Lambat / >60 Sangat Lambat (`DailyComplaint::performanceCategoryFor`). Keluar dari Clear → metrik di-reset.
+  - **Komplain berulang otomatis**: `storeComplaint` → `attachRepeatRelation` mencari komplain terakhir (individu: customer_id/code/phone/nama sama) dalam **24 jam** → isi `parent_complaint_id` + `complaint_group_id`.
+  - **Dashboard**: `DashboardController::complaintPerformance` → payload `complaint_performance` (summary + rows per petugas). Widget baru di DashboardView, gate **`dashboard.widget.complaint_performance`** (default: administrator, manager, noc — migration additive `2026_11_19_010000`).
+  - **UI**: kartu komplain (`ComplaintDataList`) tombol "Tandai Selesai" → chip "Menunggu Konfirmasi · auto-clear X mnt" (countdown live) → tombol "Tandai Clear"; chip kategori performa + durasi saat Clear; chip "Berulang". KPI `/komplain` tambah kartu "Menunggu" (`ComplaintKpiCard` 4 kartu). Form komplain pakai `complaint_status_options`. Export komplain tambah kolom Durasi, Kategori Performa, Komplain Berulang.
+  - Migration kolom baru `daily_complaints`: `parent_complaint_id`, `complaint_group_id`, `handled_at`, `handled_by`, `auto_cleared`, `handling_minutes`, `performance_category` (`2026_11_19_000000`).
+
+- (Sebelumnya) Perbaikan KPI card Aktivasi/CCTV di dashboard saat filter ODC dipilih: kini aktivasi dipetakan via `olt_name` → `Olt.odc_id` / fallback `odp_name` → `Odp.odc_id`, CCTV via `customer_name` → `Customer.odc_id`, memakai helper `dailySummaryByOdc`.
+- **On-Progress period-based** (performa/presentasi/lencana): hanya item yang dibuat dalam rentang filter. **Kecuali KPI card atas** yang tetap kumulatif (`*_open_all`).
+- Role `noc` kehilangan permission `network.view` → menu JARINGAN tak lagi tampil untuk role noc.
+- Favorit sidebar kini **global & bisa dibuka semua role** (admin mengontrol lewat `/settings`).
 
 ## Sudah selesai
 
+- **Pembatasan Clear Komplain hanya untuk pembuat** (permintaan user, 2026-11-20):
+  - Backend `DailyEntryController`: helper `assertCanChangeComplaintStatus` dipanggil di `updateStatus` (PATCH) **dan** `updateComplaint` (PUT) — 403 bila `created_by` ≠ `auth()->id()` saat **transisi status apa pun** (On-Progress / Menunggu Konfirmasi / Clear); helper `assertComplaintOwner` juga dipakai di `updateComplaint` (edit field apa pun) dan `destroy` (hapus) → 403 untuk non-pembuat. Perbandingan ID numerik, bukan nama; admin tidak dikecualikan.
+  - Frontend: semua pill status di `ComplaintDataList.vue` (data + carry-over) dinonaktifkan dengan ikon `Lock` & tooltip (khusus Clear: "Hanya pembuat komplain yang dapat melakukan Clear.", status lain: "Hanya pembuat komplain yang dapat mengubah status komplain."); menu **Edit Komplain** & **Hapus Komplain** juga dinonaktifkan dengan ikon gembok + tooltip masing-masing. Dropdown status di form Edit `InputHarianView.vue` dinonaktifkan + pesan sama; guard juga di `openEditComplaint`, `requestDelete`, `openActionClear`/`submitActionClear`/`submitComplaint` (simpan status tanpa perubahan tetap diizinkan).
+  - Auto-clear 30 menit tetap jalan, tapi atribusi diubah: `cleared_by = null`, `cleared_at = now()` eksplisit, activity log `user_name = 'System / Scheduler'` + `meta.source = 'scheduler'` (ActivityLogger dapat param `actorName` baru). Tidak memakai `handled_by`/`created_by` sebagai pelaku. Serializer komplain menampilkan `clearer_name = 'System / Scheduler'` untuk `auto_cleared`; dashboard mengelompokkan auto-clear ke baris "System / Scheduler" (bukan creator).
+  - Verifikasi: `composer test` **22 lolos** (8 test baru `ComplaintClearOwnershipTest`: creator Clear PATCH+PUT, 403 other/admin di kedua endpoint, 403 untuk On-Progress/Menunggu Konfirmasi, creator tetap bisa mengubah status, 403 edit/hapus untuk non-pembuat + creator bisa edit/hapus, Action wajib 422, auto-clear + audit System/Scheduler), `php -l` OK, `npm run build:web` lolos.
+- **KPI Persen Komplain (SLA ≤ 60 menit) di Dashboard** (permintaan user, 2026-11-20):
+  - Helper bersama **baru** `App\Support\ComplaintSla` (`app/Support/ComplaintSla.php`): `minutes()` & `summary()` dengan aturan **ketat** — hanya komplain Clear dengan `handling_minutes` valid yang dihitung; durasi NULL **tidak masuk pembilang maupun penyebut**. Dipakai oleh `DashboardController::complaintPerformance` (`complaint_performance.summary.sla`), `DailyEntryController::listComplaints` dan `exportComplaintsRecap` — aturan SLA identik di semua tempat.
+  - `DashboardController::stats()` kini membaca param `shift` (1–3, diabaikan bila di luar rentang) dan meneruskannya ke `complaintPerformance()`; filter `shift` ditambahkan ke query `$inputs`, `$cleared`, `$openBase`. Select `status` ditambahkan ke `$cleared` agar `ComplaintSla::summary()` bisa membacanya. Tiap `rows[]` kini punya `sla` per petugas (dari grup `cleared_by ?? created_by`). Payload lain tidak diubah.
+  - Frontend: `DashboardView.vue` dropdown Shift (Semua/1/2/3) ikut watcher & `load()` (tanpa polling baru; Refresh/filter/remount tetap jalur refresh); kartu ke-6 "Persen Komplain (SLA ≤ 60 menit)" di grid Performa Komplain (`lg:grid-cols-6`) dengan ikon `ListChecks`, nilai `X%` (atau `—`) + `within/clear`, warna ≥90 hijau / 70–89,9 oranye / <70 merah / null netral, memakai token dark mode yang ada. Tabel per petugas juga mendapat kolom **Persen Komplain** (dari `rows[].sla`, aturan & warna sama seperti kartu).
+  - Verifikasi: `composer test` **14 lolos** (2 test baru `DashboardComplaintSlaTest` + `ComplaintSlaTest` disesuaikan), `php -l` OK, `npm run build:web` lolos. Data lokal aktual: semua Clear = 14 valid, ≤60 = 1 → **7,1%**; Dashboard & `/komplain` menghasilkan payload SLA identik (terverifikasi via Tinker).
+- **Komplain: filter NOC/Shift/Status, KPI SLA 60 menit & export rekap** (permintaan user, 2026-11-20):
+  - Helper `applyComplaintListFilters` di `DailyEntryController` menyatukan filter periode (termasuk carry-over/`mode=clear`), ODC, search, `user_id` (`created_by`), `shift` (1–3), `status` untuk list, KPI, export detail & export rekap. Export detail kini mengikuti semantik periode daftar (sebelumnya `whereBetween('report_date')`).
+  - `GET /daily-entry/list/complaints` mengembalikan `sla: { clear, within_60, percent }` (dihitung dari query setelah filter, sebelum `limit(500)`). Sumber durasi: **`handling_minutes` valid saja** (aturan ketat via `ComplaintSla` — data NULL tidak dihitung, tidak ada fallback); tanpa migration/backfill, data historis tidak diubah. `percent` null bila `clear = 0` → tampil `—`.
+  - Endpoint baru `GET /daily-entry/export/complaints-recap` → `komplain-rekap-{from}-{to}.xlsx`, kolom: NOC, Shift, Total komplain, Clear, On-Progress (semua status belum Clear, termasuk Menunggu Konfirmasi), Clear ≤60 menit, Clear >60 menit, Persentase SLA.
+  - Frontend: dropdown NOC (dari `technicianApi.list()` → role teknisi/noc/engineer active), Shift (opsi existing 1/2/3), Status (Semua + `complaint_status_options`) di `/komplain`; KPI baru "Persen Komplain (≤ 60 menit)" (kartu ke-5 `ComplaintKpiCard`, grid xl 5 kolom); tombol "Rekap NOC/Shift" + `dailyEntryApi.exportComplaintsRecap`.
+  - Verifikasi: `composer test` **12 lolos** (2 test baru `ComplaintSlaTest`, termasuk uji filter user/shift/status + isi file xlsx rekap), `php -l` OK, `route:list --path=complaints` menampilkan 3 route, `npm run build:web` **lolos**.
+- **Perbaikan notifikasi Toast tidak hilang** (2026-11-20): `components/ui/Toast.vue` dulu selalu me-render `<div role="alert">` walau `message` sudah dikosongkan oleh `dismiss` → kotak warna hijau kosong tetap tampil. Sekarang div pakai `v-if="message"`, timer di-reset via `watch([message, hideAfterMs], startTimer, { immediate: true })` (pesan baru dapat durasi penuh; `error` 8 dtk, lain 4 dtk), cleanup timer di `onBeforeUnmount`. Berlaku global untuk `GamasView` & `InputHarianView`. `npm run build:web` lolos.
+- **Update Progress GAMAS** (permintaan user, 2026-11-20) — kode selesai & migration sudah `php artisan migrate` lokal:
+  - Tabel baru `daily_gamas_updates` (`2026_11_20_020000_create_daily_gamas_updates_table.php`): `daily_gamas_id` FK `cascadeOnDelete` (riwayat ikut terhapus saat GAMAS dihapus), `update_text`, `created_by` FK `nullOnDelete`, `timestamps` (tanggal+jam otomatis), index `(daily_gamas_id, created_at)`. Tidak menyentuh kolom `action` maupun status.
+  - Model `DailyGamasUpdate` (relasi `author`/`gamas`) + relasi `updates()` (hasMany `latest()`) di `DailyGamas`.
+  - Route `GET/POST /gamas/{dailyGamas}/updates` → `GamasController::updates` / `::storeUpdate` (validasi `update_text` wajib, trim, max 2000; urut terbaru di atas; activity log `gamas` + broadcast realtime `gamasUpdated`). Tidak pakai endpoint komplain.
+  - Frontend: `GamasUpdate` + `gamasApi.updates/storeUpdate` di `services/api.ts`; tombol Update (ikon `MessageSquarePlus`) di tiap baris (termasuk carry-over) `GamasView.vue` → popup **Tambah Update** (identitas jenis/lokasi/ODC/problem, textarea wajib "Update / Progress", panel Riwayat Update dengan petugas + tanggal/jam, urut terbaru, pesan "Belum ada riwayat update", tombol Batal / Simpan Update). Sukses → entri di-`unshift`, textarea dikosongkan, popup **tetap terbuka**, toast sukses; gagal → toast error, text tetap, riwayat lokal tidak berubah.
+  - Verifikasi: `composer test` **10 lolos** (3 test baru `GamasUpdateTest`), `php -l` semua file backend OK, `php artisan route:list --path=updates` menampilkan 2 route baru, `npm run build:web` **lolos**.
+- **Clear GAMAS dengan Action wajib** (permintaan user, 2026-11-20, `GamasView.vue` saja): tombol Clear kini mengecek Action — kosong → popup "Action Wajib Diisi" (pesan & placeholder sesuai permintaan, 1 textarea, tombol Batal / Simpan & Clear), **tidak** membuka form Edit; Action sudah terisi → langsung `gamasApi.updateStatus` seperti sebelumnya. `submitActionClear()` mengirim **satu request** `gamasApi.update` (PUT `/gamas/{id}`) berisi payload penuh item + `action` + `status: 'Clear'` — backend `GamasController::update` menjalankan `assertActionForClear`, `syncClearAttribution`, `end_problem` default, realtime & activity log (tidak pakai endpoint komplain; backend/DB tidak diubah). Sukses → popup tutup + `load()` (refetch tabel + KPI, bukan reload halaman); gagal → popup tetap terbuka, error inline, status tidak diubah. `npm run build:web` lolos.
+- **Modul Gamas (2026-11-20)**: lihat rincian di "Tugas sekarang" — semua langkah teknis (migration, backend, frontend, verifikasi `migrate` + test + build) sudah dikerjakan; sisa verifikasi manual di bawah.
+- **Jam Open / Jam Close di export + list** (2026-11-13): semua export (Komplain, Report Ticket, Aktivasi, Dismantle) punya kolom **Jam Open** (`created_at`) dan **Jam Close** (`cleared_at`) format `H:i`. List menampilkan jam juga. Helper `formatTimeId()` di `lib/date-input.ts`. `ReportTicketResource` mengekspos `cleared_at`.
+- **Export Excel Dismantle** (2026-11-13): endpoint `GET /dismantles/export` (`DismantleController::export`) — filter mengikuti list termasuk Tanpa ODC & mode clear.
+- **Export Excel Report Ticket 500** (2026-11-13): `$from`/`$to` tidak dideklarasikan di `export` → ditambahkan.
+- **Export Excel Aktivasi** (2026-11-13): endpoint `GET /daily-entry/export/activations` (`DailyEntryController::exportActivations`), tombol "Excel" tab Aktivasi.
 - `DashboardController::nocPerformance` baris 378 — `total` = Σ clear + Σ open; ikut memengaruhi `contribution_pct`, `avg_per_day`, ranking, dan grafik kontribusi.
 - Label UI `DashboardView.vue` disesuaikan: "ranking by total (Clear + On-Progress)", header "Total (C+OP)", subtitle kontribusi, dan footer detail.
-- On-Progress juga dimasukkan ke **KPI top performer** (`categoryKpis` → `$top(clear, open)`), **Lencana** (`specialistBadges` → Clear + On-Progress per kategori), **donut Persentase Penyelesaian** (`clearByType`), dan **stacked bar Performa NOC per Kategori** (`stackedByNoc`). Subtitle UI terkait diperbarui.
-- **On-Progress period-based untuk performa/presentasi/lencana**: `nocPerformance` opens & `summaryForRange` `*_open` memakai `whereBetween('report_date', [from,to])` (ticket/dismantle via `opened_at`/`created_at` between). `php -l` + `composer test` lolos.
-- **KPI card atas tetap kumulatif**: `summaryForRange` menambah field `*_open_all` (masih `<= to`, jwt helper `countOpensUpTo`, `countDismantleOpensUpTo`); `categoryKpis['open']` memakai `*_open_all`. `php -l` + `composer test` lolos.
-- `php -l` + `npm run build:web` lolos.
-- `network.view` dihapus dari `role_defaults['noc']` (`config/permissions.php`) + migration `2026_10_09_000000_remove_network_view_from_noc_role.php` (revoke dari role `noc` di DB, down = give back). Migration sudah dijalankan & terverifikasi (`has network.view: false`).
-- Favorit global: `Sidebar.vue:favorites` tidak difilter `filterByAccess`; `router/index.ts:beforeEach` meng-await `fetchSidebarFavorites()` lalu mengizinkan `to.path` yang ada di `sidebarFavoritePaths` walau user tidak punya permission halaman tsb. `npm run build:web` lolos.
-- KPI card Aktivasi/CCTV saat filter ODC: `summaryForRange` tidak lagi memaksa 0; helper `dailySummaryByOdc` memetakan aktivasi via OLT/ODP dan CCTV via nama pelanggan, menghitung input period, `open` period, `open_all` kumulatif, dan clear via `cleared_at`. Angka KPI kini sama dengan `odc_stats` (contoh SOBRAH Jul–Sep: activations_clear 2). `php -l` + `composer test` lolos.
+- On-Progress juga dimasukkan ke **KPI top performer**, **Lencana**, **donut Persentase Penyelesaian**, dan **stacked bar Performa NOC per Kategori**.
+- **On-Progress period-based untuk performa/presentasi/lencana**: `nocPerformance` opens & `summaryForRange` `*_open` memakai `whereBetween('report_date', [from,to])`. `php -l` + `composer test` lolos.
+- **KPI card atas tetap kumulatif**: `summaryForRange` menambah field `*_open_all`; `categoryKpis['open']` memakai `*_open_all`.
+- `network.view` dihapus dari `role_defaults['noc']` + migration `2026_10_09_000000` (sudah dijalankan & terverifikasi).
+- Favorit global: `Sidebar.vue:favorites` tidak difilter `filterByAccess`; router guard mengizinkan path favorit walau tanpa permission.
+- KPI card Aktivasi/CCTV saat filter ODC: helper `dailySummaryByOdc` — angka KPI sama dengan `odc_stats`.
+- **Format durasi komplain mudah dibaca** (2026-11-20): `formatDuration` (frontend `lib/utils.ts`) + `App\Support\DurationFormat::minutes()` (backend). Test `tests/Unit/DurationFormatTest.php`; `composer test` (7 lolos) + `npm run build:web` lolos.
 
 ## Langkah berikutnya
 
-- Verifikasi manual: login user `noc` → favorit OLT (yang dicentang admin di `/settings`) muncul & bisa dibuka; section JARINGAN tetap tidak muncul.
+- **Verifikasi manual pembatasan Clear komplain**: login sebagai pembuat → pill Clear aktif & berhasil Clear; login sebagai petugas lain/admin → pill Clear ada ikon gembok, tooltip tampil, klik tidak berfungsi; buka form Edit komplain orang lain → opsi Clear disabled + pesan; coba PATCH/PUT status Clear via API dengan user lain → 403; coba ubah ke On-Progress/Menunggu Konfirmasi dengan user lain → 403; auto-clear 30 menit tetap jalan & activity log menunjukkan "System / Scheduler" (bukan nama pembuat).
+- **Verifikasi manual KPI SLA Dashboard**: buka Dashboard → kartu "Persen Komplain (SLA ≤ 60 menit)" di bagian Performa Komplain menampilkan `X% (within/clear)`; ubah periode, NOC, Shift → angka kartu, KPI lain, dan tabel ikut berubah; klik Refresh → angka tetap sinkron; bandingkan dengan kartu SLA di `/komplain` untuk filter yang sama (should identik). Warna: ≥90 hijau, 70–89 oranye, <70 merah, kosong → `—`.
+- **Verifikasi manual filter/KPI/export komplain**: buka `/komplain` → pilih NOC, Shift, Status, periode → KPI (termasuk "Persen Komplain (≤ 60 menit)"), kartu, dan tabel ikut berubah; tombol "Excel" menghasilkan detail sesuai filter; tombol "Rekap NOC/Shift" menghasilkan baris per kombinasi NOC×Shift dengan kolom sesuai permintaan; kosongkan Clear → KPI SLA tampil `—`.
+- **Verifikasi manual Update Progress GAMAS**: buka `/gamas` → klik tombol Update pada baris On-Progress & Clear (termasuk carry-over) → popup "Tambah Update" menampilkan identitas GAMAS + pesan "Belum ada riwayat update" bila kosong → isi Update/Progress → Simpan → entri baru muncul di atas, toast sukses, textarea kosong, popup tetap terbuka → Batal → buka lagi → riwayat masih ada; textarea kosong → error; status & Action GAMAS tidak berubah; Clear dengan Action kosong tetap memunculkan popup Action; hapus GAMAS yang punya riwayat → riwayat ikut terhapus.
+- **Verifikasi manual Clear + Action wajib GAMAS**: buka `/gamas` → klik Clear pada item Action kosong → popup "Action Wajib Diisi" tampil (form Edit tidak terbuka) → Batal → status utuh; klik lagi → isi Action → Simpan & Clear → tabel + KPI ter-refetch tanpa reload; kosongkan Action lalu Simpan → error inline & popup tetap; Action sudah terisi → Clear langsung tanpa popup. Ulangi pada tab status On-Progress & baris carry-over.
+- **Verifikasi manual modul Gamas**:
+  1. **Re-login** dulu (permission baru `gamas.view` baru terbaca sesi lama) → menu **Gamas** muncul untuk admin/manager/noc/teknisi; role `engineer` tidak melihatnya.
+  2. Buka `/gamas` → Tambah Gamas (jenis ODP/Jalur, lokasi wajib) → muncul di tabel; KPI "Total periode" naik; badge angka sidebar di `/gamas` tampil bila ada item On-Progress.
+  3. Klik "Tandai Clear" tanpa Action → muncul error wajib Action; isi Action lalu Clear → status berubah + `cleared_by`/`cleared_at` terisi.
+  4. Buka `/komplain` → tombol toggle Individu/Gamas **sudah tidak ada**; komplain baru tersimpan `complaint_type=individual`.
+  5. Login `manager` → dashboard muncul section **Statistik Gamas** (re-login bila perlu); role `engineer` tidak melihatnya.
+  6. Generate report section **Gamas** dari `/gamas` (tombol Generate) → teks "Gangguan Massal (Gamas)" terisi.
+  7. Export Excel dari `/gamas` → file `gamas-{from}-{to}.xlsx`.
+  8. Realtime: buka `/gamas` di 2 browser, input gamas di satu tab → tab lain terupdate ≤3 dtk.
+- **Verifikasi manual alur komplain baru**: buka `/komplain` → input komplain (action diisi) → klik "Tandai Selesai" → chip "Menunggu Konfirmasi · auto-clear 30 mnt" muncul (countdown jalan) → klik "Tandai Clear" (atau tunggu auto-clear; bisa dipercepat dengan `handled_at` di mundurkan lewat tinker lalu `php artisan complaint:auto-clear`). Cek: `handling_minutes`/`performance_category` terisi, chip kategori tampil di kartu.
+- **Verifikasi relasi berulang**: input komplain pelanggan sama <24 jam sejak komplain sebelumnya → chip "Berulang" muncul (`parent_complaint_id` terisi).
+- **Verifikasi dashboard komplain**: login `manager`/`noc` → section "Performa Komplain" muncul (re-login dulu); role `engineer` tidak melihatnya.
+- Verifikasi manual: login user `noc` → favorit OLT muncul & bisa dibuka; section JARINGAN tetap tidak muncul.
 - Verifikasi manual dashboard: On-Progress di performa/donut/stacked/lencana hanya dari item periode tsb.
 - Verifikasi manual KPI Aktivasi/CCTV dengan filter ODC (mis. SOBRAH, Jul–Sep) → Clear/On-Progress harus sama dengan tabel Statistik ODC, bukan 0.
-- (Opsional) Terapkan period-based open yang sama ke `odcPerformance` / `stacked_by_odc` (masih `<= to`) bila statistik ODC harus konsisten dengan performa-per-user.
+- (Opsional) Terapkan period-based open yang sama ke `odcPerformance` / `stacked_by_odc` (masih `<= to`).
 - (Perlu keputusan) Karena API jaringan tidak ber-middleware permission, noc yang membuka favorit OLT otomatis bisa **tambah/edit/hapus** data OLT. Bila ingin read-only, perlu gate tambahan (`network.manage`) di UI.
 
 ## File disentuh
 
-- `apps/backend/app/Http/Controllers/Api/DailyEntryController.php` (tambah `exportActivations`)
-- `apps/backend/app/Http/Controllers/Api/ReportTicketController.php` (deklarasi `$from`/`$to` di `export`)
-- `apps/backend/app/Http/Controllers/Api/DismantleController.php` (tambah `export`)
-- `apps/backend/routes/api.php` (route `dismantles/export`)
-- `apps/frontend/src/services/api.ts` (tambah `dismantleApi.exportExcel`)
-- `apps/frontend/src/views/DismantleView.vue` (tombol Export Excel)
-- `apps/frontend/src/lib/date-input.ts` (helper `formatTimeId`)
-- `apps/frontend/src/components/daily/ComplaintDataList.vue` (jam open/close)
-- `apps/frontend/src/views/ReportTicketView.vue` (jam open/close)
-- `apps/backend/app/Http/Resources/ReportTicketResource.php` (`cleared_at`)
-- `apps/backend/app/Http/Controllers/Api/DailyEntryController.php`, `ReportTicketController.php`, `DismantleController.php` (kolom Jam Open/Close)
-- `apps/backend/routes/api.php` (route `daily-entry/export/activations`)
-- `apps/frontend/src/services/api.ts` (tambah `dailyEntryApi.exportActivations`)
-- `apps/frontend/src/views/InputHarianView.vue` (tombol Excel untuk tab aktivasi)
+- **Pembatasan Clear komplain (2026-11-20)**:
+  - `apps/backend/app/Http/Controllers/Api/DailyEntryController.php` (`assertCanClearComplaint`), `app/Console/Commands/AutoClearWaitingComplaintsCommand.php`, `app/Services/Audit/ActivityLogger.php` (param `actorName`), `app/Services/DailyEntry/DailyEntryComplaintSerializer.php`, `app/Http/Controllers/Api/DashboardController.php` (grup baris System/Scheduler)
+  - `apps/backend/tests/Feature/ComplaintClearOwnershipTest.php` (baru, 8 test)
+  - `apps/frontend/src/components/daily/ComplaintDataList.vue`, `apps/frontend/src/views/InputHarianView.vue`
 
-- `apps/backend/app/Http/Controllers/Api/DashboardController.php`
-- `apps/frontend/src/views/DashboardView.vue`
-- `apps/backend/config/permissions.php`
-- `apps/backend/database/migrations/2026_10_09_000000_remove_network_view_from_noc_role.php`
-- `apps/frontend/src/components/layout/Sidebar.vue`
-- `apps/frontend/src/router/index.ts`
+- **KPI SLA Dashboard (2026-11-20)**:
+  - `apps/backend/app/Support/ComplaintSla.php` (baru), `app/Http/Controllers/Api/DashboardController.php` (param `shift`, filter query, payload `sla`)
+  - `apps/backend/tests/Feature/DashboardComplaintSlaTest.php` (baru, 2 test), `apps/backend/tests/Feature/ComplaintSlaTest.php` (disesuaikan)
+  - `apps/frontend/src/services/api.ts` (`shift` param + tipe `sla`), `apps/frontend/src/views/DashboardView.vue` (dropdown Shift + kartu SLA)
+
+- **Filter/KPI/export komplain (2026-11-20)**:
+  - `apps/backend/app/Http/Controllers/Api/DailyEntryController.php` (helper `applyComplaintListFilters`, `complaintSlaForFiltered`, `complaintSlaMinutes`, `isClearStatus`, payload `sla`, `exportComplaintsRecap`), `routes/api.php` (route rekap)
+  - `apps/backend/tests/Feature/ComplaintSlaTest.php` (baru, 2 test)
+  - `apps/frontend/src/services/api.ts` (`ComplaintFilterParams`, `ComplaintSlaSummary`, `listComplaints`, `exportComplaintsRecap`), `apps/frontend/src/views/InputHarianView.vue` (filter + tombol export), `apps/frontend/src/components/daily/ComplaintKpiCard.vue` (kartu SLA)
+
+- **Update Progress GAMAS (2026-11-20)**:
+  - `apps/backend/database/migrations/2026_11_20_020000_create_daily_gamas_updates_table.php`, `app/Models/DailyGamasUpdate.php` (baru), `app/Models/DailyGamas.php` (relasi `updates()`)
+  - `apps/backend/app/Http/Controllers/Api/GamasController.php` (`updates`, `storeUpdate`, `serializeUpdate`), `routes/api.php` (2 route)
+  - `apps/backend/tests/Feature/GamasUpdateTest.php` (baru, 3 test)
+  - `apps/frontend/src/services/api.ts` (`GamasUpdate`, `gamasApi.updates/storeUpdate`), `apps/frontend/src/views/GamasView.vue` (tombol Update + popup Tambah Update + riwayat + Toast)
+
+- **Modul Gamas (2026-11-20)**:
+  - `apps/backend/database/migrations/2026_11_20_000000_create_daily_gamas_table.php` (tabel + pindah data)
+  - `apps/backend/database/migrations/2026_11_20_010000_add_gamas_permissions.php`
+  - `apps/backend/app/Models/DailyGamas.php` (baru), `apps/backend/app/Http/Controllers/Api/GamasController.php` (baru), `apps/backend/app/Http/Controllers/Api/GamasEventsController.php` (baru)
+  - `apps/backend/app/Http/Controllers/Api/DailyEntryEventsController.php` (`CHANNEL` → `protected`), `DailyEntryController.php` (cabang gamas dihapus), `DashboardController.php` (nav badge `gamas`, `gamasSummary`, `complaintClientShare` dibersihkan), `GenerateReportController.php` (section `gamas`)
+  - `apps/backend/app/Services/Gamas/GamasStatsService.php` (baru), `apps/backend/app/Services/DailyEntry/DailyEntryRealtimeService.php` (broadcast gamas), `apps/backend/app/Services/Report/ReportGeneratorService.php` (`dailyGamasByOdc`)
+  - `apps/backend/app/Support/ReportTemplateDefaults.php` (template gamas), `routes/api.php` (prefix `/gamas`), `config/permissions.php`, `config/activity_log.php` (tipe `gamas`)
+  - `apps/frontend/src/views/GamasView.vue` (baru; termasuk popup "Action Wajib Diisi" + `submitActionClear`), `apps/frontend/src/router/index.ts` (route `/gamas`), `apps/frontend/src/data/navigation.ts` (menu Gamas)
+  - `apps/frontend/src/composables/useDailyEntryPoll.ts` (param `fetchEvents` opsional + payload gamas), `apps/frontend/src/services/api.ts` (`gamasApi`, tipe, `gamas_summary`, `nav_badges.gamas`, `ReportSection`)
+  - `apps/frontend/src/views/InputHarianView.vue` (toggle/field gamas dihapus), `apps/frontend/src/components/daily/ComplaintDataList.vue` (branch `isGamas` dihapus)
+  - `apps/frontend/src/views/DashboardView.vue` (widget Statistik Gamas), `apps/frontend/src/components/layout/Sidebar.vue` (badge `/gamas`), `apps/frontend/src/components/report/SectionReportModal.vue` (label `gamas`)
+
+- `apps/backend/app/Http/Controllers/Api/DailyEntryController.php` (tambah `exportActivations`), `ReportTicketController.php` (deklarasi `$from`/`$to`), `DismantleController.php` (tambah `export`)
+- `apps/backend/routes/api.php` (route `dismantles/export`, `daily-entry/export/activations`)
+- `apps/frontend/src/services/api.ts` (`dismantleApi.exportExcel`, `dailyEntryApi.exportActivations`)
+- `apps/frontend/src/views/DismantleView.vue`, `apps/frontend/src/views/InputHarianView.vue` (tombol Excel), `apps/frontend/src/lib/date-input.ts` (`formatTimeId`)
+- `apps/frontend/src/components/daily/ComplaintDataList.vue`, `apps/frontend/src/views/ReportTicketView.vue` (jam open/close), `apps/backend/app/Http/Resources/ReportTicketResource.php` (`cleared_at`)
+
+- `apps/backend/app/Http/Controllers/Api/DashboardController.php`, `apps/frontend/src/views/DashboardView.vue`
+- `apps/backend/config/permissions.php`, `apps/backend/database/migrations/2026_10_09_000000_remove_network_view_from_noc_role.php`
+- `apps/frontend/src/components/layout/Sidebar.vue`, `apps/frontend/src/router/index.ts`
+
+- **Alur komplain baru (2026-11-19)**:
+  - `apps/backend/database/migrations/2026_11_19_000000_add_complaint_flow_fields.php`, `2026_11_19_010000_add_complaint_performance_widget_permission.php`
+  - `apps/backend/app/Support/ReportStatus.php`, `apps/backend/app/Models/DailyComplaint.php` (`syncHandling`, `performanceCategoryFor`, relasi)
+  - `apps/backend/app/Http/Controllers/Api/DailyEntryController.php` (status baru, `attachRepeatRelation`, export), `DashboardController.php` (`complaintPerformance`)
+  - `apps/backend/app/Console/Commands/AutoClearWaitingComplaintsCommand.php` + `bootstrap/app.php` (schedule)
+  - `apps/backend/app/Services/DailyEntry/DailyEntryComplaintSerializer.php`, `config/permissions.php`
+  - `apps/frontend/src/services/api.ts`, `components/daily/ComplaintDataList.vue`, `components/daily/ComplaintKpiCard.vue`, `views/InputHarianView.vue`, `views/DashboardView.vue`
+
+- **Format durasi komplain (2026-11-20)**:
+  - `apps/frontend/src/lib/utils.ts` (helper `formatDuration`)
+  - `apps/frontend/src/components/daily/ComplaintDataList.vue`, `components/daily/ComplaintHistoryPanel.vue`, `components/daily/ComplaintKpiCard.vue`, `views/DashboardView.vue`
+  - `apps/backend/app/Support/DurationFormat.php` (baru), `tests/Unit/DurationFormatTest.php` (baru)
+  - `apps/backend/app/Http/Controllers/Api/DailyEntryController.php` (`exportComplaints`)
 
 ## Catatan & jebakan
 
-- Open terbagi dua: **period-based** (`*_open`, untuk performa/presentasi/lencana — report_date antara dari–sampai, belum Clear) dan **kumulatif** (`*_open_all`, khusus KPI card atas — `report_date <= to`, sudah termasuk backlog). Dibedakan lewat nama field; jangan mencampur keduanya.
+- **SLA komplain**: `start_problem`/`end_problem` bertipe DATE (tanpa jam) → KPI ≤60 menit memakai `handling_minutes` valid saja (aturan ketat di `App\Support\ComplaintSla`); durasi NULL **tidak dihitung** di Dashboard, `/komplain`, maupun rekap. Jangan menambah fallback atau migration hanya untuk KPI ini — ketiga tempat harus memanggil helper yang sama.
+- **Test SQLite**: cast `date` Eloquent menyimpan `YYYY-MM-DD 00:00:00`; test yang memakai `whereBetween('report_date', [from,to])` harus menulis `report_date` mentah via `DB::table()->update()` seperti di `ComplaintSlaTest`.
+- **Gamas**: data lama di `daily_complaints` (kolom `gamas_kind`/`location_label`/`impact`) dibiarkan apa adanya setelah pemindahan — kolom TIDAK di-drop supaya migration aman di production. Baris gamas sendiri sudah di-DELETE dari `daily_complaints` (kecuali histori pindah ke `daily_gamas`).
+- **Gamas**: permission baru hanya terbaca setelah **re-login** (daftar permission di-cache di sesi). Widget dashboard juga begitu.
+- **Gamas**: `useDailyEntryPoll` kini menerima argumen ketiga `fetchEvents` (default `dailyEntryApi.events`); payload realtime punya `complaint_id?`/`gamas_id?` opsional — `InputHarianView` sudah di-guard `if (payload.complaint_id)`.
+- **Gamas**: `GamasListParams` sengaja berupa `type` (bukan `interface`) supaya bisa di-pass ke `downloadFile(..., params?: Record<string, unknown>)` (TS tidak punya index signature untuk interface).
+- **Gamas**: durasi penilaian performa TIDAK berlaku untuk gamas (alurnya sederhana On-Progress/Clear). Jangan menambahkan auto-clear ke `GamasController` tanpa konfirmasi user.
+- Open terbagi dua: **period-based** (`*_open`, untuk performa/presentasi/lencana — report_date antara dari–sampai, belum Clear) dan **kumulatif** (`*_open_all`, khusus KPI card atas — `report_date <= to`). Dibedakan lewat nama field; jangan mencampur keduanya.
 - Clear selalu period-based via `cleared_at`/`cleared_by`. `total` performa = beban kerja masuk periode (open period) + hasil clear periode.
-- `odcPerformance`/`odc_stats` (tabel Statistik ODC) **masih clear-only total dengan open kumulatif** (`<= to`) — sengaja dibiarkan, konsisten dengan carry-over list. Kalau diubah, pastikan sejalan modul lain.
-- API jaringan (olt/odc/odp/router/dll.) **tidak** digate permission middleware — menu section di-filter permission, tapi akses langsung + edit hanya bisa dibatasi lewat UI/router atau middleware baru.
+- `odcPerformance`/`odc_stats` (tabel Statistik ODC) **masih clear-only total dengan open kumulatif** (`<= to`) — sengaja dibiarkan, konsisten dengan carry-over list.
+- API jaringan (olt/odc/odp/router/dll.) **tidak** digate permission middleware — menu section di-filter permission, tapi akses langsung + edit hanya bisa dibatasi lewat UI/router atau middleware baru. **API gamas juga demikian** (route `/gamas` tanpa middleware `permission:`) — halaman di-gate via `meta.permission`, tapi endpoint bisa dipanggil langsung oleh sesi valid mana pun.
 - Perubahan permission default hanya re-run saat `db:seed` atau migration baru; edit UI di `/roles` tetap menang (tidak di-reset).
 - Migration `up` idempotent (revoke yang sudah tidak ada = no-op); `down` mengembalikan `network.view`. Target hanya role `noc`.
+- **Alur komplain**: durasi penilaian mencakup jeda menunggu konfirmasi → komplain yang di-auto-clear hampir pasti ≥31 menit (minimal kategori "Lambat"); "Cepat" hanya mungkin kalau pelanggan konfirmasi <30 menit. Jangan "memperbaiki" ini tanpa konfirmasi user.
+- **Auto-clear**: bukan aksi user — `cleared_by` sengaja null & audit memakai "System / Scheduler". Jangan mengisi `cleared_by` dengan `created_by`/`handled_by` (menyamarkan pelaku). Manual Clear tetap mencatat ID pembuat yang melakukan Clear.
+- `ReportStatus::options()` tetap `[On-Progress, Clear]` untuk tipe lain (termasuk gamas); **komplain** memakai `complaintOptions()` (ada `Menunggu Konfirmasi`). Form frontend membedakan lewat `complaint_status_options` dari `GET /daily-entry`.
+- Migration permission widget **additive** (`givePermissionTo`, bukan `syncPermissions`) supaya kustomisasi role di `/roles` tidak di-reset.
+- Item "Menunggu Konfirmasi" = **open**: ikut carry-over, hitungan `*_open`, dan badge `input_harian`.
+- Kolom `handling_minutes`/`performance_category` hanya terisi untuk komplain yang clear **setelah** fitur ini; data lama = NULL (dashboard abaikan, avg jadi `—`).
+- Format durasi duplikat di **2 tempat** dengan aturan yang sama: `formatDuration` (frontend) dan `App\Support\DurationFormat::minutes` (backend/export). Kalau aturan berubah, ubah keduanya + `DurationFormatTest`.

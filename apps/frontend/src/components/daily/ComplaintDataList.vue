@@ -8,6 +8,8 @@ import {
 } from '@/services/api'
 import Button from '@/components/ui/Button.vue'
 import ComplaintHistoryPanel from '@/components/daily/ComplaintHistoryPanel.vue'
+import { useAuthStore } from '@/stores/auth'
+import { formatDuration } from '@/lib/utils'
 import {
   Calendar,
   Check,
@@ -15,16 +17,21 @@ import {
   ChevronRight,
   ClipboardList,
   Clock,
+  Lock,
   MessageSquareWarning,
   MoreVertical,
   Pencil,
   Plus,
+  RotateCcw,
   Router,
   Signal,
+  Timer,
   Trash2,
   Wifi,
   WifiOff,
 } from 'lucide-vue-next'
+
+const auth = useAuthStore()
 
 const props = defineProps<{
   items: DailyEntryItem[]
@@ -35,8 +42,14 @@ const emit = defineEmits<{
   edit: [item: DailyEntryItem]
   delete: [item: DailyEntryItem]
   'need-action': [id: number]
+  /** Clear ditekan tapi Action masih kosong → popup khusus isi Action (bukan form Edit penuh). */
+  'clear-needs-action': [id: number]
   'mark-clear': [payload: { type: string; id: number }]
+  'set-status': [payload: { type: string; id: number; status: string }]
 }>()
+
+/** Timer auto-clear "Menunggu Konfirmasi" (menit) — sama dengan backend. */
+const WAITING_MINUTES = 30
 
 const pageSize = 8
 const pageToday = ref(1)
@@ -123,6 +136,59 @@ function isClear(status: string) {
   return status?.toLowerCase() === 'clear'
 }
 
+function isWaiting(item: DailyEntryItem) {
+  return item.status === 'Menunggu Konfirmasi'
+}
+
+const nowTick = ref(Date.now())
+let tickTimer: ReturnType<typeof setInterval> | null = null
+const hasWaitingItem = computed(() => props.items.some((i) => isWaiting(i)))
+
+watch(
+  hasWaitingItem,
+  (active) => {
+    if (active && !tickTimer) {
+      tickTimer = setInterval(() => {
+        nowTick.value = Date.now()
+      }, 20_000)
+    } else if (!active && tickTimer) {
+      clearInterval(tickTimer)
+      tickTimer = null
+    }
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  if (tickTimer) clearInterval(tickTimer)
+})
+
+/** Sisa waktu auto-clear (menit). */
+function waitingLeft(item: DailyEntryItem) {
+  if (!isWaiting(item) || !item.handled_at) return 0
+  const due = new Date(item.handled_at).getTime() + WAITING_MINUTES * 60_000
+  return Math.max(0, Math.ceil((due - nowTick.value) / 60_000))
+}
+
+function performanceClass(category?: string | null) {
+  switch (category) {
+    case 'Cepat':
+      return 'bg-success/10 text-success'
+    case 'Lambat':
+      return 'bg-info/10 text-info'
+    case 'Cukup Lambat':
+      return 'bg-warning/10 text-warning'
+    case 'Sangat Lambat':
+      return 'bg-danger/10 text-danger'
+    default:
+      return 'bg-muted text-muted'
+  }
+}
+
+function durationLabel(item: DailyEntryItem) {
+  if (item.handling_minutes == null) return ''
+  return formatDuration(item.handling_minutes)
+}
+
 function itemDate(value: string | null | undefined) {
   return (value ?? '').slice(0, 10)
 }
@@ -168,29 +234,11 @@ function metaLine(item: DailyEntryItem) {
 }
 
 function locationLine(item: DailyEntryItem) {
-  if (item.complaint_type === 'gamas') {
-    const kindMap: Record<string, string> = {
-      odp: 'ODP/Jalur',
-      upstream: 'Upstream',
-      olt: 'OLT/Site',
-      other: 'Gamas',
-    }
-    const parts = [
-      kindMap[item.gamas_kind ?? ''] ?? 'Gamas',
-      item.location_label || item.customer_name,
-      item.impact,
-    ].filter(Boolean)
-    return parts.join(' • ')
-  }
   const parts: string[] = []
   if (item.customer_code) parts.push(`ID ${item.customer_code}`)
   if (item.odc_name) parts.push(`ODC ${item.odc_name}`)
   if (item.shift) parts.push(`Shift ${item.shift}`)
   return parts.length ? parts.join(' • ') : '—'
-}
-
-function isGamas(item: DailyEntryItem) {
-  return item.complaint_type === 'gamas'
 }
 
 function toggleMenu(id: number, event: MouseEvent) {
@@ -218,25 +266,98 @@ function closeMenu() {
 
 function onEdit(item: DailyEntryItem) {
   closeMenu()
+  if (isComplaintLocked(item)) return
   emit('edit', item)
 }
 
 function onDelete(item: DailyEntryItem) {
   closeMenu()
+  if (isComplaintLocked(item)) return
   emit('delete', item)
 }
 
-function onMarkClear(item: DailyEntryItem) {
-  if (!item.action?.trim()) {
-    emit('need-action', item.id)
-    return
+/** Tombol pill status di kartu komplain (warna konsisten: oranye / biru / hijau). */
+const statusPills = [
+  { status: 'On-Progress', label: 'On-Progress', active: 'bg-warning/15 text-warning ring-1 ring-warning/40' },
+  { status: 'Menunggu Konfirmasi', label: 'Menunggu Konfirmasi', active: 'bg-info/15 text-info ring-1 ring-info/40' },
+  { status: 'Clear', label: 'Clear', active: 'bg-success/15 text-success ring-1 ring-success/40' },
+] as const
+
+/** `${id}:${status}` saat request status sedang berjalan — cegah double-click. */
+const statusPending = ref<string | null>(null)
+let statusPendingTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearStatusPending() {
+  statusPending.value = null
+  if (statusPendingTimer) {
+    clearTimeout(statusPendingTimer)
+    statusPendingTimer = null
   }
-  emit('mark-clear', { type: 'complaint', id: item.id })
 }
 
-async function openHistory(item: DailyEntryItem) {
-  if (isGamas(item)) return
+function isStatusBusy(item: DailyEntryItem) {
+  return statusPending.value !== null && statusPending.value.startsWith(`${item.id}:`)
+}
 
+/**
+ * Klik pill status: langsung perbarui status komplain.
+ * Tanpa optimistic update — status kartu hanya berubah setelah respons sukses
+ * dari server; bila gagal, status tetap seperti semula + notifikasi error
+ * ditampilkan induk halaman (InputHarianView).
+ */
+function isComplaintLocked(item: DailyEntryItem): boolean {
+  const ownerId = item.created_by
+  const userId = auth.user?.id
+  return ownerId == null || userId == null || Number(ownerId) !== Number(userId)
+}
+
+function statusPillTitle(item: DailyEntryItem, status: string): string {
+  if (!isComplaintLocked(item)) return `Ubah status menjadi ${status}`
+  return status === 'Clear'
+    ? 'Hanya pembuat komplain yang dapat melakukan Clear.'
+    : 'Hanya pembuat komplain yang dapat mengubah status komplain.'
+}
+
+function onStatusPill(item: DailyEntryItem, status: string) {
+  if (isStatusBusy(item) || item.status === status || isComplaintLocked(item)) return
+  if (!item.action?.trim()) {
+    if (status === 'Clear') {
+      // Clear tanpa Action → popup khusus isi Action (bukan form Edit penuh).
+      emit('clear-needs-action', item.id)
+      return
+    }
+    if (status === 'Menunggu Konfirmasi') {
+      emit('need-action', item.id)
+      return
+    }
+  }
+  statusPending.value = `${item.id}:${status}`
+  if (statusPendingTimer) clearTimeout(statusPendingTimer)
+  // Failsafe: kalau API gagal/tidak merespons, kunci dilepas otomatis.
+  statusPendingTimer = setTimeout(clearStatusPending, 6000)
+  if (status === 'Clear') {
+    emit('mark-clear', { type: 'complaint', id: item.id })
+  } else {
+    emit('set-status', { type: 'complaint', id: item.id, status })
+  }
+}
+
+// Status kartu hanya berubah setelah respons sukses → lepas kunci pending.
+watch(
+  () => props.items.map((i) => `${i.id}:${i.status}`).join('|'),
+  () => {
+    if (!statusPending.value) return
+    const sep = statusPending.value.indexOf(':')
+    const id = Number(statusPending.value.slice(0, sep))
+    const target = statusPending.value.slice(sep + 1)
+    const item = props.items.find((i) => i.id === id)
+    if (!item || item.status === target) clearStatusPending()
+  },
+)
+
+onUnmounted(clearStatusPending)
+
+async function openHistory(item: DailyEntryItem) {
   historyTitle.value = item.customer_name?.trim()
     ? `Riwayat · ${item.customer_name}`
     : 'Riwayat Komplain'
@@ -340,7 +461,6 @@ watch(
                 <div class="min-w-0 flex-1 space-y-1.5">
                   <div class="flex min-w-0 flex-wrap items-center gap-1.5">
                     <button
-                      v-if="!isGamas(item)"
                       type="button"
                       class="max-w-full truncate text-left text-sm font-semibold text-foreground transition hover:text-primary hover:underline sm:text-base"
                       :title="'Lihat riwayat komplain'"
@@ -348,17 +468,8 @@ watch(
                     >
                       {{ item.customer_name || '—' }}
                     </button>
-                    <p v-else class="max-w-full truncate text-sm font-semibold text-foreground sm:text-base">
-                      {{ item.location_label || item.customer_name || 'Gamas' }}
-                    </p>
-                    <span
-                      v-if="isGamas(item)"
-                      class="inline-flex items-center rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger"
-                    >
-                      Gamas
-                    </span>
                     <button
-                      v-else-if="(item.complaint_count_90d ?? 0) >= 1"
+                      v-if="(item.complaint_count_90d ?? 0) >= 1"
                       type="button"
                       class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium transition hover:ring-2 hover:ring-primary/20"
                       :class="complaintCountBadgeClass(item.complaint_count_90d ?? 0)"
@@ -368,28 +479,64 @@ watch(
                       {{ item.complaint_count_90d }}× / 90h
                     </button>
                     <span
-                      v-if="isClear(item.status)"
-                      class="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success"
+                      v-if="isClear(item.status) && item.performance_category"
+                      :class="['inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium', performanceClass(item.performance_category)]"
+                      :title="`Durasi penanganan ${durationLabel(item) || '—'}`"
                     >
-                      <Check class="h-3 w-3" />
-                      Clear
+                      <Timer class="h-3 w-3" />
+                      {{ item.performance_category }}<template v-if="durationLabel(item)"> · {{ durationLabel(item) }}</template>
                     </span>
+                    <button
+                      v-if="!isClear(item.status) && (item.parent_complaint_id || item.is_repeat)"
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-full bg-slate-200/80 px-2 py-0.5 text-[11px] font-medium text-slate-700 transition hover:ring-2 hover:ring-primary/20 dark:bg-slate-700/80 dark:text-slate-200"
+                      :title="`Komplain berulang — terkait komplain #${item.parent_complaint_id ?? '-'}`"
+                      @click.stop="openHistory(item)"
+                    >
+                      <RotateCcw class="h-3 w-3" />
+                      Berulang
+                    </button>
                     <span
-                      v-if="isClearedFromPreviousDay(item)"
+                      v-if="isClear(item.status) && isClearedFromPreviousDay(item)"
                       class="inline-flex items-center rounded-full bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success"
                       :title="'Laporan dari ' + formatDate(item.report_date)"
                     >
                       dari {{ formatDateShort(item.report_date) }}
                     </span>
-                    <button
-                      v-else-if="!isClear(item.status)"
-                      type="button"
-                      class="inline-flex max-w-full items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning transition hover:bg-success/10 hover:text-success"
-                      @click="onMarkClear(item)"
+                    <template v-else-if="isWaiting(item)">
+                      <span
+                        class="inline-flex items-center gap-1 rounded-full bg-info/10 px-2 py-0.5 text-[11px] font-medium text-info"
+                        :title="`Selesai ditangani ${formatTime(item.handled_at)} — menunggu konfirmasi pelanggan`"
+                      >
+                        <Timer class="h-3 w-3" />
+                        Menunggu Konfirmasi · auto-clear {{ waitingLeft(item) ? formatDuration(waitingLeft(item)) : 'segera' }}
+                      </span>
+                    </template>
+                  </div>
+                  <div
+                    class="flex flex-wrap items-center gap-1.5 pt-0.5"
+                    role="group"
+                    aria-label="Status komplain"
+                    @click.stop
+                  >
+                    <span
+                      v-for="s in statusPills"
+                      :key="s.status"
+                      class="inline-flex"
+                      :title="statusPillTitle(item, s.status)"
                     >
-                      <span class="sm:hidden">Tandai Clear</span>
-                      <span class="hidden sm:inline">{{ item.status || 'On-Progress' }} · Tandai Clear</span>
-                    </button>
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                        :class="item.status === s.status ? s.active : 'border border-border text-muted hover:border-foreground/40 hover:text-foreground'"
+                        :disabled="isStatusBusy(item) || isComplaintLocked(item)"
+                        :aria-pressed="item.status === s.status"
+                        @click.stop="onStatusPill(item, s.status)"
+                      >
+                        <Lock v-if="isComplaintLocked(item)" class="h-3 w-3" />
+                        {{ s.label }}
+                      </button>
+                    </span>
                   </div>
                   <p class="break-words text-sm text-muted">{{ locationLine(item) }}</p>
                   <p :class="['break-words text-sm font-medium', accentFor(item, index).problem]">
@@ -500,7 +647,6 @@ watch(
                 <div class="min-w-0 flex-1 space-y-1.5">
                   <div class="flex min-w-0 flex-wrap items-center gap-1.5">
                     <button
-                      v-if="!isGamas(item)"
                       type="button"
                       class="max-w-full truncate text-left text-sm font-semibold text-foreground transition hover:text-primary hover:underline sm:text-base"
                       :title="'Lihat riwayat komplain'"
@@ -508,17 +654,8 @@ watch(
                     >
                       {{ item.customer_name || '—' }}
                     </button>
-                    <p v-else class="max-w-full truncate text-sm font-semibold text-foreground sm:text-base">
-                      {{ item.location_label || item.customer_name || 'Gamas' }}
-                    </p>
-                    <span
-                      v-if="isGamas(item)"
-                      class="inline-flex items-center rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger"
-                    >
-                      Gamas
-                    </span>
                     <button
-                      v-else-if="(item.complaint_count_90d ?? 0) >= 1"
+                      v-if="(item.complaint_count_90d ?? 0) >= 1"
                       type="button"
                       class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium transition hover:ring-2 hover:ring-primary/20"
                       :class="complaintCountBadgeClass(item.complaint_count_90d ?? 0)"
@@ -528,18 +665,54 @@ watch(
                       {{ item.complaint_count_90d }}× / 90h
                     </button>
                     <button
+                      v-if="!isClear(item.status) && (item.parent_complaint_id || item.is_repeat)"
                       type="button"
-                      class="inline-flex max-w-full items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning transition hover:bg-success/10 hover:text-success"
-                      @click="onMarkClear(item)"
+                      class="inline-flex items-center gap-1 rounded-full bg-slate-200/80 px-2 py-0.5 text-[11px] font-medium text-slate-700 transition hover:ring-2 hover:ring-primary/20 dark:bg-slate-700/80 dark:text-slate-200"
+                      :title="`Komplain berulang — terkait komplain #${item.parent_complaint_id ?? '-'}`"
+                      @click.stop="openHistory(item)"
                     >
-                      <span class="sm:hidden">Tandai Clear</span>
-                      <span class="hidden sm:inline">{{ item.status || 'On-Progress' }} · Tandai Clear</span>
+                      <RotateCcw class="h-3 w-3" />
+                      Berulang
                     </button>
+                    <template v-if="isWaiting(item)">
+                      <span
+                        class="inline-flex items-center gap-1 rounded-full bg-info/10 px-2 py-0.5 text-[11px] font-medium text-info"
+                        :title="`Selesai ditangani ${formatTime(item.handled_at)} — menunggu konfirmasi pelanggan`"
+                      >
+                        <Timer class="h-3 w-3" />
+                        Menunggu Konfirmasi · auto-clear {{ waitingLeft(item) ? formatDuration(waitingLeft(item)) : 'segera' }}
+                      </span>
+                    </template>
                     <span
                       class="inline-flex items-center rounded-full bg-slate-200/80 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-700/80 dark:text-slate-200"
                       :title="`Masih open sejak ${formatDate(item.report_date)}`"
                     >
                       Open dari {{ formatDateShort(item.report_date) }}
+                    </span>
+                  </div>
+                  <div
+                    class="flex flex-wrap items-center gap-1.5 pt-0.5"
+                    role="group"
+                    aria-label="Status komplain"
+                    @click.stop
+                  >
+                    <span
+                      v-for="s in statusPills"
+                      :key="s.status"
+                      class="inline-flex"
+                      :title="statusPillTitle(item, s.status)"
+                    >
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                        :class="item.status === s.status ? s.active : 'border border-border text-muted hover:border-foreground/40 hover:text-foreground'"
+                        :disabled="isStatusBusy(item) || isComplaintLocked(item)"
+                        :aria-pressed="item.status === s.status"
+                        @click.stop="onStatusPill(item, s.status)"
+                      >
+                        <Lock v-if="isComplaintLocked(item)" class="h-3 w-3" />
+                        {{ s.label }}
+                      </button>
                     </span>
                   </div>
                   <p class="break-words text-sm text-muted">{{ locationLine(item) }}</p>
@@ -619,22 +792,30 @@ watch(
         :style="{ top: `${menuPos.top}px`, left: `${menuPos.left}px` }"
         @click.stop
       >
-        <button
-          type="button"
-          class="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-foreground transition hover:bg-muted"
-          @click="onEdit(menuItem)"
-        >
-          <Pencil class="h-4 w-4 text-muted" />
-          Edit Komplain
-        </button>
-        <button
-          type="button"
-          class="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-danger transition hover:bg-danger/5"
-          @click="onDelete(menuItem)"
-        >
-          <Trash2 class="h-4 w-4" />
-          Hapus Komplain
-        </button>
+        <div :title="isComplaintLocked(menuItem) ? 'Hanya pembuat komplain yang dapat mengedit komplain.' : undefined">
+          <button
+            type="button"
+            class="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="isComplaintLocked(menuItem)"
+            @click="onEdit(menuItem)"
+          >
+            <Lock v-if="isComplaintLocked(menuItem)" class="h-4 w-4 text-muted" />
+            <Pencil v-else class="h-4 w-4 text-muted" />
+            Edit Komplain
+          </button>
+        </div>
+        <div :title="isComplaintLocked(menuItem) ? 'Hanya pembuat komplain yang dapat menghapus komplain.' : undefined">
+          <button
+            type="button"
+            class="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-danger transition hover:bg-danger/5 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="isComplaintLocked(menuItem)"
+            @click="onDelete(menuItem)"
+          >
+            <Lock v-if="isComplaintLocked(menuItem)" class="h-4 w-4 text-danger" />
+            <Trash2 v-else class="h-4 w-4" />
+            Hapus Komplain
+          </button>
+        </div>
       </div>
     </Teleport>
 

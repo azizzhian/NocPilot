@@ -10,7 +10,8 @@ Bahasa komunikasi dengan user: **Bahasa Indonesia**.
 
 Aplikasi operasional **NOC (Network Operations Center) ISP** untuk tim NOC shift harian:
 
-- **Input harian**: Aktivasi, Setup CCTV, Komplain (individu / gamas = gangguan massal), Update NOC
+- **Input harian**: Aktivasi, Setup CCTV, Komplain (individu), Update NOC
+- **Gamas**: gangguan massal (ODP/Upstream/OLT) — modul **terpisah** dari Komplain (tabel `daily_gamas`, menu `/gamas`)
 - **Report**: Dismantle (pencabutan layanan) dan Report Ticket, termasuk import Excel & export
 - **Dashboard**: statistik Clear per tipe, per NOC, per ODC, peringkat kinerja NOC
 - **Monitoring MikroTik**: collector background (API MikroTik + SNMP), UI hanya membaca DB
@@ -50,6 +51,7 @@ composer test --working-dir=apps/backend       # test backend (SQLite in-memory)
 - `config/permissions.php` — **katalog permission + default per role** (sumber tunggal).
 - `app/Http/Controllers/Api/` — satu controller per modul:
   - `DailyEntryController` (terbesar, ±1300 baris) — semua Input Harian, list, export, filter ODC, riwayat komplain
+  - `GamasController` + `GamasEventsController` — modul Gamas (CRUD/list/stats/export + realtime channel `gamas`)
   - `DashboardController` — statistik dashboard & per-ODC
   - `DismantleController`, `ReportTicketController` — menu Report
   - `GenerateReportController` + `Services/Report/ReportGeneratorService.php` — generate report teks
@@ -58,6 +60,7 @@ composer test --working-dir=apps/backend       # test backend (SQLite in-memory)
 - `app/Http/Resources/` — format JSON response
 - `app/Services/`
   - `DailyEntry/` — serializer, realtime, `ComplaintHistoryAnalyzer` (complaint score)
+  - `Gamas/GamasStatsService` — statistik gamas (dipakai `GamasController::stats` & widget dashboard)
   - `Report/` — generator, template, laporan network monitor
   - `Mikrotik/`, `Monitoring/` (RouterMonitor, SnmpPoller) — collector
   - `Dismantle/DismantleImportService`, `Customer/*Import*` — import Excel
@@ -74,6 +77,7 @@ composer test --working-dir=apps/backend       # test backend (SQLite in-memory)
 - `services/api.ts` — **semua fungsi API + tipe TypeScript** (±900 baris), dikelompokkan per modul (`authApi`, `oltApi`, dst.)
 - `stores/auth.ts` — sesi, `can(permission)`, sync login/logout antar tab
 - `views/InputHarianView.vue` — dipakai 3 route: `/komplain`, `/aktivasi` (aktivasi + CCTV), `/update-noc` (dibedakan via `meta.dailyTab(s)`)
+- `views/GamasView.vue` — halaman Gamas (`/gamas`), pola mirip ReportTicketView + realtime channel `gamas`
 - `views/DashboardView.vue`, `DismantleView.vue`, `ReportTicketView.vue`, `GenerateReportView.vue`, `MonitoringView.vue`
 - `components/network/ResourceListView.vue` — CRUD generik untuk halaman master (OLT, ODC, ODP, POP, Lokasi, dll.)
 - `components/ui/` — komponen dasar (Button, Input, Select, Modal, Toast, DateRangePicker, ...)
@@ -99,6 +103,18 @@ Hampir semua list/dashboard punya filter ODC. Nilai `__none__` atau `Tanpa ODC` 
 - **Dismantle / Report Ticket**: `location` → tabel `locations` (`Location.odc_id`, alias lokasi ke ODC)
 - Pencocokan nama: trim, lowercase, buang suffix dalam kurung (`normalizeLookupName`).
 - Logika "Tanpa ODC" di `DailyEntryController` **harus sama persis** dengan `DashboardController` (mis. `activationCountsByOdc`). Kalau mengubah salah satunya, ubah juga yang lain.
+
+### Alur komplain & performa penanganan (2026-11-19)
+- Status komplain: `On-Progress` → **`Menunggu Konfirmasi`** (NOC klik "Tandai Selesai", wajib isi `action`) → `Clear` (manual) atau **auto-clear 30 menit** oleh command `complaint:auto-clear` (jadwal `everyMinute`). Tipe lain tetap hanya `On-Progress`/`Clear` (`ReportStatus::options()` vs `complaintOptions()`).
+- Durasi penilaian = `created_at` → `cleared_at` (**termasuk** jeda menunggu konfirmasi), disimpan di `handling_minutes` + `performance_category`: 1–30 **Cepat**, 31–40 **Lambat**, 41–60 **Cukup Lambat**, >60 **Sangat Lambat** (`DailyComplaint::performanceCategoryFor`). Keluar dari Clear → metrik di-reset.
+- Auto-clear memakai `handled_by` sebagai `cleared_by` (jangan biarkan `cleared_at` null — semua query clear berbasis `cleared_at`) + `auto_cleared = true`.
+- Komplain berulang: otomatis saat `storeComplaint` — komplain terakhir (individu: customer_id/code/phone/nama sama) dalam **24 jam** → `parent_complaint_id` + `complaint_group_id`.
+- Item `Menunggu Konfirmasi` = **open** (ikut carry-over & hitungan open). Widget dashboard "Performa Komplain" digate `dashboard.widget.complaint_performance`.
+
+### Gamas (2026-11-20)
+- Gamas **bukan komplain**: datanya di tabel `daily_gamas`, menu `/gamas` (permission `gamas.view`), channel realtime `gamas`, section report `gamas`. Komplain selalu `complaint_type = individual`.
+- Alur status gamas: **On-Progress ↔ Clear** saja (Clear wajib `action`); **tanpa** Menunggu Konfirmasi, auto-clear, kategori performa, dan komplain berulang.
+- Carry-over & filter ODC/`__none__`/`mode=clear` di `GamasController` mengikuti pola `DailyEntryController` — kalau logika carry-over berubah, ubah keduanya.
 
 ### Permission
 - Backend: middleware `permission:<nama>`. Frontend: `auth.can('<nama>')` + `meta.permission`. Role `administrator` = semua akses.
@@ -131,6 +147,7 @@ Hampir semua list/dashboard punya filter ODC. Nilai `__none__` atau `Tanpa ODC` 
 - **2026-09-14** — Masa berlaku token diatur `SANCTUM_EXPIRATION` (default 720 menit = 1 shift); login memakai captcha matematika.
 - **2026-09-19** — ODC dipetakan lewat OLT (`olts.odc_id`) dan tabel `locations` (alias lokasi → ODC), bukan teks bebas.
 - **2026-09-22** — `olt_name` wajib diisi saat input Aktivasi supaya aktivasi selalu bisa dipetakan ke ODC.
+- **2026-11-20** — Gamas dipisah dari Komplain: tabel sendiri `daily_gamas`, permission `gamas.view`, menu `/gamas`; komplain selalu individu. Alur gamas sederhana On-Progress/Clear.
 
 ## 8. Utang teknis yang diketahui
 

@@ -7,6 +7,7 @@ use App\Models\DailyActivation;
 use App\Models\DailyCctvSetup;
 use App\Models\DailyComplaint;
 use App\Models\DailyDismantle;
+use App\Models\DailyGamas;
 use App\Models\DailyNocUpdate;
 use App\Models\ReportTemplate;
 use App\Support\ReportStatus;
@@ -59,7 +60,7 @@ class ReportGeneratorService
     /**
      * Generate teks report hanya untuk satu bagian (komplain, aktivasi, dll).
      *
-     * @param  'complaint'|'activation'|'cctv'|'noc'|'dismantle'|'ticket'|'monitoring'  $section
+     * @param  'complaint'|'gamas'|'activation'|'cctv'|'noc'|'dismantle'|'ticket'|'monitoring'  $section
      */
     public function generateSection(string $section, Carbon $from, ?Carbon $to = null): string
     {
@@ -83,6 +84,7 @@ class ReportGeneratorService
 
         $context = match ($section) {
             'complaint' => ['complaints_by_odc' => $this->dailyComplaintsByOdc($from, $to)],
+            'gamas' => ['gamas_by_odc' => $this->dailyGamasByOdc($from, $to)],
             'activation' => ['activations' => $this->dailyActivations($from, $to)],
             'cctv' => ['cctv_setups' => $this->dailyCctvSetups($from, $to)],
             'noc' => $this->nocUpdateOnlyContext($from, $to),
@@ -319,6 +321,32 @@ class ReportGeneratorService
                     'problem' => $c->problem ?? '-',
                     'action' => $c->action ?? '-',
                     'status' => $c->status,
+                ])->all(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /** @return array<int, array{odc_name: string, items: array<int, array<string, string>>}> */
+    private function dailyGamasByOdc(Carbon $from, Carbon $to): array
+    {
+        $gamas = DailyGamas::query()
+            ->whereDate('report_date', '>=', $from->toDateString())
+            ->whereDate('report_date', '<=', $to->toDateString())
+            ->orderByRaw("CASE WHEN status = 'Clear' THEN 1 ELSE 0 END")
+            ->orderBy('start_problem')
+            ->get();
+
+        return $gamas->groupBy(fn ($g) => $g->odc_name ?: 'Tanpa ODC')
+            ->map(fn ($items, $odcName) => [
+                'odc_name' => $odcName,
+                'items' => $items->map(fn ($g) => [
+                    'gamas_kind_label' => DailyGamas::kindLabel($g->gamas_kind),
+                    'location_label' => $g->location_label,
+                    'impact' => $g->impact ?? '-',
+                    'problem' => $g->problem ?? '-',
+                    'action' => $g->action ?? '-',
+                    'status' => $g->status,
                 ])->all(),
             ])
             ->values()

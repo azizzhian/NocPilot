@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type { ComplaintHistoryItem, ComplaintHistorySummary } from '@/services/api'
 import { AlertTriangle, Check, ChevronRight, Clock, X } from 'lucide-vue-next'
+import { formatDuration } from '@/lib/utils'
 
 const props = withDefaults(
   defineProps<{
@@ -73,9 +74,7 @@ function formatDate(value: string | null | undefined) {
 
 function formatAvgHours(hours: number | null) {
   if (hours == null) return '—'
-  if (hours < 1) return `${Math.round(hours * 60)} mnt`
-  if (hours < 24) return `${hours} jam`
-  return `${(hours / 24).toFixed(1)} hari`
+  return formatDuration(Math.round(hours * 60))
 }
 
 function countBadgeClass(n: number) {

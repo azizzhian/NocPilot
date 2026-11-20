@@ -12,13 +12,15 @@ import Skeleton from '@/components/ui/Skeleton.vue'
 import { dashboardApi, odcApi, type DashboardStats, type DashboardSpecialist } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { todayInput } from '@/lib/date-input'
-import { Activity, Trophy, Award, Cable } from 'lucide-vue-next'
+import { formatDuration } from '@/lib/utils'
+import { Activity, Trophy, Award, Cable, Timer, Siren, ListChecks } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const router = useRouter()
 const fromDate = ref(todayInput())
 const toDate = ref(todayInput())
 const userId = ref<number | ''>('')
+const shiftFilter = ref<number | ''>('')
 const odcName = ref('')
 const odcs = ref<{ id: number; name: string }[]>([])
 const loading = ref(true)
@@ -33,12 +35,44 @@ const charts = ref<DashboardStats['charts'] | null>(null)
 const heatmap = ref<DashboardStats['heatmap']>({ days: [], rows: [] })
 const recentActivities = ref<DashboardStats['recent_activities']>([])
 const nocUsers = ref<DashboardStats['noc_users']>([])
+const complaintPerformance = ref<NonNullable<DashboardStats['complaint_performance']> | null>(null)
+const gamasSummary = ref<DashboardStats['gamas_summary'] | null>(null)
 
 const showKpis = computed(() => auth.can('dashboard.widget.kpis'))
 const showClearByType = computed(() => auth.can('dashboard.widget.clear_by_type'))
 const showClearByNoc = computed(() => auth.can('dashboard.widget.clear_by_noc'))
 const showNocPerformance = computed(() => auth.can('dashboard.widget.noc_performance'))
+const showComplaintPerformance = computed(() => auth.can('dashboard.widget.complaint_performance'))
+const showGamas = computed(() => auth.can('dashboard.widget.gamas'))
 const showRecent = computed(() => auth.can('dashboard.widget.recent'))
+
+const shiftOptions = [
+  { value: 1, label: 'Shift 1' },
+  { value: 2, label: 'Shift 2' },
+  { value: 3, label: 'Shift 3' },
+] as const
+
+const complaintSla = computed(() => complaintPerformance.value?.summary.sla ?? null)
+
+function slaTone(percent: number | null | undefined) {
+  if (percent == null) return { box: 'bg-muted/20', text: 'text-foreground' }
+  if (percent >= 90) return { box: 'bg-success/5', text: 'text-success' }
+  if (percent >= 70) return { box: 'bg-warning/5', text: 'text-warning' }
+  return { box: 'bg-danger/5', text: 'text-danger' }
+}
+
+const complaintSlaTone = computed(() => slaTone(complaintSla.value?.percent))
+
+const perfCategories = [
+  { key: 'Cepat', label: 'Cepat', hint: '1–30 menit', cls: 'bg-success/10 text-success' },
+  { key: 'Lambat', label: 'Lambat', hint: '31–40 menit', cls: 'bg-info/10 text-info' },
+  { key: 'Cukup Lambat', label: 'Cukup Lambat', hint: '41–60 menit', cls: 'bg-warning/10 text-warning' },
+  { key: 'Sangat Lambat', label: 'Sangat Lambat', hint: '>60 menit', cls: 'bg-danger/10 text-danger' },
+] as const
+
+function fmtDuration(minutes: number | null | undefined) {
+  return formatDuration(minutes)
+}
 
 const kpiHref: Record<string, string> = {
   complaints: '/komplain',
@@ -292,6 +326,7 @@ async function load() {
       from: fromDate.value,
       to: toDate.value,
       user_id: userId.value === '' ? undefined : Number(userId.value),
+      shift: shiftFilter.value === '' ? undefined : Number(shiftFilter.value),
       odc_name: odcName.value || undefined,
     })
     periodLabel.value = data.period.label
@@ -301,6 +336,8 @@ async function load() {
     nocPerformance.value = data.noc_performance
     odcStats.value = data.odc_stats ?? []
     odcPage.value = 1
+    complaintPerformance.value = data.complaint_performance ?? null
+    gamasSummary.value = data.gamas_summary ?? null
     charts.value = data.charts ?? emptyCharts()
     heatmap.value = data.heatmap ?? { days: [], rows: [] }
     recentActivities.value = data.recent_activities
@@ -312,6 +349,8 @@ async function load() {
     specialists.value = []
     nocPerformance.value = []
     odcStats.value = []
+    complaintPerformance.value = null
+    gamasSummary.value = null
     charts.value = emptyCharts()
     heatmap.value = { days: [], rows: [] }
     recentActivities.value = []
@@ -320,7 +359,7 @@ async function load() {
   }
 }
 
-watch([fromDate, toDate, userId, odcName], () => {
+watch([fromDate, toDate, userId, shiftFilter, odcName], () => {
   void load()
 })
 
@@ -346,6 +385,17 @@ onMounted(async () => {
         <Select :model-value="String(userId)" class="w-48" @update:model-value="(v) => userId = v === '' ? '' : Number(v)">
           <option value="">Semua NOC</option>
           <option v-for="u in nocUsers" :key="u.id" :value="String(u.id)">{{ u.name }}</option>
+        </Select>
+      </div>
+      <div>
+        <label class="mb-1.5 block text-xs font-medium text-muted">Shift</label>
+        <Select
+          :model-value="shiftFilter === '' ? '' : String(shiftFilter)"
+          class="w-36"
+          @update:model-value="(v) => shiftFilter = v === '' ? '' : Number(v)"
+        >
+          <option value="">Semua shift</option>
+          <option v-for="s in shiftOptions" :key="s.value" :value="String(s.value)">{{ s.label }}</option>
         </Select>
       </div>
       <Button variant="outline" :disabled="loading" @click="load">Refresh</Button>
@@ -505,6 +555,195 @@ onMounted(async () => {
         unit="%"
         :height="260"
       />
+    </div>
+
+    <!-- 4a. Performa Komplain -->
+    <div v-if="!loading && showComplaintPerformance && complaintPerformance" class="mt-6">
+      <Card class="p-5">
+        <div class="mb-4">
+          <div class="flex items-center gap-2">
+            <Timer class="h-4 w-4 text-primary" />
+            <h3 class="text-sm font-semibold text-foreground">Performa Komplain</h3>
+          </div>
+          <p class="mt-1 text-xs text-muted">
+            Alur: On-Progress → Menunggu Konfirmasi → Clear (auto-clear 30 menit tanpa konfirmasi pelanggan).
+            Durasi dihitung dari input sampai clear.
+          </p>
+        </div>
+
+        <!-- Ringkasan atas -->
+        <div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-6">
+          <div class="rounded-xl border border-border bg-muted/20 p-3">
+            <p class="text-[11px] text-muted">Total komplain</p>
+            <p class="mt-0.5 text-2xl font-bold text-foreground">{{ complaintPerformance.summary.total }}</p>
+            <p class="text-[11px] text-muted">periode ini · {{ complaintPerformance.summary.repeat }} berulang</p>
+          </div>
+          <div class="rounded-xl border border-border bg-warning/5 p-3">
+            <p class="text-[11px] text-muted">Sedang ditangani</p>
+            <p class="mt-0.5 text-2xl font-bold text-warning">{{ complaintPerformance.summary.open_all }}</p>
+            <p class="text-[11px] text-muted">{{ complaintPerformance.summary.in_progress }} On-Progress · {{ complaintPerformance.summary.waiting }} menunggu konfirmasi</p>
+          </div>
+          <div class="rounded-xl border border-border bg-info/5 p-3">
+            <p class="text-[11px] text-muted">Rata-rata durasi</p>
+            <p class="mt-0.5 text-2xl font-bold text-info">{{ fmtDuration(complaintPerformance.summary.avg_minutes) }}</p>
+            <p class="text-[11px] text-muted">{{ complaintPerformance.summary.clear }} komplain clear</p>
+          </div>
+          <div class="rounded-xl border border-border bg-muted/20 p-3">
+            <p class="text-[11px] text-muted">Auto-clear</p>
+            <p class="mt-0.5 text-2xl font-bold text-foreground">{{ complaintPerformance.summary.auto_cleared }}</p>
+            <p class="text-[11px] text-muted">clear otomatis (30 menit)</p>
+          </div>
+          <div class="rounded-xl border border-border bg-success/5 p-3">
+            <p class="text-[11px] text-muted">Clear periode</p>
+            <p class="mt-0.5 text-2xl font-bold text-success">{{ complaintPerformance.summary.clear }}</p>
+            <p class="text-[11px] text-muted">input: {{ complaintPerformance.summary.total }} · open: {{ complaintPerformance.summary.open }}</p>
+          </div>
+          <div class="rounded-xl border border-border p-3" :class="complaintSlaTone.box">
+            <div class="flex items-center gap-1.5">
+              <ListChecks class="h-3.5 w-3.5" :class="complaintSlaTone.text" />
+              <p class="text-[11px] text-muted">Persen Komplain (SLA ≤ 60 menit)</p>
+            </div>
+            <p class="mt-0.5 text-2xl font-bold" :class="complaintSlaTone.text">
+              {{ complaintSla?.percent == null ? '—' : `${complaintSla.percent}%` }}
+            </p>
+            <p class="text-[11px] text-muted">
+              {{ complaintSla ? `${complaintSla.within_60}/${complaintSla.clear}` : 'Belum ada data durasi valid' }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Distribusi kategori -->
+        <div class="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div
+            v-for="cat in perfCategories"
+            :key="cat.key"
+            class="rounded-xl border border-border p-3"
+            :class="cat.cls"
+            :title="`Durasi ${cat.hint}`"
+          >
+            <p class="text-[11px] font-medium opacity-80">{{ cat.label }} · {{ cat.hint }}</p>
+            <p class="mt-0.5 text-2xl font-bold">{{ complaintPerformance.summary.categories[cat.key] ?? 0 }}</p>
+          </div>
+        </div>
+
+        <!-- Tabel per petugas -->
+        <div v-if="complaintPerformance.rows.length" class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-border text-left text-xs text-muted">
+                <th class="pb-2 pr-2" rowspan="2">#</th>
+                <th class="pb-2 pr-3" rowspan="2">Petugas NOC</th>
+                <th class="pb-1 pr-2 text-center" colspan="3">Komplain</th>
+                <th class="pb-2 pr-2 text-right" rowspan="2">Persen Komplain</th>
+                <th class="pb-1 pr-2 text-center" colspan="4">Kategori performa (clear periode)</th>
+                <th class="pb-2 text-right" rowspan="2">Rata-rata durasi</th>
+              </tr>
+              <tr class="border-b border-border text-left text-[10px] text-muted">
+                <th class="pb-2 pr-2 text-right font-medium">Total</th>
+                <th class="pb-2 pr-2 text-right font-medium">Ditangani</th>
+                <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+                <th class="pb-2 pr-2 text-right font-medium text-success">Cepat</th>
+                <th class="pb-2 pr-2 text-right font-medium text-info">Lambat</th>
+                <th class="pb-2 pr-2 text-right font-medium text-warning">Cukup</th>
+                <th class="pb-2 pr-2 text-right font-medium text-danger">Sgt. Lambat</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(row, idx) in complaintPerformance.rows"
+                :key="row.user_id"
+                class="border-b border-border/60"
+              >
+                <td class="py-2.5 pr-2">{{ medal(idx) }}</td>
+                <td class="py-2.5 pr-3 font-medium text-foreground">{{ row.name }}</td>
+                <td class="py-2.5 pr-2 text-right">{{ row.total }}</td>
+                <td class="py-2.5 pr-2 text-right text-warning">
+                  {{ row.open }}
+                  <span v-if="row.waiting" class="text-[10px] text-info" :title="`${row.waiting} menunggu konfirmasi`">({{ row.waiting }} mggu)</span>
+                </td>
+                <td class="py-2.5 pr-2 text-right">{{ row.clear }}</td>
+                <td
+                  class="py-2.5 pr-2 text-right font-semibold"
+                  :class="slaTone(row.sla?.percent).text"
+                  :title="row.sla ? `${row.sla.within_60}/${row.sla.clear} Clear ≤60 menit` : 'Belum ada data durasi valid'"
+                >
+                  {{ row.sla?.percent == null ? '—' : `${row.sla.percent}%` }}
+                </td>
+                <td class="py-2.5 pr-2 text-right">{{ row.categories?.Cepat ?? 0 }}</td>
+                <td class="py-2.5 pr-2 text-right">{{ row.categories?.Lambat ?? 0 }}</td>
+                <td class="py-2.5 pr-2 text-right">{{ row.categories?.['Cukup Lambat'] ?? 0 }}</td>
+                <td class="py-2.5 pr-2 text-right">{{ row.categories?.['Sangat Lambat'] ?? 0 }}</td>
+                <td class="py-2.5 text-right font-semibold">{{ fmtDuration(row.avg_minutes) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="py-8 text-center text-sm text-muted">Belum ada komplain di periode ini.</p>
+      </Card>
+    </div>
+
+    <!-- 4a2. Statistik Gamas -->
+    <div v-if="!loading && showGamas && gamasSummary" class="mt-6">
+      <Card class="p-5">
+        <div class="mb-4">
+          <div class="flex items-center gap-2">
+            <Siren class="h-4 w-4 text-danger" />
+            <h3 class="text-sm font-semibold text-foreground">Statistik Gamas</h3>
+          </div>
+          <p class="mt-1 text-xs text-muted">
+            Gangguan massal (ODP, upstream, OLT/site) — modul terpisah dari Komplain.
+          </p>
+        </div>
+
+        <div class="mb-4 grid grid-cols-3 gap-3">
+          <div class="rounded-xl border border-border bg-muted/20 p-3">
+            <p class="text-[11px] text-muted">Total periode</p>
+            <p class="mt-0.5 text-2xl font-bold text-foreground">{{ gamasSummary.summary.total }}</p>
+            <p class="text-[11px] text-muted">input pada rentang terpilih</p>
+          </div>
+          <div class="rounded-xl border border-border bg-warning/5 p-3">
+            <p class="text-[11px] text-muted">On-Progress</p>
+            <p class="mt-0.5 text-2xl font-bold text-warning">{{ gamasSummary.summary.open_all }}</p>
+            <p class="text-[11px] text-muted">termasuk backlog</p>
+          </div>
+          <div class="rounded-xl border border-border bg-success/5 p-3">
+            <p class="text-[11px] text-muted">Clear periode</p>
+            <p class="mt-0.5 text-2xl font-bold text-success">{{ gamasSummary.summary.clear }}</p>
+            <p class="text-[11px] text-muted">per tanggal clear</p>
+          </div>
+        </div>
+
+        <div class="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+          <span v-for="k in gamasSummary.by_kind" :key="k.kind" class="text-foreground">
+            {{ k.label }}
+            <span class="text-muted">({{ k.total }})</span>
+            <span class="ml-1 text-xs text-muted">open {{ k.open }} · clear {{ k.clear }}</span>
+          </span>
+        </div>
+
+        <div v-if="gamasSummary.by_odc.length" class="overflow-x-auto">
+          <p class="mb-2 text-xs font-medium text-muted">Top ODC (gamas terbanyak)</p>
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-border text-left text-xs text-muted">
+                <th class="pb-2 pr-3 font-medium">ODC / Site</th>
+                <th class="pb-2 pr-3 text-right font-medium">Total</th>
+                <th class="pb-2 pr-3 text-right font-medium">Open</th>
+                <th class="pb-2 text-right font-medium">Clear</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in gamasSummary.by_odc" :key="row.odc_name" class="border-b border-border/60">
+                <td class="py-2 pr-3 font-medium text-foreground">{{ row.odc_name }}</td>
+                <td class="py-2 pr-3 text-right">{{ row.total }}</td>
+                <td class="py-2 pr-3 text-right text-warning">{{ row.open }}</td>
+                <td class="py-2 text-right text-success">{{ row.clear }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="py-4 text-center text-sm text-muted">Belum ada gamas di periode ini.</p>
+      </Card>
     </div>
 
     <!-- 4b. Statistik ODC + stacked bar ODC -->

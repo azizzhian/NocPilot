@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\DailyActivation;
 use App\Models\DailyCctvSetup;
 use App\Models\DailyComplaint;
+use App\Models\DailyGamas;
 use App\Models\DailyNocUpdate;
 use App\Models\Dismantle;
 use App\Models\Location;
@@ -16,6 +17,8 @@ use App\Models\Odp;
 use App\Models\Olt;
 use App\Models\ReportTicket;
 use App\Models\User;
+use App\Services\Gamas\GamasStatsService;
+use App\Support\ComplaintSla;
 use App\Support\ReportStatus;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -33,6 +36,9 @@ class DashboardController extends Controller
             'nav_badges' => [
                 'monitoring' => 0,
                 'input_harian' => DailyComplaint::whereDate('report_date', $today)
+                    ->whereIn('status', [ReportStatus::ON_PROGRESS, ReportStatus::WAITING_CONFIRMATION])
+                    ->count(),
+                'gamas' => DailyGamas::whereDate('report_date', $today)
                     ->where('status', ReportStatus::ON_PROGRESS)
                     ->count(),
                 'activations' => DailyActivation::whereDate('report_date', $today)
@@ -71,6 +77,10 @@ class DashboardController extends Controller
         }
 
         $userId = $request->integer('user_id', 0) ?: null;
+        $shift = $request->integer('shift', 0) ?: null;
+        if ($shift !== null && ! in_array($shift, [1, 2, 3], true)) {
+            $shift = null;
+        }
         $odcName = trim($request->string('odc_name')->toString()) ?: null;
         $complaintOdcName = trim($request->string('complaint_odc_name')->toString()) ?: null;
         $clientShareSource = strtolower(trim($request->string('client_share_source')->toString()));
@@ -93,6 +103,8 @@ class DashboardController extends Controller
         $odcStats = $this->odcPerformance($from, $to, $periodDays, $odcName);
         $charts = $this->buildCharts($summary, $nocPerformance, $odcStats);
         $complaintClientShare = $this->complaintClientShare($from, $to, $complaintOdcName, $clientShareSource);
+        $complaintPerformance = $this->complaintPerformance($from, $to, $userId, $odcName, $shift);
+        $gamasSummary = $this->gamasSummary($from, $to);
 
         return response()->json([
             'period' => [
@@ -111,6 +123,8 @@ class DashboardController extends Controller
             'noc_performance' => $nocPerformance,
             'odc_stats' => $odcStats,
             'complaint_client_share' => $complaintClientShare,
+            'complaint_performance' => $complaintPerformance,
+            'gamas_summary' => $gamasSummary,
             'charts' => $charts,
             'heatmap' => $this->weeklyHeatmap($to, $userId, $odcName),
             'recent_activities' => $this->recentActivities(),
@@ -122,6 +136,9 @@ class DashboardController extends Controller
             'nav_badges' => [
                 'monitoring' => 0,
                 'input_harian' => DailyComplaint::whereDate('report_date', today())
+                    ->whereIn('status', [ReportStatus::ON_PROGRESS, ReportStatus::WAITING_CONFIRMATION])
+                    ->count(),
+                'gamas' => DailyGamas::whereDate('report_date', today())
                     ->where('status', ReportStatus::ON_PROGRESS)
                     ->count(),
                 'activations' => DailyActivation::whereDate('report_date', today())
@@ -336,6 +353,16 @@ class DashboardController extends Controller
             'noc_updates_open_all' => $this->countOpensUpTo(DailyNocUpdate::class, $toDate, $userId, $odcName),
             'noc_updates_clear' => $this->countClearsInRange(DailyNocUpdate::class, $from, $to, $userId, $odcName),
         ];
+    }
+
+    /**
+     * Widget Statistik Gamas (modul terpisah dari komplain).
+     *
+     * @return array{summary: array{total: int, open_all: int, clear: int}, by_kind: list<array<string, mixed>>, by_odc: list<array<string, mixed>>}
+     */
+    protected function gamasSummary(Carbon $from, Carbon $to): array
+    {
+        return app(GamasStatsService::class)->forRange($from->toDateString(), $to->toDateString());
     }
 
     /**
@@ -561,6 +588,163 @@ class DashboardController extends Controller
                 return $row;
             })
             ->all();
+    }
+
+    /**
+     * Performa penanganan komplain per petugas NOC (alur baru: On-Progress →
+     * Menunggu Konfirmasi → Clear, dengan auto-clear 30 menit).
+     *
+     * - `total` / `open` (On-Progress + Menunggu Konfirmasi): komplain input dalam periode (report_date).
+     * - `open_all` / `in_progress` / `waiting` kartu atas: kumulatif (report_date ≤ sampai), belum Clear.
+     * - durasi rata-rata & kategori performa: komplain yang di-Clear dalam periode (cleared_at).
+     *
+     * @return array{summary: array<string, mixed>, rows: list<array<string, mixed>>}
+     */
+    protected function complaintPerformance(Carbon $from, Carbon $to, ?int $userId, ?string $odcName = null, ?int $shift = null): array
+    {
+        $fromDate = $from->toDateString();
+        $toDate = $to->toDateString();
+        $fromStart = $from->copy()->startOfDay();
+        $toEnd = $to->copy()->endOfDay();
+
+        $inputs = DailyComplaint::query()
+            ->whereBetween('report_date', [$fromDate, $toDate])
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->when($userId, fn ($q) => $q->where('created_by', $userId))
+            ->when($shift, fn ($q) => $q->where('shift', $shift))
+            ->get(['id', 'created_by', 'status', 'parent_complaint_id']);
+
+        $cleared = DailyComplaint::query()
+            ->where('status', ReportStatus::CLEAR)
+            ->where(function ($q) use ($fromStart, $toEnd, $fromDate, $toDate) {
+                $q->whereBetween('cleared_at', [$fromStart, $toEnd])
+                    ->orWhere(function ($q2) use ($fromDate, $toDate) {
+                        $q2->whereNull('cleared_at')
+                            ->whereBetween('report_date', [$fromDate, $toDate]);
+                    });
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
+            ->when($shift, fn ($q) => $q->where('shift', $shift))
+            ->get(['id', 'created_by', 'cleared_by', 'status', 'handling_minutes', 'performance_category', 'auto_cleared']);
+
+        $openBase = DailyComplaint::query()
+            ->whereDate('report_date', '<=', $toDate)
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->when($userId, fn ($q) => $q->where('created_by', $userId))
+            ->when($shift, fn ($q) => $q->where('shift', $shift));
+
+        $openAll = (clone $openBase)
+            ->where(function ($q) {
+                $q->whereNull('status')
+                    ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+            })
+            ->count();
+        $inProgressAll = (clone $openBase)->where('status', ReportStatus::ON_PROGRESS)->count();
+        $waitingAll = (clone $openBase)->where('status', ReportStatus::WAITING_CONFIRMATION)->count();
+
+        $categories = array_fill_keys(DailyComplaint::PERFORMANCE_CATEGORIES, 0);
+        $withDuration = $cleared->filter(fn (DailyComplaint $c) => $c->handling_minutes !== null);
+        foreach ($withDuration as $c) {
+            $key = (string) $c->performance_category;
+            if (array_key_exists($key, $categories)) {
+                $categories[$key]++;
+            }
+        }
+        $avgMinutes = $withDuration->count() > 0
+            ? (int) round((float) $withDuration->avg('handling_minutes'))
+            : null;
+
+        /** @var array<string, array<string, mixed>> $byUser */
+        $byUser = [];
+        $emptyRow = fn (): array => [
+            'total' => 0,
+            'open' => 0,
+            'in_progress' => 0,
+            'waiting' => 0,
+            'clear' => 0,
+            'auto_cleared' => 0,
+            'durations' => [],
+            'sla_items' => [],
+            'categories' => array_fill_keys(DailyComplaint::PERFORMANCE_CATEGORIES, 0),
+        ];
+
+        foreach ($inputs as $c) {
+            $key = (string) ($c->created_by ?? 0);
+            $byUser[$key] ??= $emptyRow();
+            $byUser[$key]['total']++;
+            if (ReportStatus::isOpen($c->status)) {
+                $byUser[$key]['open']++;
+            }
+            if ($c->status === ReportStatus::ON_PROGRESS) {
+                $byUser[$key]['in_progress']++;
+            }
+            if ($c->status === ReportStatus::WAITING_CONFIRMATION) {
+                $byUser[$key]['waiting']++;
+            }
+        }
+
+        foreach ($cleared as $c) {
+            $key = $c->auto_cleared ? 'system' : (string) ($c->cleared_by ?? $c->created_by ?? 0);
+            $byUser[$key] ??= $emptyRow();
+            $byUser[$key]['clear']++;
+            $byUser[$key]['sla_items'][] = $c;
+            if ($c->auto_cleared) {
+                $byUser[$key]['auto_cleared']++;
+            }
+            if ($c->handling_minutes !== null) {
+                $byUser[$key]['durations'][] = (int) $c->handling_minutes;
+                $cat = (string) $c->performance_category;
+                if (array_key_exists($cat, $byUser[$key]['categories'])) {
+                    $byUser[$key]['categories'][$cat]++;
+                }
+            }
+        }
+
+        $userIds = array_values(array_filter(array_map('intval', array_keys($byUser))));
+        $names = $userIds !== []
+            ? User::whereIn('id', $userIds)->pluck('name', 'id')
+            : collect();
+
+        $rows = collect($byUser)
+            ->map(function (array $row, string $key) use ($names) {
+                $userIdKey = (int) $key;
+                $durations = $row['durations'];
+                $sla = ComplaintSla::summary($row['sla_items']);
+                unset($row['durations'], $row['sla_items']);
+
+                return [
+                    'user_id' => $userIdKey,
+                    'name' => $key === 'system'
+                        ? 'System / Scheduler'
+                        : ($names->get($userIdKey) ?: ($userIdKey > 0 ? 'User #'.$userIdKey : 'Tanpa petugas')),
+                    ...$row,
+                    'avg_minutes' => $durations !== []
+                        ? (int) round(array_sum($durations) / count($durations))
+                        : null,
+                    'sla' => $sla,
+                ];
+            })
+            ->sortByDesc('total')
+            ->values()
+            ->all();
+
+        return [
+            'summary' => [
+                'total' => $inputs->count(),
+                'open' => $inputs->filter(fn (DailyComplaint $c) => ReportStatus::isOpen($c->status))->count(),
+                'open_all' => $openAll,
+                'in_progress' => $inProgressAll,
+                'waiting' => $waitingAll,
+                'clear' => $cleared->count(),
+                'avg_minutes' => $avgMinutes,
+                'auto_cleared' => $cleared->filter(fn (DailyComplaint $c) => (bool) $c->auto_cleared)->count(),
+                'repeat' => $inputs->filter(fn (DailyComplaint $c) => (bool) $c->parent_complaint_id)->count(),
+                'categories' => $categories,
+                'sla' => ComplaintSla::summary($cleared),
+            ],
+            'rows' => $rows,
+        ];
     }
 
     /**
@@ -1030,7 +1214,6 @@ class DashboardController extends Controller
             string $name,
             ?string $code,
             ?string $odc,
-            bool $isGamas,
             string $type,
         ) use (&$byClient): void {
             if (! isset($byClient[$key])) {
@@ -1039,7 +1222,7 @@ class DashboardController extends Controller
                     'name' => $name,
                     'customer_code' => $code,
                     'odc_name' => $odc,
-                    'is_gamas' => $isGamas,
+                    'is_gamas' => false,
                     'complaints_count' => 0,
                     'tickets_count' => 0,
                 ];
@@ -1059,11 +1242,9 @@ class DashboardController extends Controller
 
         $complaints = DailyComplaint::query()
             ->select([
-                'complaint_type',
                 'customer_id',
                 'customer_code',
                 'customer_name',
-                'location_label',
                 'odc_name',
             ])
             ->whereBetween('report_date', [$from->toDateString(), $to->toDateString()])
@@ -1071,30 +1252,21 @@ class DashboardController extends Controller
             ->get();
 
         foreach ($complaints as $row) {
-            $isGamas = ($row->complaint_type ?? '') === DailyComplaint::TYPE_GAMAS;
-            if ($isGamas) {
-                $label = trim((string) ($row->location_label ?: $row->customer_name ?: 'Gamas'));
-                $key = 'gamas:'.mb_strtolower($label).'|'.mb_strtolower((string) ($row->odc_name ?? ''));
-                $code = null;
-                $name = 'Gamas: '.$label;
-            } else {
-                $code = trim((string) ($row->customer_code ?? ''));
-                $name = trim((string) ($row->customer_name ?? ''));
-                if ($code === '' && $name === '' && ! $row->customer_id) {
-                    continue;
-                }
-                $key = $code !== ''
-                    ? 'code:'.mb_strtolower($code)
-                    : ($row->customer_id ? 'id:'.$row->customer_id : 'name:'.mb_strtolower($name));
-                $name = $name !== '' ? $name : ($code !== '' ? $code : 'Pelanggan');
+            $code = trim((string) ($row->customer_code ?? ''));
+            $name = trim((string) ($row->customer_name ?? ''));
+            if ($code === '' && $name === '' && ! $row->customer_id) {
+                continue;
             }
+            $key = $code !== ''
+                ? 'code:'.mb_strtolower($code)
+                : ($row->customer_id ? 'id:'.$row->customer_id : 'name:'.mb_strtolower($name));
+            $name = $name !== '' ? $name : ($code !== '' ? $code : 'Pelanggan');
 
             $bump(
                 $key,
                 $name,
                 $code,
                 $row->odc_name ? (string) $row->odc_name : null,
-                $isGamas,
                 'complaint',
             );
         }
@@ -1129,7 +1301,6 @@ class DashboardController extends Controller
                 $name,
                 $code !== '' ? $code : null,
                 $row->odc_name ? (string) $row->odc_name : null,
-                false,
                 'ticket',
             );
         }

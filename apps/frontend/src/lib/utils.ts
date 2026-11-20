@@ -22,6 +22,26 @@ export function formatMbps(mbps: number): string {
   return `${mbps.toFixed(0)} Mbps`
 }
 
+/**
+ * Format durasi menit → teks mudah dibaca.
+ * 45 → "45 mnt", 60 → "1 jam", 95 → "1 jam 35 mnt", 1500 → "1 hari 1 jam".
+ */
+export function formatDuration(minutes: number | null | undefined): string {
+  if (minutes == null) return '—'
+  const total = Math.max(0, Math.round(minutes))
+  if (total < 60) return total < 1 ? '<1 mnt' : `${total} mnt`
+
+  const days = Math.floor(total / 1440)
+  const hours = Math.floor((total % 1440) / 60)
+  const mins = total % 60
+
+  const parts: string[] = []
+  if (days > 0) parts.push(`${days} hari`)
+  if (hours > 0) parts.push(`${hours} jam`)
+  if (mins > 0 && days === 0) parts.push(`${mins} mnt`)
+  return parts.join(' ')
+}
+
 export function timeAgo(date: Date | string): string {
   const now = new Date()
   const then = new Date(date)

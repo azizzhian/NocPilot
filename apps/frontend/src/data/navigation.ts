@@ -21,6 +21,7 @@ import {
   ListTodo,
   UserCog,
   AlertTriangle,
+  Siren,
   Ticket,
   ClipboardList,
   type LucideIcon,
@@ -59,6 +60,7 @@ export const navigation: NavSection[] = [
     title: 'OPERASIONAL',
     items: [
       { label: 'Komplain', to: '/komplain', icon: AlertTriangle, favorite: true, favoriteOrder: 2, permission: 'complaint.view' },
+      { label: 'Gamas', to: '/gamas', icon: Siren, favorite: true, favoriteOrder: 6, permission: 'gamas.view' },
       { label: 'Aktivasi', to: '/aktivasi', icon: Zap, favorite: true, favoriteOrder: 4, permission: 'activation.view' },
       { label: 'Update NOC', to: '/update-noc', icon: ClipboardList, favorite: true, favoriteOrder: 5, permission: 'activation.view' },
     ],

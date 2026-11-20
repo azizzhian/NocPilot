@@ -20,6 +20,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('routers:sync')
             ->everyThirtySeconds()
             ->withoutOverlapping(5);
+
+        // Auto-clear komplain "Menunggu Konfirmasi" setelah 30 menit tanpa konfirmasi pelanggan.
+        $schedule->command('complaint:auto-clear')
+            ->everyMinute()
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([

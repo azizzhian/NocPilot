@@ -20,6 +20,7 @@ use App\Services\DailyEntry\DailyEntryComplaintSerializer;
 use App\Services\DailyEntry\DailyEntryRealtimeService;
 use App\Services\DailyEntry\DailyEntrySerializer;
 use App\Services\Phone\PhoneNormalizer;
+use App\Support\ComplaintSla;
 use App\Support\ReportStatus;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -95,6 +96,7 @@ class DailyEntryController extends Controller
                 ->map(fn (DailyNocUpdate $item) => $this->entrySerializer->serialize($item, $date))->values(),
             'lookups' => $this->lookups(),
             'status_options' => ReportStatus::options(),
+            'complaint_status_options' => ReportStatus::complaintOptions(),
             'summary' => [
                 'activations' => DailyActivation::whereDate('report_date', $carbon)->count(),
                 'complaints' => DailyComplaint::whereDate('report_date', $carbon)->count(),
@@ -398,14 +400,16 @@ class DailyEntryController extends Controller
     public function storeComplaint(Request $request): JsonResponse
     {
         $data = $this->validateComplaint($request);
-        if ($data['status'] === ReportStatus::CLEAR) {
-            $this->assertComplaintActionForClear($data['action'] ?? null);
-            if (empty($data['end_problem'])) {
-                $data['end_problem'] = today()->toDateString();
-            }
+        if ($data['status'] !== ReportStatus::ON_PROGRESS) {
+            $this->assertComplaintActionForClear($data['action'] ?? null, $data['status']);
+        }
+        if ($data['status'] === ReportStatus::CLEAR && empty($data['end_problem'])) {
+            $data['end_problem'] = today()->toDateString();
         }
         $item = new DailyComplaint([...$data, 'created_by' => $request->user()->id]);
+        $this->attachRepeatRelation($item);
         $item->syncClearAttribution($data['status'], $request->user()->id);
+        $item->syncHandling($data['status'], $request->user()->id);
         $item->save();
         $item->load(['creator:id,name', 'clearer:id,name']);
         $this->dailyEntryRealtime->complaintCreated($item);
@@ -425,16 +429,23 @@ class DailyEntryController extends Controller
 
     public function updateComplaint(Request $request, DailyComplaint $dailyComplaint): JsonResponse
     {
+        $this->assertComplaintOwner(
+            $dailyComplaint,
+            $request->user()?->id,
+            'Hanya pembuat komplain yang dapat mengedit komplain.',
+        );
         $data = $this->validateComplaint($request);
         if ($data['status'] === ReportStatus::CLEAR && empty($data['end_problem'])) {
             $data['end_problem'] = today()->toDateString();
         }
-        if ($data['status'] === ReportStatus::CLEAR) {
-            $this->assertComplaintActionForClear($data['action'] ?? null);
+        if ($data['status'] !== ReportStatus::ON_PROGRESS) {
+            $this->assertComplaintActionForClear($data['action'] ?? null, $data['status']);
         }
         $previous = $dailyComplaint->status;
+        $this->assertCanChangeComplaintStatus($dailyComplaint, $request->user()?->id, $data['status'], $previous);
         $dailyComplaint->fill($data);
         $dailyComplaint->syncClearAttribution($data['status'], $request->user()->id, $previous);
+        $dailyComplaint->syncHandling($data['status'], $request->user()->id, $previous);
         $dailyComplaint->save();
         $fresh = $dailyComplaint->fresh(['creator:id,name', 'clearer:id,name']);
         $this->dailyEntryRealtime->complaintUpdated($fresh);
@@ -490,6 +501,11 @@ class DailyEntryController extends Controller
         $label = $this->activityLabelFor($type, $model);
 
         if ($type === 'complaint' && $model instanceof DailyComplaint) {
+            $this->assertComplaintOwner(
+                $model,
+                request()->user()?->id,
+                'Hanya pembuat komplain yang dapat menghapus komplain.',
+            );
             $reportDate = $model->report_date?->toDateString() ?? today()->toDateString();
             $snapshot = $this->complaintSerializer->serialize($model, $reportDate);
             $model->delete();
@@ -507,12 +523,23 @@ class DailyEntryController extends Controller
 
     public function updateStatus(Request $request, string $type, int $id): JsonResponse
     {
+        $statusRule = $type === 'complaint'
+            ? implode(',', ReportStatus::complaintOptions())
+            : implode(',', ReportStatus::options());
         $data = $request->validate([
-            'status' => 'required|in:On-Progress,Clear',
+            'status' => "required|in:{$statusRule}",
         ]);
 
         $model = $this->resolveModel($type)::findOrFail($id);
         $previous = $model->status;
+
+        if ($model instanceof DailyComplaint) {
+            $this->assertCanChangeComplaintStatus($model, $request->user()?->id, $data['status'], $previous);
+        }
+
+        if ($type === 'complaint' && $data['status'] === ReportStatus::WAITING_CONFIRMATION) {
+            $this->assertComplaintActionForClear($model->action, ReportStatus::WAITING_CONFIRMATION);
+        }
 
         if ($data['status'] === ReportStatus::CLEAR) {
             if ($type === 'dismantle' && ! $model->close_ticket) {
@@ -528,6 +555,9 @@ class DailyEntryController extends Controller
 
         $model->status = $data['status'];
         $model->syncClearAttribution($data['status'], $request->user()?->id, $previous);
+        if ($model instanceof DailyComplaint) {
+            $model->syncHandling($data['status'], $request->user()?->id, $previous);
+        }
         $model->save();
         $fresh = $model->fresh(['creator:id,name', 'clearer:id,name']);
 
@@ -729,95 +759,60 @@ class DailyEntryController extends Controller
         $request->merge([
             'start_problem' => $request->filled('start_problem') ? $request->input('start_problem') : null,
             'end_problem' => $request->filled('end_problem') ? $request->input('end_problem') : null,
-            'complaint_type' => $request->input('complaint_type', DailyComplaint::TYPE_INDIVIDUAL),
         ]);
 
-        $type = $request->string('complaint_type')->toString();
-
-        $rules = [
+        $data = $request->validate([
             'report_date' => 'required|date',
-            'complaint_type' => 'required|in:individual,gamas',
             'odc_name' => 'nullable|string|max:255',
             'phone_normalized' => 'nullable|string|max:30',
             'start_problem' => 'nullable|date',
             'end_problem' => 'nullable|date',
             'problem' => 'nullable|string|max:255',
             'action' => 'nullable|string',
-            'status' => 'required|in:On-Progress,Clear',
+            'status' => 'required|in:'.implode(',', ReportStatus::complaintOptions()),
             'shift' => 'nullable|integer|in:1,2,3',
-        ];
-
-        if ($type === DailyComplaint::TYPE_GAMAS) {
-            $rules = [
-                ...$rules,
-                'customer_id' => 'nullable',
-                'customer_code' => 'nullable|string|max:100',
-                'customer_name' => 'nullable|string|max:255',
-                'gamas_kind' => 'required|in:odp,upstream,olt,other',
-                'location_label' => 'required|string|max:255',
-                'impact' => 'nullable|string|max:100',
-            ];
-        } else {
-            $rules = [
-                ...$rules,
-                'customer_id' => 'nullable|integer|exists:customers,id',
-                'customer_code' => 'required|string|max:100',
-                'customer_name' => 'required|string|max:255',
-                'gamas_kind' => 'nullable',
-                'location_label' => 'nullable|string|max:255',
-                'impact' => 'nullable|string|max:100',
-            ];
-        }
-
-        $data = $request->validate($rules);
+            'customer_id' => 'nullable|integer|exists:customers,id',
+            'customer_code' => 'required|string|max:100',
+            'customer_name' => 'required|string|max:255',
+        ]);
 
         $phone = trim((string) ($data['phone_normalized'] ?? ''));
         $data['phone_normalized'] = $phone !== '' ? (PhoneNormalizer::toLocal($phone) ?: $phone) : null;
 
-        if ($data['complaint_type'] === DailyComplaint::TYPE_GAMAS) {
-            $data['customer_id'] = null;
-            $data['customer_code'] = null;
-            $data['phone_normalized'] = null;
-            $location = trim((string) $data['location_label']);
-            $impact = trim((string) ($data['impact'] ?? ''));
-            $data['customer_name'] = $impact !== ''
-                ? "{$location} ({$impact})"
-                : $location;
+        // Gamas sudah modul terpisah (tabel daily_gamas) — komplain selalu tipe individual.
+        $data['gamas_kind'] = null;
+        $data['location_label'] = null;
+        $data['impact'] = null;
+
+        $code = trim((string) ($data['customer_code'] ?? ''));
+        $data['customer_code'] = $code;
+
+        $customer = null;
+        if (! empty($data['customer_id'])) {
+            $customer = Customer::query()->with('odc:id,name')->find($data['customer_id']);
+        }
+        if (! $customer && $code !== '') {
+            $customer = Customer::query()->with('odc:id,name')
+                ->where('customer_code', $code)
+                ->first();
+        }
+
+        if ($customer) {
+            $data['customer_id'] = $customer->id;
+            $data['customer_code'] = $customer->customer_code;
+            if (trim((string) ($data['customer_name'] ?? '')) === '') {
+                $data['customer_name'] = $customer->name;
+            }
+            if (empty($data['odc_name']) && $customer->odc) {
+                $data['odc_name'] = $customer->odc->name;
+            } elseif (empty($data['odc_name']) && $customer->odc_id) {
+                $data['odc_name'] = Odc::query()->whereKey($customer->odc_id)->value('name');
+            }
+            if (empty($data['phone_normalized']) && $customer->phone) {
+                $data['phone_normalized'] = PhoneNormalizer::toLocal($customer->phone) ?: $customer->phone;
+            }
         } else {
-            $data['gamas_kind'] = null;
-            $data['location_label'] = null;
-            $data['impact'] = null;
-
-            $code = trim((string) ($data['customer_code'] ?? ''));
-            $data['customer_code'] = $code;
-
-            $customer = null;
-            if (! empty($data['customer_id'])) {
-                $customer = Customer::query()->with('odc:id,name')->find($data['customer_id']);
-            }
-            if (! $customer && $code !== '') {
-                $customer = Customer::query()->with('odc:id,name')
-                    ->where('customer_code', $code)
-                    ->first();
-            }
-
-            if ($customer) {
-                $data['customer_id'] = $customer->id;
-                $data['customer_code'] = $customer->customer_code;
-                if (trim((string) ($data['customer_name'] ?? '')) === '') {
-                    $data['customer_name'] = $customer->name;
-                }
-                if (empty($data['odc_name']) && $customer->odc) {
-                    $data['odc_name'] = $customer->odc->name;
-                } elseif (empty($data['odc_name']) && $customer->odc_id) {
-                    $data['odc_name'] = Odc::query()->whereKey($customer->odc_id)->value('name');
-                }
-                if (empty($data['phone_normalized']) && $customer->phone) {
-                    $data['phone_normalized'] = PhoneNormalizer::toLocal($customer->phone) ?: $customer->phone;
-                }
-            } else {
-                $data['customer_id'] = null;
-            }
+            $data['customer_id'] = null;
         }
 
         return $data;
@@ -880,37 +875,19 @@ class DailyEntryController extends Controller
     {
         $from = $request->string('from', now()->toDateString())->toString();
         $to = $request->string('to', $from)->toString();
-        $odc = trim($request->string('odc_name')->toString()) ?: null;
-        $search = trim($request->string('search')->toString());
-        $unmapped = $this->isUnmappedOdcFilter($odc);
+        $query = DailyComplaint::query();
+        $this->applyComplaintListFilters($query, $request, $from, $to);
 
-        $rows = DailyComplaint::query()
+        $rows = $query
             ->with(['creator:id,name', 'clearer:id,name'])
-            ->when($search !== '', function ($q) use ($search) {
-                $q->where(function ($inner) use ($search) {
-                    $inner->where('customer_name', 'like', "%{$search}%")
-                        ->orWhere('customer_code', 'like', "%{$search}%")
-                        ->orWhere('problem', 'like', "%{$search}%")
-                        ->orWhere('location_label', 'like', "%{$search}%");
-                });
-            }, function ($q) use ($from, $to, $odc, $unmapped) {
-                $q->whereBetween('report_date', [$from, $to]);
-                if ($unmapped) {
-                    $this->scopeEmptyOdcName($q);
-                } elseif ($odc) {
-                    $q->where('odc_name', $odc);
-                }
-            })
             ->orderBy('report_date')
             ->orderBy('id')
             ->get()
             ->map(fn (DailyComplaint $r) => [
                 $r->report_date?->toDateString(),
-                $r->complaint_type,
                 $r->customer_code,
                 $r->customer_name,
                 $r->odc_name,
-                $r->location_label,
                 $r->problem,
                 $r->action,
                 $r->shift,
@@ -919,13 +896,51 @@ class DailyEntryController extends Controller
                 $r->end_problem?->toDateString(),
                 $r->created_at?->format('H:i'),
                 $r->cleared_at?->format('H:i'),
+                \App\Support\DurationFormat::minutes($r->handling_minutes),
+                $r->performance_category,
+                $r->parent_complaint_id ? 'Ya (#'.$r->parent_complaint_id.')' : null,
                 $r->creator?->name,
                 $r->clearer?->name,
             ]);
 
         return \App\Support\ExcelExport::download(
             'komplain-'.$from.'-'.$to.'.xlsx',
-            ['Tanggal', 'Tipe', 'Kode', 'Nama', 'ODC/Site', 'Lokasi', 'Problem', 'Action', 'Shift', 'Status', 'Start Problem', 'End Problem', 'Jam Open', 'Jam Close', 'Input oleh', 'Clear oleh'],
+            ['Tanggal', 'Kode', 'Nama', 'ODC/Site', 'Problem', 'Action', 'Shift', 'Status', 'Start Problem', 'End Problem', 'Jam Open', 'Jam Close', 'Durasi', 'Kategori Performa', 'Komplain Berulang', 'Input oleh', 'Clear oleh'],
+            $rows,
+        );
+    }
+
+    public function exportComplaintsRecap(Request $request)
+    {
+        $from = $request->string('from', now()->toDateString())->toString();
+        $to = $request->string('to', $from)->toString();
+        $query = DailyComplaint::query()->with('creator:id,name');
+        $this->applyComplaintListFilters($query, $request, $from, $to);
+
+        $rows = $query->get()
+            ->groupBy(fn (DailyComplaint $c) => ($c->created_by ?? 0).'|'.($c->shift ?? 0))
+            ->map(function ($group) {
+                $first = $group->first();
+                $clearAll = $group->filter(fn (DailyComplaint $c) => ReportStatus::isClear($c->status))->count();
+                $sla = ComplaintSla::summary($group);
+
+                return [
+                    $first->creator?->name ?? '—',
+                    $first->shift ? 'Shift '.$first->shift : '—',
+                    $group->count(),
+                    $clearAll,
+                    $group->count() - $clearAll,
+                    $sla['within_60'],
+                    $sla['clear'] - $sla['within_60'],
+                    $sla['percent'] === null ? '—' : $sla['percent'].'%',
+                ];
+            })
+            ->sortBy([0, 1])
+            ->values();
+
+        return \App\Support\ExcelExport::download(
+            'komplain-rekap-'.$from.'-'.$to.'.xlsx',
+            ['NOC', 'Shift', 'Total komplain', 'Clear', 'On-Progress', 'Clear ≤60 menit', 'Clear >60 menit', 'Persentase SLA'],
             $rows,
         );
     }
@@ -934,35 +949,19 @@ class DailyEntryController extends Controller
     {
         $from = $request->string('from', now()->toDateString())->toString();
         $to = $request->string('to', $from)->toString();
-        $odc = trim($request->string('odc_name')->toString()) ?: null;
-        $search = trim($request->string('search')->toString());
-        $unmapped = $this->isUnmappedOdcFilter($odc);
+        $query = DailyComplaint::query();
+        $this->applyComplaintListFilters($query, $request, $from, $to);
 
-        $items = DailyComplaint::query()
+        $sla = $this->complaintSlaForFiltered($query);
+        $items = (clone $query)
             ->with(['creator:id,name', 'clearer:id,name', 'customer:id,name,customer_code,odc_id'])
-            ->when($search !== '', function ($q) use ($search) {
-                // Search global: abaikan filter periode & ODC
-                $q->where(function ($inner) use ($search) {
-                    $inner->where('customer_name', 'like', "%{$search}%")
-                        ->orWhere('customer_code', 'like', "%{$search}%")
-                        ->orWhere('problem', 'like', "%{$search}%")
-                        ->orWhere('location_label', 'like', "%{$search}%");
-                });
-            }, function ($q) use ($from, $to, $odc, $unmapped, $request) {
-                $q->where(fn ($q2) => $this->applyListDateFilter($q2, $request, $from, $to));
-                if ($unmapped) {
-                    $this->scopeEmptyOdcName($q);
-                } elseif ($odc) {
-                    $q->where('odc_name', $odc);
-                }
-            })
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->limit(500)
             ->get()
             ->map(fn (DailyComplaint $c) => $this->complaintSerializer->serialize($c, $from));
 
-        return response()->json(['data' => $items]);
+        return response()->json(['data' => $items, 'sla' => $sla]);
     }
 
     public function listNocUpdates(Request $request): JsonResponse
@@ -1152,6 +1151,62 @@ class DailyEntryController extends Controller
     }
 
     /**
+     * Filter bersama untuk list/KPI/export komplain — periode, ODC, pencarian,
+     * NOC (created_by), shift, dan status memakai semantik yang sama.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\DailyComplaint>  $query
+     */
+    protected function applyComplaintListFilters($query, Request $request, string $from, string $to): void
+    {
+        $odc = trim($request->string('odc_name')->toString()) ?: null;
+        $search = trim($request->string('search')->toString());
+        $unmapped = $this->isUnmappedOdcFilter($odc);
+
+        $query->when($search !== '', function ($q) use ($search) {
+            // Search global: abaikan filter periode & ODC
+            $q->where(function ($inner) use ($search) {
+                $inner->where('customer_name', 'like', "%{$search}%")
+                    ->orWhere('customer_code', 'like', "%{$search}%")
+                    ->orWhere('problem', 'like', "%{$search}%");
+            });
+        }, function ($q) use ($from, $to, $odc, $unmapped, $request) {
+            $q->where(fn ($q2) => $this->applyListDateFilter($q2, $request, $from, $to));
+            if ($unmapped) {
+                $this->scopeEmptyOdcName($q);
+            } elseif ($odc) {
+                $q->where('odc_name', $odc);
+            }
+        });
+
+        $userId = $request->input('user_id');
+        if (is_numeric($userId) && (int) $userId > 0) {
+            $query->where('created_by', (int) $userId);
+        }
+
+        $shift = $request->input('shift');
+        if (is_numeric($shift) && in_array((int) $shift, [1, 2, 3], true)) {
+            $query->where('shift', (int) $shift);
+        }
+
+        $status = trim($request->string('status')->toString());
+        if (in_array($status, ReportStatus::complaintOptions(), true)) {
+            $query->where('status', $status);
+        }
+    }
+
+    /**
+     * SLA memakai aturan bersama (App\Support\ComplaintSla): hanya Clear dengan
+     * handling_minutes valid. Tidak menulis/mengubah data historis.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\DailyComplaint>  $query
+     * @return array{clear: int, within_60: int, percent: float|null}
+     */
+    protected function complaintSlaForFiltered($query): array
+    {
+        return ComplaintSla::summary((clone $query)->get(['status', 'handling_minutes']));
+    }
+
+    /**
      * Sama dengan DashboardController: strip suffix (…), lowercase.
      */
     protected function normalizeLookupName(string $value): string
@@ -1317,12 +1372,76 @@ class DailyEntryController extends Controller
         );
     }
 
-    protected function assertComplaintActionForClear(?string $action): void
+    protected function assertComplaintActionForClear(?string $action, string $status = ReportStatus::CLEAR): void
     {
         if (trim((string) $action) === '') {
             throw ValidationException::withMessages([
-                'action' => 'Action/perbaikan wajib diisi sebelum status Clear.',
+                'action' => "Action/perbaikan wajib diisi sebelum status {$status}.",
             ]);
+        }
+    }
+
+    protected function assertComplaintOwner(DailyComplaint $complaint, ?int $userId, string $message): void
+    {
+        if ((int) ($complaint->created_by ?? 0) !== (int) ($userId ?? 0)) {
+            abort(403, $message);
+        }
+    }
+
+    /** Hanya pembuat komplain (created_by) yang boleh mengubah status komplain. */
+    protected function assertCanChangeComplaintStatus(
+        DailyComplaint $complaint,
+        ?int $userId,
+        string $newStatus,
+        ?string $previousStatus = null,
+    ): void {
+        if ($newStatus === $previousStatus) {
+            return;
+        }
+
+        if ((int) ($complaint->created_by ?? 0) !== (int) ($userId ?? 0)) {
+            $message = $newStatus === ReportStatus::CLEAR
+                ? 'Hanya pembuat komplain yang dapat melakukan Clear.'
+                : 'Hanya pembuat komplain yang dapat mengubah status komplain.';
+            abort(403, $message);
+        }
+    }
+
+    /**
+     * Komplain berulang: hubungkan otomatis ke komplain sebelumnya dari pelanggan
+     * yang sama dalam 24 jam terakhir (riwayat gangguan tetap tersimpan per rantai/grup).
+     * Gamas sudah modul terpisah dan tidak ikut relasi ini.
+     */
+    protected function attachRepeatRelation(DailyComplaint $item): void
+    {
+        $since = now()->subHours(DailyComplaint::REPEAT_WINDOW_HOURS);
+
+        $previous = DailyComplaint::query()
+            ->where('created_at', '>=', $since)
+            ->when($item->getKey(), fn ($q) => $q->whereKeyNot($item->getKey()))
+            ->where('complaint_type', DailyComplaint::TYPE_INDIVIDUAL)
+            ->where(function ($q2) use ($item) {
+                if ($item->customer_id) {
+                    $q2->orWhere('customer_id', $item->customer_id);
+                }
+                if (trim((string) $item->customer_code) !== '') {
+                    $q2->orWhere('customer_code', $item->customer_code);
+                }
+                if ($item->phone_normalized) {
+                    $q2->orWhere('phone_normalized', $item->phone_normalized);
+                }
+                if (trim((string) $item->customer_name) !== '') {
+                    $q2->orWhereRaw('LOWER(TRIM(customer_name)) = ?', [
+                        mb_strtolower(trim((string) $item->customer_name)),
+                    ]);
+                }
+            })
+            ->orderByDesc('id')
+            ->first();
+
+        if ($previous) {
+            $item->parent_complaint_id = $previous->id;
+            $item->complaint_group_id = $previous->complaint_group_id ?? $previous->id;
         }
     }
 }

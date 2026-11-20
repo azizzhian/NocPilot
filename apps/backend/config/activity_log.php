@@ -23,6 +23,7 @@ return [
         'customer',
         'ticket',
         'complaint',
+        'gamas',
         'activation',
         'cctv',
         'dismantle',

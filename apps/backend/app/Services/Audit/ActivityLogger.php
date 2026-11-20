@@ -16,12 +16,13 @@ class ActivityLogger
         ?Request $request = null,
         ?Model $subject = null,
         ?array $meta = null,
+        ?string $actorName = null,
     ): ActivityLog {
         $agent = $request?->userAgent() ?? '';
 
         return ActivityLog::create([
             'user_id' => $user?->id,
-            'user_name' => $user?->name ?? 'System',
+            'user_name' => $actorName ?? $user?->name ?? 'System',
             'type' => $type,
             'action' => $action,
             'subject_type' => $subject ? $subject::class : null,

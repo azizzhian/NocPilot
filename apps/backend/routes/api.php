@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\AlertController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\GenerateReportController;
+use App\Http\Controllers\Api\GamasController;
+use App\Http\Controllers\Api\GamasEventsController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\DailyEntryController;
 use App\Http\Controllers\Api\DailyEntryEventsController;
@@ -83,6 +85,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/customers/search', [DailyEntryController::class, 'searchCustomers']);
             Route::get('/complaint-history', [DailyEntryController::class, 'complaintHistory']);
             Route::get('/export/complaints', [DailyEntryController::class, 'exportComplaints']);
+            Route::get('/export/complaints-recap', [DailyEntryController::class, 'exportComplaintsRecap']);
             Route::get('/export/noc-updates', [DailyEntryController::class, 'exportNocUpdates']);
             Route::get('/export/activations', [DailyEntryController::class, 'exportActivations']);
             Route::get('/list/complaints', [DailyEntryController::class, 'listComplaints']);
@@ -101,6 +104,20 @@ Route::prefix('v1')->group(function () {
             Route::put('/noc-update/{dailyNocUpdate}', [DailyEntryController::class, 'updateNocUpdate']);
             Route::delete('/{type}/{id}', [DailyEntryController::class, 'destroy']);
             Route::patch('/{type}/{id}/status', [DailyEntryController::class, 'updateStatus']);
+        });
+
+        // Gamas (gangguan massal) — modul terpisah dari komplain
+        Route::prefix('gamas')->group(function () {
+            Route::get('/events', [GamasEventsController::class, 'index']);
+            Route::get('/stats', [GamasController::class, 'stats']);
+            Route::get('/export', [GamasController::class, 'export']);
+            Route::get('/', [GamasController::class, 'index']);
+            Route::post('/', [GamasController::class, 'store']);
+            Route::get('/{dailyGamas}/updates', [GamasController::class, 'updates']);
+            Route::post('/{dailyGamas}/updates', [GamasController::class, 'storeUpdate']);
+            Route::put('/{dailyGamas}', [GamasController::class, 'update']);
+            Route::patch('/{dailyGamas}/status', [GamasController::class, 'updateStatus']);
+            Route::delete('/{dailyGamas}', [GamasController::class, 'destroy']);
         });
 
         // Activity & Realtime

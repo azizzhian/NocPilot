@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
 import { cn } from '@/lib/utils'
 
 const props = withDefaults(
@@ -21,16 +21,24 @@ const hideAfterMs = computed(() => {
 
 let timer: ReturnType<typeof setTimeout> | undefined
 
-onMounted(() => {
+function clearTimer() {
+  if (timer) {
+    clearTimeout(timer)
+    timer = undefined
+  }
+}
+
+function startTimer() {
+  clearTimer()
   const ms = hideAfterMs.value
-  if (ms > 0) {
+  if (ms > 0 && props.message.trim() !== '') {
     timer = setTimeout(() => emit('dismiss'), ms)
   }
-})
+}
 
-onBeforeUnmount(() => {
-  if (timer) clearTimeout(timer)
-})
+watch([() => props.message, hideAfterMs], startTimer, { immediate: true })
+
+onBeforeUnmount(clearTimer)
 
 const variantClass = {
   success: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/90 dark:text-emerald-200',
@@ -42,6 +50,7 @@ const variantClass = {
 <template>
   <Teleport to="body">
     <div
+      v-if="message"
       role="alert"
       :class="cn(
         'pointer-events-none fixed left-1/2 top-4 z-[100] w-[min(92vw,32rem)] -translate-x-1/2 rounded-xl border px-4 py-3 text-sm shadow-lg',
