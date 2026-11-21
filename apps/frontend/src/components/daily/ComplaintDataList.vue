@@ -9,7 +9,13 @@ import {
 import Button from '@/components/ui/Button.vue'
 import ComplaintHistoryPanel from '@/components/daily/ComplaintHistoryPanel.vue'
 import { useAuthStore } from '@/stores/auth'
-import { formatDuration } from '@/lib/utils'
+import { serverNow } from '@/lib/api'
+import {
+  complaintClearRemainingSeconds,
+  formatCountdown,
+  formatDuration,
+  isComplaintClearTooYoung,
+} from '@/lib/utils'
 import {
   Calendar,
   Check,
@@ -169,6 +175,38 @@ function waitingLeft(item: DailyEntryItem) {
   return Math.max(0, Math.ceil((due - nowTick.value) / 60_000))
 }
 
+/** Tick 1 detik untuk countdown minimum umur Clear (waktu server via header Date). */
+const clearTick = ref(serverNow())
+let clearTimer: ReturnType<typeof setInterval> | null = null
+const hasYoungComplaint = computed(() =>
+  props.items.some((i) => isComplaintClearTooYoung(i, clearTick.value)),
+)
+
+watch(
+  hasYoungComplaint,
+  (active) => {
+    if (active && !clearTimer) {
+      clearTick.value = serverNow()
+      clearTimer = setInterval(() => {
+        clearTick.value = serverNow()
+      }, 1000)
+    } else if (!active && clearTimer) {
+      clearInterval(clearTimer)
+      clearTimer = null
+    }
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  if (clearTimer) clearInterval(clearTimer)
+})
+
+function clearHint(item: DailyEntryItem): string {
+  const remaining = complaintClearRemainingSeconds(item.created_at, clearTick.value)
+  if (remaining === null) return 'Clear belum tersedia (waktu input tidak valid)'
+  return `Clear tersedia dalam ${formatCountdown(remaining)}`
+}
+
 function performanceClass(category?: string | null) {
   switch (category) {
     case 'Cepat':
@@ -312,6 +350,14 @@ function isComplaintLocked(item: DailyEntryItem): boolean {
 }
 
 function statusPillTitle(item: DailyEntryItem, status: string): string {
+  if (status === 'Clear' && !isComplaintLocked(item)) {
+    if (complaintClearRemainingSeconds(item.created_at, clearTick.value) === null) {
+      return 'Waktu input komplain tidak valid. Komplain belum dapat di-Clear.'
+    }
+    if (isComplaintClearTooYoung(item, clearTick.value)) {
+      return 'Komplain harus berusia minimal 5 menit sebelum dapat di-Clear.'
+    }
+  }
   if (!isComplaintLocked(item)) return `Ubah status menjadi ${status}`
   return status === 'Clear'
     ? 'Hanya pembuat komplain yang dapat melakukan Clear.'
@@ -320,6 +366,7 @@ function statusPillTitle(item: DailyEntryItem, status: string): string {
 
 function onStatusPill(item: DailyEntryItem, status: string) {
   if (isStatusBusy(item) || item.status === status || isComplaintLocked(item)) return
+  if (status === 'Clear' && isComplaintClearTooYoung(item, serverNow())) return
   if (!item.action?.trim()) {
     if (status === 'Clear') {
       // Clear tanpa Action → popup khusus isi Action (bukan form Edit penuh).
@@ -529,13 +576,21 @@ watch(
                         type="button"
                         class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                         :class="item.status === s.status ? s.active : 'border border-border text-muted hover:border-foreground/40 hover:text-foreground'"
-                        :disabled="isStatusBusy(item) || isComplaintLocked(item)"
+                        :disabled="isStatusBusy(item) || isComplaintLocked(item) || (s.status === 'Clear' && isComplaintClearTooYoung(item, clearTick))"
                         :aria-pressed="item.status === s.status"
                         @click.stop="onStatusPill(item, s.status)"
                       >
                         <Lock v-if="isComplaintLocked(item)" class="h-3 w-3" />
                         {{ s.label }}
                       </button>
+                    </span>
+                    <span
+                      v-if="isComplaintClearTooYoung(item, clearTick)"
+                      class="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning"
+                      :title="statusPillTitle(item, 'Clear')"
+                    >
+                      <Timer class="h-3 w-3" />
+                      {{ clearHint(item) }}
                     </span>
                   </div>
                   <p class="break-words text-sm text-muted">{{ locationLine(item) }}</p>
@@ -706,13 +761,21 @@ watch(
                         type="button"
                         class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                         :class="item.status === s.status ? s.active : 'border border-border text-muted hover:border-foreground/40 hover:text-foreground'"
-                        :disabled="isStatusBusy(item) || isComplaintLocked(item)"
+                        :disabled="isStatusBusy(item) || isComplaintLocked(item) || (s.status === 'Clear' && isComplaintClearTooYoung(item, clearTick))"
                         :aria-pressed="item.status === s.status"
                         @click.stop="onStatusPill(item, s.status)"
                       >
                         <Lock v-if="isComplaintLocked(item)" class="h-3 w-3" />
                         {{ s.label }}
                       </button>
+                    </span>
+                    <span
+                      v-if="isComplaintClearTooYoung(item, clearTick)"
+                      class="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning"
+                      :title="statusPillTitle(item, 'Clear')"
+                    >
+                      <Timer class="h-3 w-3" />
+                      {{ clearHint(item) }}
                     </span>
                   </div>
                   <p class="break-words text-sm text-muted">{{ locationLine(item) }}</p>

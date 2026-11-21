@@ -234,8 +234,11 @@ class ComplaintClearOwnershipTest extends TestCase
             'action' => 'Sudah ditangani',
         ], $extra));
         DB::table('daily_complaints')->where('id', $complaint->id)
-            ->update(['report_date' => today()->toDateString()]);
+            ->update([
+                'report_date' => today()->toDateString(),
+                'created_at' => now()->subMinutes(10),
+            ]);
 
-        return $complaint;
+        return $complaint->refresh();
     }
 }

@@ -403,8 +403,10 @@ class DailyEntryController extends Controller
         if ($data['status'] !== ReportStatus::ON_PROGRESS) {
             $this->assertComplaintActionForClear($data['action'] ?? null, $data['status']);
         }
-        if ($data['status'] === ReportStatus::CLEAR && empty($data['end_problem'])) {
-            $data['end_problem'] = today()->toDateString();
+        if ($data['status'] === ReportStatus::CLEAR) {
+            throw ValidationException::withMessages([
+                'status' => 'Komplain baru tidak dapat langsung di-Clear. Minimal waktu penanganan adalah 5 menit.',
+            ]);
         }
         $item = new DailyComplaint([...$data, 'created_by' => $request->user()->id]);
         $this->attachRepeatRelation($item);
@@ -443,6 +445,9 @@ class DailyEntryController extends Controller
         }
         $previous = $dailyComplaint->status;
         $this->assertCanChangeComplaintStatus($dailyComplaint, $request->user()?->id, $data['status'], $previous);
+        if ($data['status'] === ReportStatus::CLEAR && $previous !== ReportStatus::CLEAR) {
+            $this->assertComplaintMinimumAgeForClear($dailyComplaint);
+        }
         $dailyComplaint->fill($data);
         $dailyComplaint->syncClearAttribution($data['status'], $request->user()->id, $previous);
         $dailyComplaint->syncHandling($data['status'], $request->user()->id, $previous);
@@ -547,6 +552,9 @@ class DailyEntryController extends Controller
             }
             if ($type === 'complaint') {
                 $this->assertComplaintActionForClear($model->action);
+                if ($previous !== ReportStatus::CLEAR && $model instanceof DailyComplaint) {
+                    $this->assertComplaintMinimumAgeForClear($model);
+                }
                 if (! $model->end_problem) {
                     $model->end_problem = today();
                 }
@@ -1377,6 +1385,30 @@ class DailyEntryController extends Controller
         if (trim((string) $action) === '') {
             throw ValidationException::withMessages([
                 'action' => "Action/perbaikan wajib diisi sebelum status {$status}.",
+            ]);
+        }
+    }
+
+    /** Clear manual hanya boleh setelah MIN_CLEAR_AGE_SECONDS detik sejak created_at. */
+    protected function assertComplaintMinimumAgeForClear(DailyComplaint $complaint): void
+    {
+        try {
+            $createdAt = $complaint->created_at;
+        } catch (\Throwable) {
+            $createdAt = null;
+        }
+
+        if (! $createdAt instanceof Carbon || $createdAt->getTimestamp() <= 0) {
+            throw ValidationException::withMessages([
+                'created_at' => 'Waktu input komplain tidak ditemukan atau tidak valid. Komplain belum dapat di-Clear.',
+            ]);
+        }
+
+        $ageSeconds = now()->getTimestamp() - $createdAt->getTimestamp();
+
+        if ($ageSeconds < DailyComplaint::MIN_CLEAR_AGE_SECONDS) {
+            throw ValidationException::withMessages([
+                'created_at' => 'Komplain belum dapat di-Clear. Minimal waktu penanganan adalah 5 menit.',
             ]);
         }
     }

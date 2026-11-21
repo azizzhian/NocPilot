@@ -24,7 +24,8 @@ import { useDailyEntryPoll, type DailyEntryRealtimeEvent } from '@/composables/u
 import { useAuthStore } from '@/stores/auth'
 import { toDateInput, todayInput, formatTimeId } from '@/lib/date-input'
 import { parseActivationText } from '@/lib/parse-activation-text'
-import { cn } from '@/lib/utils'
+import { cn, complaintClearRemainingSeconds, isComplaintClearTooYoung } from '@/lib/utils'
+import { serverNow } from '@/lib/api'
 import { Pencil, Trash2, Plus, Download, FileText, Clock, Check } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -296,6 +297,36 @@ const complaintStatusOptions = computed(
 
 const CLEAR_OWNER_MESSAGE = 'Hanya pembuat komplain yang dapat melakukan Clear.'
 const STATUS_OWNER_MESSAGE = 'Hanya pembuat komplain yang dapat mengubah status komplain.'
+const CLEAR_AGE_MESSAGE = 'Komplain harus berusia minimal 5 menit sebelum dapat di-Clear.'
+const CLEAR_TIME_INVALID_MESSAGE = 'Waktu input komplain tidak valid. Komplain belum dapat di-Clear.'
+const CLEAR_NEW_MESSAGE = 'Komplain baru tidak dapat langsung di-Clear. Minimal waktu penanganan adalah 5 menit.'
+
+function clearAgeBlockMessage(item: DailyEntryItem, nowMs: number = serverNow()): string | null {
+  if (item.status === 'Clear') return null
+  if (complaintClearRemainingSeconds(item.created_at, nowMs) === null) return CLEAR_TIME_INVALID_MESSAGE
+  return isComplaintClearTooYoung(item, nowMs) ? CLEAR_AGE_MESSAGE : null
+}
+
+const clearFormTick = ref(serverNow())
+let clearFormTimer: ReturnType<typeof setInterval> | null = null
+watch(
+  () => formModalOpen.value && activeTab.value === 'complaint',
+  (active) => {
+    if (active && !clearFormTimer) {
+      clearFormTick.value = serverNow()
+      clearFormTimer = setInterval(() => {
+        clearFormTick.value = serverNow()
+      }, 1000)
+    } else if (!active && clearFormTimer) {
+      clearInterval(clearFormTimer)
+      clearFormTimer = null
+    }
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  if (clearFormTimer) clearInterval(clearFormTimer)
+})
 
 function isComplaintOwner(item: DailyEntryItem): boolean {
   const ownerId = item.created_by
@@ -312,6 +343,11 @@ const canChangeStatus = computed(() =>
 const canSubmitStatusChange = computed(() =>
   canChangeStatus.value || editingComplaint.value?.status === complaintForm.status,
 )
+const clearFormBlockMessage = computed(() => {
+  if (activeTab.value !== 'complaint') return null
+  if (!editingComplaintId.value) return CLEAR_NEW_MESSAGE
+  return editingComplaint.value ? clearAgeBlockMessage(editingComplaint.value, clearFormTick.value) : null
+})
 
 /** Komplain dalam rentang yang sedang menunggu konfirmasi pelanggan (auto-clear 30 mnt). */
 const complaintWaitingCount = computed(() => {
@@ -810,6 +846,11 @@ function openActionClear(id: number) {
     error.value = CLEAR_OWNER_MESSAGE
     return
   }
+  const ageBlock = clearAgeBlockMessage(item)
+  if (ageBlock) {
+    error.value = ageBlock
+    return
+  }
   actionClearItem.value = item
   actionClearText.value = item.action ?? ''
   actionClearError.value = ''
@@ -831,6 +872,11 @@ async function submitActionClear() {
   if (!item) return
   if (!isComplaintOwner(item)) {
     actionClearError.value = CLEAR_OWNER_MESSAGE
+    return
+  }
+  const ageBlock = clearAgeBlockMessage(item)
+  if (ageBlock) {
+    actionClearError.value = ageBlock
     return
   }
   const action = actionClearText.value.trim()
@@ -885,6 +931,17 @@ async function submitComplaint() {
   ) {
     error.value = `Action/perbaikan wajib diisi sebelum status ${complaintForm.status}.`
     return
+  }
+  if (!editingComplaintId.value && complaintForm.status === 'Clear') {
+    error.value = CLEAR_NEW_MESSAGE
+    return
+  }
+  if (editingComplaintId.value && complaintForm.status === 'Clear' && editingComplaint.value) {
+    const ageBlock = clearAgeBlockMessage(editingComplaint.value)
+    if (ageBlock) {
+      error.value = ageBlock
+      return
+    }
   }
   if (!complaintForm.customer_code.trim() || !complaintForm.customer_name.trim()) {
     error.value = 'Komplain wajib isi Nama dan ID Pelanggan.'
@@ -1025,6 +1082,17 @@ async function markItemClear(type: string, id: number) {
 }
 
 async function setItemStatus(type: string, id: number, status: string) {
+  if (type === 'complaint' && status === 'Clear') {
+    const item = data.value?.complaints.find(c => c.id === id)
+    if (item) {
+      const ageBlock = clearAgeBlockMessage(item)
+      if (ageBlock) {
+        error.value = ageBlock
+        showToast(ageBlock, 'error')
+        return
+      }
+    }
+  }
   try {
     const res = await dailyEntryApi.updateStatus(type, id, status)
 
@@ -1037,6 +1105,7 @@ async function setItemStatus(type: string, id: number, status: string) {
   } catch (e: unknown) {
     const err = e as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } }
     error.value = err.response?.data?.errors?.action?.[0]
+      ?? err.response?.data?.errors?.created_at?.[0]
       ?? err.response?.data?.message
       ?? 'Gagal memperbarui status.'
     showToast(error.value, 'error')
@@ -1643,9 +1712,15 @@ onUnmounted(stopPoll)
         <div :title="canChangeStatus ? undefined : STATUS_OWNER_MESSAGE">
           <label class="mb-1.5 block text-sm font-medium text-foreground">Status</label>
           <Select v-model="complaintForm.status" :disabled="!canChangeStatus">
-            <option v-for="s in complaintStatusOptions" :key="s" :value="s">{{ s }}</option>
+            <option
+              v-for="s in complaintStatusOptions"
+              :key="s"
+              :value="s"
+              :disabled="s === 'Clear' && Boolean(clearFormBlockMessage)"
+            >{{ s }}</option>
           </Select>
           <p v-if="!canChangeStatus" class="mt-1 text-[11px] text-muted">{{ STATUS_OWNER_MESSAGE }}</p>
+          <p v-else-if="clearFormBlockMessage" class="mt-1 text-[11px] text-muted">{{ clearFormBlockMessage }}</p>
         </div>
         <div class="flex gap-2">
           <Button type="submit" :disabled="saving">{{ editingComplaintId ? 'Simpan Perubahan' : 'Simpan Komplain' }}</Button>

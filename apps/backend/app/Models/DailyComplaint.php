@@ -23,6 +23,9 @@ class DailyComplaint extends Model
     /** Timer auto-clear status Menunggu Konfirmasi (menit). */
     public const WAITING_CONFIRMATION_MINUTES = 30;
 
+    /** Umur minimum komplain (detik) sebelum boleh di-Clear secara manual. */
+    public const MIN_CLEAR_AGE_SECONDS = 300;
+
     /** Kategori performa penanganan (durasi sejak input sampai clear). */
     public const PERFORMANCE_CATEGORIES = ['Cepat', 'Lambat', 'Cukup Lambat', 'Sangat Lambat'];
 

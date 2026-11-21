@@ -2,6 +2,8 @@ import axios from 'axios'
 
 const TOKEN_KEY = 'nocpilot_token'
 
+let serverClockOffsetMs = 0
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? '/api/v1',
   headers: {
@@ -19,7 +21,16 @@ api.interceptors.request.use((config) => {
 })
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const dateHeader = response.headers?.['date']
+    if (typeof dateHeader === 'string') {
+      const serverMs = Date.parse(dateHeader)
+      if (!Number.isNaN(serverMs)) {
+        serverClockOffsetMs = serverMs - Date.now()
+      }
+    }
+    return response
+  },
   (error) => {
     const message = error.response?.data?.message
     if (typeof message === 'string' && message.includes('SQLSTATE')) {
@@ -34,5 +45,10 @@ api.interceptors.response.use(
     return Promise.reject(error)
   },
 )
+
+/** Waktu server (ms) — offset diambil dari header Date respons API. */
+export function serverNow(): number {
+  return Date.now() + serverClockOffsetMs
+}
 
 export default api

@@ -107,9 +107,16 @@ Hampir semua list/dashboard punya filter ODC. Nilai `__none__` atau `Tanpa ODC` 
 ### Alur komplain & performa penanganan (2026-11-19)
 - Status komplain: `On-Progress` → **`Menunggu Konfirmasi`** (NOC klik "Tandai Selesai", wajib isi `action`) → `Clear` (manual) atau **auto-clear 30 menit** oleh command `complaint:auto-clear` (jadwal `everyMinute`). Tipe lain tetap hanya `On-Progress`/`Clear` (`ReportStatus::options()` vs `complaintOptions()`).
 - Durasi penilaian = `created_at` → `cleared_at` (**termasuk** jeda menunggu konfirmasi), disimpan di `handling_minutes` + `performance_category`: 1–30 **Cepat**, 31–40 **Lambat**, 41–60 **Cukup Lambat**, >60 **Sangat Lambat** (`DailyComplaint::performanceCategoryFor`). Keluar dari Clear → metrik di-reset.
-- Auto-clear memakai `handled_by` sebagai `cleared_by` (jangan biarkan `cleared_at` null — semua query clear berbasis `cleared_at`) + `auto_cleared = true`.
+- Auto-clear adalah aksi sistem: `cleared_by = null`, `cleared_at = now()` eksplisit, `auto_cleared = true`, activity log `user_name = 'System / Scheduler'` + `meta.source = 'scheduler'` (jangan memakai `handled_by`/`created_by` sebagai pelaku). Manual Clear tetap mencatat ID pembuat yang melakukan Clear.
 - Komplain berulang: otomatis saat `storeComplaint` — komplain terakhir (individu: customer_id/code/phone/nama sama) dalam **24 jam** → `parent_complaint_id` + `complaint_group_id`.
 - Item `Menunggu Konfirmasi` = **open** (ikut carry-over & hitungan open). Widget dashboard "Performa Komplain" digate `dashboard.widget.complaint_performance`.
+
+### Minimum umur Clear manual (2026-11-21)
+- Transisi **bukan Clear → Clear** (manual) hanya boleh setelah **`created_at` berusia ≥ 300 detik** (presisi detik: 4m59s ditolak, tepat 5m diizinkan). Sumber waktu: `now()` backend; frontend memakai offset dari header HTTP `Date` (`serverNow()` di `lib/api.ts`), fallback `Date.now()`.
+- `created_at` kosong/tidak valid → **tolak 422** (`errors.created_at`), jangan menganggap sudah memenuhi umur. Tidak ada fallback ke `report_date`.
+- Aturan hanya di `DailyEntryController` (`assertComplaintMinimumAgeForClear`, dipanggil di `updateStatus` & `updateComplaint`). Edit komplain yang **sudah Clear** (no-op status) tidak divalidasi umur lagi.
+- `storeComplaint` juga menolak 422 (`errors.status`) bila komplain baru dibuat langsung dengan status **Clear** (komplain baru selalu berumur ~0 detik). Auto-clear scheduler, `syncHandling`/`syncClearAttribution`, Gamas, dan modul lain tidak terkena guard ini.
+- Prioritas error manual: **403 pembuat** → **422 Action wajib** → **422 umur**. Tombol pill Clear & opsi Clear di form Edit dinonaktifkan dengan countdown mm:ss + tooltip; backend tetap memvalidasi (bukan hanya frontend).
 
 ### Gamas (2026-11-20)
 - Gamas **bukan komplain**: datanya di tabel `daily_gamas`, menu `/gamas` (permission `gamas.view`), channel realtime `gamas`, section report `gamas`. Komplain selalu `complaint_type = individual`.
@@ -148,6 +155,7 @@ Hampir semua list/dashboard punya filter ODC. Nilai `__none__` atau `Tanpa ODC` 
 - **2026-09-19** — ODC dipetakan lewat OLT (`olts.odc_id`) dan tabel `locations` (alias lokasi → ODC), bukan teks bebas.
 - **2026-09-22** — `olt_name` wajib diisi saat input Aktivasi supaya aktivasi selalu bisa dipetakan ke ODC.
 - **2026-11-20** — Gamas dipisah dari Komplain: tabel sendiri `daily_gamas`, permission `gamas.view`, menu `/gamas`; komplain selalu individu. Alur gamas sederhana On-Progress/Clear.
+- **2026-11-21** — Clear manual komplain wajib berusia ≥5 menit sejak `created_at` (presisi detik). Validasi backend di `DailyEntryController` (termasuk store dengan status Clear), countdown frontend memakai offset header `Date`; auto-clear tidak terkena aturan ini.
 
 ## 8. Utang teknis yang diketahui
 

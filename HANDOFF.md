@@ -4,7 +4,7 @@ Catatan tugas yang **sedang berjalan**, dipakai bergantian oleh Cursor dan OpenC
 Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan oleh `/worklog` saat tugas tuntas
 (ringkasannya dipindah ke `CHANGELOG.md`). Keputusan permanen ditulis di `AGENTS.md`, bukan di sini.
 
-- **Terakhir diperbarui**: 2026-11-20 oleh OpenCode
+- **Terakhir diperbarui**: 2026-11-21 oleh OpenCode
 - **Commit dasar**: `f7d4ca9` (Required OLT)
 
 ## Tugas sekarang
@@ -35,6 +35,13 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 - Favorit sidebar kini **global & bisa dibuka semua role** (admin mengontrol lewat `/settings`).
 
 ## Sudah selesai
+
+- **Minimum umur 5 menit sebelum Clear komplain** (permintaan user, 2026-11-21) — kode **selesai & terverifikasi otomatis**:
+  - Aturan hanya untuk **transisi bukan Clear → Clear** di PATCH status & PUT complaint; edit komplain yang sudah Clear (no-op status) tidak divalidasi umur lagi. `storeComplaint` juga menolak 422 (`errors.status`) bila komplain baru dibuat langsung dengan status Clear.
+  - Presisi **detik**: `getTimestamp()` selisih < 300 ditolak; tepat 300 diizinkan. `created_at` kosong/tidak valid → 422 `errors.created_at` dengan pesan khusus (try/catch saat akses cast). Sumber waktu backend `now()`.
+  - Helper `DailyEntryController::assertComplaintMinimumAgeForClear` dipanggil di `updateStatus` (setelah Action) & `updateComplaint` (setelah Action, sebelum guard status). Prioritas: 403 pembuat → 422 Action → 422 umur. Auto-clear, `syncHandling`, `syncClearAttribution`, activity log, Gamas tidak tersentuh.
+  - Frontend: `serverNow()` (offset header `Date` di interceptor `lib/api.ts`, fallback `Date.now()`), helper `formatCountdown`/`complaintClearRemainingSeconds`/`isComplaintClearTooYoung` di `lib/utils.ts`, ticker 1 detik di `ComplaintDataList` (data & carry-over) dengan teks "Clear tersedia dalam mm:ss" + tooltip, opsi Clear di form Edit `InputHarianView` dinonaktifkan dengan countdown (ticker aktif saat modal komplain terbuka), guard defense-in-depth di `openActionClear`/`submitActionClear`/`setItemStatus`/`submitComplaint`.
+  - Verifikasi aktual: `composer test --working-dir=apps/backend` → **32 lolos / 185 assertions** (10 test baru di `ComplaintClearMinimumAgeTest` + backdate `makeComplaint` di `ComplaintClearOwnershipTest`); `npm run build:web` → **lolos** (`vue-tsc --noEmit` + Vite build, hanya warning lama dari dependency). Tidak ada endpoint/migration/kolom baru.
 
 - **Pembatasan Clear Komplain hanya untuk pembuat** (permintaan user, 2026-11-20):
   - Backend `DailyEntryController`: helper `assertCanChangeComplaintStatus` dipanggil di `updateStatus` (PATCH) **dan** `updateComplaint` (PUT) — 403 bila `created_by` ≠ `auth()->id()` saat **transisi status apa pun** (On-Progress / Menunggu Konfirmasi / Clear); helper `assertComplaintOwner` juga dipakai di `updateComplaint` (edit field apa pun) dan `destroy` (hapus) → 403 untuk non-pembuat. Perbandingan ID numerik, bukan nama; admin tidak dikecualikan.
@@ -77,6 +84,7 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 
 ## Langkah berikutnya
 
+- **Verifikasi manual minimum umur Clear komplain**: buka `/komplain` → komplain baru (Action terisi) menampilkan pill Clear disabled + "Clear tersedia dalam mm:ss" & tooltip, countdown turun tiap detik (data hari ini & carry-over), otomatis aktif tepat setelah 5 menit tanpa reload. Form **Tambah Komplain**: opsi Clear selalu disabled + pesan "Komplain baru tidak dapat langsung di-Clear..."; kirim status Clear via Postman → 422 `errors.status`. Klik Clear sebelum 5 menit → tidak ada request; coba PATCH/PUT via Postman → 422 dengan pesan "Komplain belum dapat di-Clear. Minimal waktu penanganan adalah 5 menit."; Action kosong → popup "Action Wajib Diisi" tetap muncul (prioritas error Action); form Edit komplain muda → opsi Clear disabled + pesan; komplain yang sudah Clear tetap bisa diedit; petugas lain/auto-clear 30 menit tidak berubah.
 - **Verifikasi manual pembatasan Clear komplain**: login sebagai pembuat → pill Clear aktif & berhasil Clear; login sebagai petugas lain/admin → pill Clear ada ikon gembok, tooltip tampil, klik tidak berfungsi; buka form Edit komplain orang lain → opsi Clear disabled + pesan; coba PATCH/PUT status Clear via API dengan user lain → 403; coba ubah ke On-Progress/Menunggu Konfirmasi dengan user lain → 403; auto-clear 30 menit tetap jalan & activity log menunjukkan "System / Scheduler" (bukan nama pembuat).
 - **Verifikasi manual KPI SLA Dashboard**: buka Dashboard → kartu "Persen Komplain (SLA ≤ 60 menit)" di bagian Performa Komplain menampilkan `X% (within/clear)`; ubah periode, NOC, Shift → angka kartu, KPI lain, dan tabel ikut berubah; klik Refresh → angka tetap sinkron; bandingkan dengan kartu SLA di `/komplain` untuk filter yang sama (should identik). Warna: ≥90 hijau, 70–89 oranye, <70 merah, kosong → `—`.
 - **Verifikasi manual filter/KPI/export komplain**: buka `/komplain` → pilih NOC, Shift, Status, periode → KPI (termasuk "Persen Komplain (≤ 60 menit)"), kartu, dan tabel ikut berubah; tombol "Excel" menghasilkan detail sesuai filter; tombol "Rekap NOC/Shift" menghasilkan baris per kombinasi NOC×Shift dengan kolom sesuai permintaan; kosongkan Clear → KPI SLA tampil `—`.
@@ -101,6 +109,12 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 - (Perlu keputusan) Karena API jaringan tidak ber-middleware permission, noc yang membuka favorit OLT otomatis bisa **tambah/edit/hapus** data OLT. Bila ingin read-only, perlu gate tambahan (`network.manage`) di UI.
 
 ## File disentuh
+
+- **Minimum umur Clear komplain (2026-11-21)**:
+  - `apps/backend/app/Models/DailyComplaint.php` (konstanta `MIN_CLEAR_AGE_SECONDS`), `app/Http/Controllers/Api/DailyEntryController.php` (`assertComplaintMinimumAgeForClear` + pemanggilan di `updateStatus`/`updateComplaint`)
+  - `apps/backend/tests/Feature/ComplaintClearMinimumAgeTest.php` (baru, 9 test), `tests/Feature/ComplaintClearOwnershipTest.php` (backdate `created_at` di helper)
+  - `apps/frontend/src/lib/api.ts` (`serverNow` dari header `Date`), `apps/frontend/src/lib/utils.ts` (helper countdown)
+  - `apps/frontend/src/components/daily/ComplaintDataList.vue` (ticker, disable pill, tooltip, teks countdown), `apps/frontend/src/views/InputHarianView.vue` (guard + disable opsi Clear form Edit)
 
 - **Pembatasan Clear komplain (2026-11-20)**:
   - `apps/backend/app/Http/Controllers/Api/DailyEntryController.php` (`assertCanClearComplaint`), `app/Console/Commands/AutoClearWaitingComplaintsCommand.php`, `app/Services/Audit/ActivityLogger.php` (param `actorName`), `app/Services/DailyEntry/DailyEntryComplaintSerializer.php`, `app/Http/Controllers/Api/DashboardController.php` (grup baris System/Scheduler)
@@ -161,6 +175,8 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 
 ## Catatan & jebakan
 
+- **Minimum umur Clear**: frontend tidak punya endpoint waktu — `serverNow()` memakai offset header HTTP `Date` yang resolusinya 1 detik; `Math.ceil` di helper countdown menutup selisih sub-detik. Fallback `Date.now()` hanya bila header tidak ada (mis. response di-cache).
+- **Test minimum umur**: `ComplaintClearMinimumAgeTest` mem-freeze waktu via `Carbon::setTestNow()` di `setUp`/`tearDown` supaya batas 299/300 detik deterministik. `created_at` tidak ada di `$fillable` → backdate wajib lewat `DB::table()->update()`.
 - **SLA komplain**: `start_problem`/`end_problem` bertipe DATE (tanpa jam) → KPI ≤60 menit memakai `handling_minutes` valid saja (aturan ketat di `App\Support\ComplaintSla`); durasi NULL **tidak dihitung** di Dashboard, `/komplain`, maupun rekap. Jangan menambah fallback atau migration hanya untuk KPI ini — ketiga tempat harus memanggil helper yang sama.
 - **Test SQLite**: cast `date` Eloquent menyimpan `YYYY-MM-DD 00:00:00`; test yang memakai `whereBetween('report_date', [from,to])` harus menulis `report_date` mentah via `DB::table()->update()` seperti di `ComplaintSlaTest`.
 - **Gamas**: data lama di `daily_complaints` (kolom `gamas_kind`/`location_label`/`impact`) dibiarkan apa adanya setelah pemindahan — kolom TIDAK di-drop supaya migration aman di production. Baris gamas sendiri sudah di-DELETE dari `daily_complaints` (kecuali histori pindah ke `daily_gamas`).

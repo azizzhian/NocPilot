@@ -42,6 +42,34 @@ export function formatDuration(minutes: number | null | undefined): string {
   return parts.join(' ')
 }
 
+export const CLEAR_MIN_AGE_MS = 5 * 60_000
+
+/** Format detik → mm:ss (mis. 272 → "04:32"). */
+export function formatCountdown(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(totalSeconds))
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+/** Sisa waktu minimum sebelum Clear (detik); null bila created_at kosong/tidak valid. */
+export function complaintClearRemainingSeconds(
+  createdAt: string | null | undefined,
+  nowMs: number,
+): number | null {
+  if (!createdAt) return null
+  const created = new Date(createdAt).getTime()
+  if (Number.isNaN(created)) return null
+  return Math.max(0, Math.ceil((created + CLEAR_MIN_AGE_MS - nowMs) / 1000))
+}
+
+export function isComplaintClearTooYoung(
+  item: { status?: string | null; created_at?: string | null },
+  nowMs: number,
+): boolean {
+  if (item.status === 'Clear') return false
+  const remaining = complaintClearRemainingSeconds(item.created_at, nowMs)
+  return remaining === null || remaining > 0
+}
+
 export function timeAgo(date: Date | string): string {
   const now = new Date()
   const then = new Date(date)
