@@ -624,7 +624,12 @@ class DashboardController extends Controller
                     });
             })
             ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
-            ->when($userId, fn ($q) => $q->where('cleared_by', $userId))
+            ->when($userId, function ($q) use ($userId) {
+                $q->where(function ($q2) use ($userId) {
+                    $q2->where('cleared_by', $userId)
+                        ->orWhere(fn ($q3) => $q3->where('auto_cleared', true)->where('created_by', $userId));
+                });
+            })
             ->when($shift, fn ($q) => $q->where('shift', $shift))
             ->get(['id', 'created_by', 'cleared_by', 'status', 'handling_minutes', 'performance_category', 'auto_cleared']);
 
@@ -685,7 +690,7 @@ class DashboardController extends Controller
         }
 
         foreach ($cleared as $c) {
-            $key = $c->auto_cleared ? 'system' : (string) ($c->cleared_by ?? $c->created_by ?? 0);
+            $key = (string) ($c->cleared_by ?? $c->created_by ?? 0);
             $byUser[$key] ??= $emptyRow();
             $byUser[$key]['clear']++;
             $byUser[$key]['sla_items'][] = $c;
@@ -715,9 +720,7 @@ class DashboardController extends Controller
 
                 return [
                     'user_id' => $userIdKey,
-                    'name' => $key === 'system'
-                        ? 'System / Scheduler'
-                        : ($names->get($userIdKey) ?: ($userIdKey > 0 ? 'User #'.$userIdKey : 'Tanpa petugas')),
+                    'name' => $names->get($userIdKey) ?: ($userIdKey > 0 ? 'User #'.$userIdKey : 'Tanpa petugas'),
                     ...$row,
                     'avg_minutes' => $durations !== []
                         ? (int) round(array_sum($durations) / count($durations))

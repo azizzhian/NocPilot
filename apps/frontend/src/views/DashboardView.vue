@@ -661,7 +661,14 @@ onMounted(async () => {
                   {{ row.open }}
                   <span v-if="row.waiting" class="text-[10px] text-info" :title="`${row.waiting} menunggu konfirmasi`">({{ row.waiting }} mggu)</span>
                 </td>
-                <td class="py-2.5 pr-2 text-right">{{ row.clear }}</td>
+                <td class="py-2.5 pr-2 text-right">
+                  {{ row.clear }}
+                  <span
+                    v-if="row.auto_cleared"
+                    class="text-[10px] text-muted"
+                    :title="`${row.auto_cleared} komplain di-clear otomatis setelah 30 menit`"
+                  >({{ row.auto_cleared }} auto)</span>
+                </td>
                 <td
                   class="py-2.5 pr-2 text-right font-semibold"
                   :class="slaTone(row.sla?.percent).text"

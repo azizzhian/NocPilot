@@ -297,7 +297,7 @@ const complaintStatusOptions = computed(
 
 const CLEAR_OWNER_MESSAGE = 'Hanya pembuat komplain yang dapat melakukan Clear.'
 const STATUS_OWNER_MESSAGE = 'Hanya pembuat komplain yang dapat mengubah status komplain.'
-const CLEAR_AGE_MESSAGE = 'Komplain harus berusia minimal 5 menit sebelum dapat di-Clear.'
+const CLEAR_AGE_MESSAGE = 'Mohon untuk memeriksa komplain minimal 5 menit sebelum di-Clear.'
 const CLEAR_TIME_INVALID_MESSAGE = 'Waktu input komplain tidak valid. Komplain belum dapat di-Clear.'
 const CLEAR_NEW_MESSAGE = 'Komplain baru tidak dapat langsung di-Clear. Minimal waktu penanganan adalah 5 menit.'
 

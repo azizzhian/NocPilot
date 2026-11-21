@@ -355,7 +355,7 @@ function statusPillTitle(item: DailyEntryItem, status: string): string {
       return 'Waktu input komplain tidak valid. Komplain belum dapat di-Clear.'
     }
     if (isComplaintClearTooYoung(item, clearTick.value)) {
-      return 'Komplain harus berusia minimal 5 menit sebelum dapat di-Clear.'
+      return 'Mohon untuk melakukan pengecekan ulang komplain minimal 5 menit sebelum di-Clear.'
     }
   }
   if (!isComplaintLocked(item)) return `Ubah status menjadi ${status}`

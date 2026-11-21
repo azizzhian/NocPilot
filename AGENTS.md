@@ -117,6 +117,7 @@ Hampir semua list/dashboard punya filter ODC. Nilai `__none__` atau `Tanpa ODC` 
 - Aturan hanya di `DailyEntryController` (`assertComplaintMinimumAgeForClear`, dipanggil di `updateStatus` & `updateComplaint`). Edit komplain yang **sudah Clear** (no-op status) tidak divalidasi umur lagi.
 - `storeComplaint` juga menolak 422 (`errors.status`) bila komplain baru dibuat langsung dengan status **Clear** (komplain baru selalu berumur ~0 detik). Auto-clear scheduler, `syncHandling`/`syncClearAttribution`, Gamas, dan modul lain tidak terkena guard ini.
 - Prioritas error manual: **403 pembuat** → **422 Action wajib** → **422 umur**. Tombol pill Clear & opsi Clear di form Edit dinonaktifkan dengan countdown mm:ss + tooltip; backend tetap memvalidasi (bukan hanya frontend).
+- **Dashboard Performa Komplain** (2026-11-21): auto-clear **tidak** dibuatkan baris "System / Scheduler" — ikut ke baris `created_by` (clear, kategori, durasi, SLA) dan ditandai `(N auto)` di kolom Clear. Filter NOC pada `$cleared` = `cleared_by = user` **atau** (`auto_cleared` dan `created_by = user`). Activity log & kolom "Clear oleh" di list komplain tetap "System / Scheduler" — jangan mengubahnya.
 
 ### Gamas (2026-11-20)
 - Gamas **bukan komplain**: datanya di tabel `daily_gamas`, menu `/gamas` (permission `gamas.view`), channel realtime `gamas`, section report `gamas`. Komplain selalu `complaint_type = individual`.

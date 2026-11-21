@@ -39,6 +39,7 @@ Versioning mengikuti [Semantic Versioning](https://semver.org/).
 - Export Excel Dismantle (`GET /dismantles/export`), Aktivasi (`GET /daily-entry/export/activations`), Report Ticket perbaikan `$from`/`$to`, dan kolom **Jam Open/Jam Close** (`H:i`) di semua export + list (2026-11-13)
 
 ### Changed
+- Performa Komplain: auto-clear tidak lagi tampil sebagai baris "System / Scheduler" — digabung ke baris pembuat (`created_by`) dan ditandai `(N auto)` di kolom Clear; filter NOC ikut menyertakan auto-clear milik petugas tersebut. Kartu ringkasan, SLA sistem, dan activity log "System / Scheduler" tidak berubah (2026-11-21)
 - Input Aktivasi: `olt_name` wajib diisi agar bisa dipetakan ke ODC (2026-09-22)
 - Optimasi performa perhitungan statistik ODC (2026-09-21)
 - Durasi komplain kini format mudah dibaca: `≥60 menit` → jam, `≥24 jam` → hari, sisa satuan ikut ditulis (mis. "1 jam 35 mnt", "2 hari 3 jam") — berlaku di kartu komplain, dashboard, riwayat, dan export Excel (header "Durasi (mnt)" → "Durasi") (2026-11-20)
