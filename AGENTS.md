@@ -123,6 +123,8 @@ Hampir semua list/dashboard punya filter ODC. Nilai `__none__` atau `Tanpa ODC` 
 - Gamas **bukan komplain**: datanya di tabel `daily_gamas`, menu `/gamas` (permission `gamas.view`), channel realtime `gamas`, section report `gamas`. Komplain selalu `complaint_type = individual`.
 - Alur status gamas: **On-Progress ↔ Clear** saja (Clear wajib `action`); **tanpa** Menunggu Konfirmasi, auto-clear, kategori performa, dan komplain berulang.
 - Carry-over & filter ODC/`__none__`/`mode=clear` di `GamasController` mengikuti pola `DailyEntryController` — kalau logika carry-over berubah, ubah keduanya.
+- Riwayat update (`daily_gamas_updates`) punya `started_at`/`ended_at`/`duration_minutes` (nullable). `started_at` direkam frontend saat popup Update dibuka (dari `serverNow()`), `ended_at = now()` backend saat simpan, durasi = `intdiv` detik→menit. Klien lama tanpa `started_at` tetap diterima dengan ketiga kolom NULL → tampil "Durasi belum tersedia" (jangan mengarang durasi). Waktu depan/sebelum `created_at` GAMAS/tumpang tindih dengan `ended_at` update terakhir ditolak 422 `errors.started_at`.
+- **Usia gangguan** (`created_at` → `cleared_at`/`now()`) dan **total durasi update** (akumulasi `duration_minutes` valid) adalah dua metrik berbeda — jangan disamakan. Keduanya dipakai di tabel/popup Gamas; total durasi juga ada di `GamasStatsService::summary.update_duration_minutes` (dipakai `/gamas/stats` & dashboard `gamas_summary`).
 
 ### Permission
 - Backend: middleware `permission:<nama>`. Frontend: `auth.can('<nama>')` + `meta.permission`. Role `administrator` = semua akses.

@@ -42,6 +42,26 @@ export function formatDuration(minutes: number | null | undefined): string {
   return parts.join(' ')
 }
 
+/**
+ * Format durasi menit → teks lengkap untuk timeline insiden.
+ * 37 → "37 menit", 225 → "3 jam 45 menit", 1500 → "1 hari 2 jam".
+ */
+export function formatDurationLong(minutes: number | null | undefined): string {
+  if (minutes == null) return '—'
+  const total = Math.max(0, Math.round(minutes))
+  if (total < 1) return '<1 menit'
+  if (total < 60) return `${total} menit`
+
+  const days = Math.floor(total / 1440)
+  const hours = Math.floor((total % 1440) / 60)
+  const mins = total % 60
+  const parts: string[] = []
+  if (days > 0) parts.push(`${days} hari`)
+  if (hours > 0) parts.push(`${hours} jam`)
+  if (mins > 0 && days === 0) parts.push(`${mins} menit`)
+  return parts.join(' ')
+}
+
 export const CLEAR_MIN_AGE_MS = 5 * 60_000
 
 /** Format detik → mm:ss (mis. 272 → "04:32"). */

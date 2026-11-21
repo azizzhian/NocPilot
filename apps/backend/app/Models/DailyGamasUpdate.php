@@ -10,12 +10,18 @@ class DailyGamasUpdate extends Model
     protected $fillable = [
         'daily_gamas_id',
         'update_text',
+        'started_at',
+        'ended_at',
+        'duration_minutes',
         'created_by',
     ];
 
     protected function casts(): array
     {
         return [
+            'started_at' => 'datetime',
+            'ended_at' => 'datetime',
+            'duration_minutes' => 'integer',
             'created_at' => 'datetime',
         ];
     }

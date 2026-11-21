@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import Card from '@/components/ui/Card.vue'
@@ -20,9 +20,23 @@ import {
   type GamasStatsResponse,
   type GamasUpdate,
 } from '@/services/api'
-import { todayInput, formatTimeId } from '@/lib/date-input'
+import { todayInput, formatTimeId, formatDateId } from '@/lib/date-input'
+import { formatDuration, formatDurationLong } from '@/lib/utils'
+import { serverNow } from '@/lib/api'
 import { useDailyEntryPoll, type DailyEntryRealtimeEvent } from '@/composables/useDailyEntryPoll'
-import { Plus, Pencil, Trash2, Download, FileText, CheckCircle2, MessageSquarePlus } from 'lucide-vue-next'
+import {
+  Activity,
+  CheckCircle2,
+  Clock3,
+  Download,
+  FileText,
+  MessageSquarePlus,
+  Pencil,
+  Plus,
+  Siren,
+  Timer,
+  Trash2,
+} from 'lucide-vue-next'
 
 const route = useRoute()
 const search = ref('')
@@ -57,6 +71,12 @@ const updateSaving = ref(false)
 const updateError = ref('')
 const toast = ref<{ message: string; variant: 'success' | 'error' }>({ message: '', variant: 'success' })
 
+const clockTick = ref(serverNow())
+let clockTimer: ReturnType<typeof setInterval> | null = null
+const updateStartedAt = ref<string | null>(null)
+const updateTick = ref(serverNow())
+let updateTimer: ReturnType<typeof setInterval> | null = null
+
 const kindOptions = [
   { value: 'odp', label: 'ODP / Jalur' },
   { value: 'upstream', label: 'Upstream' },
@@ -89,6 +109,37 @@ function kindLabel(kind: string): string {
 
 function statusVariant(status: string) {
   return status === 'Clear' ? 'success' : 'warning'
+}
+
+const totalUpdateMinutes = computed(() => stats.value?.summary.update_duration_minutes ?? 0)
+
+function incidentAge(item: DailyGamasItem): number | null {
+  if (!item.created_at) return null
+  const start = new Date(item.created_at).getTime()
+  if (Number.isNaN(start)) return null
+  const cleared = item.status === 'Clear' && item.cleared_at
+    ? new Date(item.cleared_at).getTime()
+    : clockTick.value
+  const end = Number.isNaN(cleared) ? clockTick.value : cleared
+  return Math.max(0, Math.floor((end - start) / 60_000))
+}
+
+function updateTotalTitle(item: DailyGamasItem): string {
+  const count = item.updates_count ?? 0
+  if (!count) return 'Belum ada update progress'
+  const timed = item.updates_timed_count ?? 0
+  const total = formatDurationLong(item.updates_duration_minutes ?? 0)
+  if (timed < count) {
+    return `${count - timed} update lama tanpa rentang waktu · Durasi valid: ${total}`
+  }
+  return `Total durasi update: ${total}`
+}
+
+function elapsedSinceStart(): number | null {
+  if (!updateStartedAt.value) return null
+  const start = new Date(updateStartedAt.value).getTime()
+  if (Number.isNaN(start)) return null
+  return Math.max(0, Math.floor((updateTick.value - start) / 60_000))
 }
 
 function listParams() {
@@ -296,6 +347,12 @@ async function openUpdate(item: DailyGamasItem) {
   updateText.value = ''
   updateError.value = ''
   updates.value = []
+  updateStartedAt.value = new Date(serverNow()).toISOString()
+  updateTick.value = serverNow()
+  if (updateTimer) clearInterval(updateTimer)
+  updateTimer = setInterval(() => {
+    updateTick.value = serverNow()
+  }, 1000)
   updateOpen.value = true
   await loadUpdates(item.id)
 }
@@ -307,6 +364,11 @@ function closeUpdate() {
   updateText.value = ''
   updateError.value = ''
   updates.value = []
+  updateStartedAt.value = null
+  if (updateTimer) {
+    clearInterval(updateTimer)
+    updateTimer = null
+  }
 }
 
 function formatUpdateTime(value: string | null | undefined): string {
@@ -317,6 +379,10 @@ function formatUpdateTime(value: string | null | undefined): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function formatTickTime(): string {
+  return formatUpdateTime(new Date(updateTick.value).toISOString())
 }
 
 async function submitUpdate() {
@@ -330,9 +396,15 @@ async function submitUpdate() {
   updateSaving.value = true
   updateError.value = ''
   try {
-    const res = await gamasApi.storeUpdate(item.id, text)
+    const res = await gamasApi.storeUpdate(item.id, {
+      update_text: text,
+      started_at: updateStartedAt.value,
+    })
     updates.value.unshift(res.data.data)
     updateText.value = ''
+    updateStartedAt.value = new Date(serverNow()).toISOString()
+    updateTick.value = serverNow()
+    await load()
     showToast('Update berhasil disimpan.')
   } catch (e: unknown) {
     updateError.value = extractError(e, 'Gagal menyimpan update.')
@@ -402,39 +474,58 @@ onMounted(async () => {
   await loadOdcs()
   await load()
   startPoll()
+  clockTimer = setInterval(() => {
+    clockTick.value = serverNow()
+  }, 30_000)
+})
+
+onUnmounted(() => {
+  if (clockTimer) clearInterval(clockTimer)
+  if (updateTimer) clearInterval(updateTimer)
+  if (reloadTimeout) clearTimeout(reloadTimeout)
 })
 </script>
 
 <template>
   <AppLayout title="Gamas" subtitle="Gangguan massal: ODP, upstream, OLT/site">
-    <div class="mb-6 grid grid-cols-3 gap-3 md:grid-cols-3">
-      <Card padding="sm">
-        <p class="text-xl font-bold text-primary">{{ stats?.summary.total ?? 0 }}</p>
-        <p class="text-xs text-muted">Total periode</p>
-      </Card>
-      <Card padding="sm">
-        <p class="text-xl font-bold text-warning">{{ stats?.summary.open_all ?? 0 }}</p>
-        <p class="text-xs text-muted">On-Progress (termasuk backlog)</p>
-      </Card>
-      <Card padding="sm">
-        <p class="text-xl font-bold text-success">{{ stats?.summary.clear ?? 0 }}</p>
-        <p class="text-xs text-muted">Clear periode</p>
-      </Card>
-    </div>
-
-    <div
-      v-if="stats && stats.by_kind.some((k) => k.total > 0)"
-      class="mb-6 rounded-xl border border-border bg-card px-4 py-3"
-    >
-      <p class="mb-2 text-xs font-medium text-muted">Rekap per jenis (periode terpilih)</p>
-      <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-        <span v-for="k in stats.by_kind" :key="k.kind" class="text-foreground">
-          {{ k.label }}
-          <span class="text-muted">({{ k.total }})</span>
-          <span class="ml-1 text-xs text-muted">open {{ k.open }} · clear {{ k.clear }}</span>
-        </span>
+    <Card class="mb-6">
+      <div class="mb-4 flex items-center gap-2">
+        <Siren class="h-4 w-4 text-primary" />
+        <h2 class="text-sm font-semibold text-foreground">Ringkasan Insiden</h2>
+        <span class="text-xs text-muted">Periode terpilih</span>
       </div>
-    </div>
+      <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div class="rounded-xl border border-border bg-muted/20 p-3">
+          <p class="text-xl font-bold text-primary">{{ stats?.summary.total ?? 0 }}</p>
+          <p class="text-xs text-muted">Total Periode</p>
+        </div>
+        <div class="rounded-xl border border-border bg-warning/5 p-3">
+          <p class="text-xl font-bold text-warning">{{ stats?.summary.open_all ?? 0 }}</p>
+          <p class="text-xs text-muted">On-Progress (termasuk backlog)</p>
+        </div>
+        <div class="rounded-xl border border-border bg-success/5 p-3">
+          <p class="text-xl font-bold text-success">{{ stats?.summary.clear ?? 0 }}</p>
+          <p class="text-xs text-muted">Clear Periode</p>
+        </div>
+        <div class="rounded-xl border border-border bg-info/5 p-3" title="Akumulasi durasi update yang memiliki rentang waktu valid">
+          <p class="text-xl font-bold text-info">{{ formatDurationLong(totalUpdateMinutes) }}</p>
+          <p class="text-xs text-muted">Total Durasi Update</p>
+        </div>
+      </div>
+      <div
+        v-if="stats && stats.by_kind.some((k) => k.total > 0)"
+        class="mt-4 border-t border-border pt-3"
+      >
+        <p class="mb-2 text-xs font-medium text-muted">Rekap per jenis gangguan</p>
+        <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+          <span v-for="k in stats.by_kind" :key="k.kind" class="text-foreground">
+            {{ k.label }}
+            <span class="text-muted">({{ k.total }})</span>
+            <span class="ml-1 text-xs text-muted">open {{ k.open }} · clear {{ k.clear }}</span>
+          </span>
+        </div>
+      </div>
+    </Card>
 
     <div v-if="error && !showModal" class="mb-4 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
       {{ error }}
@@ -455,39 +546,45 @@ onMounted(async () => {
       <button type="button" class="ml-2 text-xs text-primary underline" @click="clearMode = false">Hapus</button>
     </div>
 
-    <div class="mb-4 flex flex-wrap items-end gap-3">
-      <SearchInput v-model="search" placeholder="Cari lokasi / problem..." class="max-w-sm" />
-      <DateRangePicker v-model:from="fromDate" v-model:to="toDate" class="w-64" />
-      <div>
-        <label class="mb-1 block text-[11px] text-muted">ODC / Site</label>
-        <Select v-model="odcName" class="w-44">
-          <option value="">Semua ODC</option>
-          <option value="__none__">Tanpa ODC</option>
-          <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
-        </Select>
+    <Card class="mb-4">
+      <div class="mb-3 flex items-center gap-2">
+        <Activity class="h-4 w-4 text-primary" />
+        <h2 class="text-sm font-semibold text-foreground">Pantau & Filter Insiden</h2>
       </div>
-      <div class="flex gap-1 overflow-x-auto">
-        <button
-          v-for="tab in statusTabs"
-          :key="tab.key"
-          type="button"
-          class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition"
-          :class="statusFilter === tab.key ? 'bg-primary text-white' : 'border border-border text-muted hover:bg-muted'"
-          @click="statusFilter = tab.key"
-        >
-          {{ tab.label }}
-        </button>
+      <div class="flex flex-wrap items-end gap-3">
+        <SearchInput v-model="search" placeholder="Cari lokasi / problem..." class="max-w-sm" />
+        <DateRangePicker v-model:from="fromDate" v-model:to="toDate" class="w-64" />
+        <div>
+          <label class="mb-1 block text-[11px] text-muted">ODC / Site</label>
+          <Select v-model="odcName" class="w-44">
+            <option value="">Semua ODC</option>
+            <option value="__none__">Tanpa ODC</option>
+            <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
+          </Select>
+        </div>
+        <div class="flex gap-1 overflow-x-auto">
+          <button
+            v-for="tab in statusTabs"
+            :key="tab.key"
+            type="button"
+            class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition"
+            :class="statusFilter === tab.key ? 'bg-primary text-white' : 'border border-border text-muted hover:bg-muted'"
+            @click="statusFilter = tab.key"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+        <div class="ml-auto flex gap-2">
+          <Button variant="outline" @click="reportModalOpen = true">
+            <FileText class="h-4 w-4" /> Generate
+          </Button>
+          <Button variant="outline" :disabled="exporting" @click="exportExcel">
+            <Download class="h-4 w-4" /> {{ exporting ? 'Export...' : 'Excel' }}
+          </Button>
+          <Button @click="openCreate"><Plus class="h-4 w-4" /> Tambah Gamas</Button>
+        </div>
       </div>
-      <div class="ml-auto flex gap-2">
-        <Button variant="outline" @click="reportModalOpen = true">
-          <FileText class="h-4 w-4" /> Generate
-        </Button>
-        <Button variant="outline" :disabled="exporting" @click="exportExcel">
-          <Download class="h-4 w-4" /> {{ exporting ? 'Export...' : 'Excel' }}
-        </Button>
-        <Button @click="openCreate"><Plus class="h-4 w-4" /> Tambah Gamas</Button>
-      </div>
-    </div>
+    </Card>
 
     <Card class="overflow-x-auto">
       <table class="w-full text-sm">
@@ -499,8 +596,8 @@ onMounted(async () => {
             <th class="pb-3 pr-3 font-medium">ODC/Site</th>
             <th class="pb-3 pr-3 font-medium">Problem</th>
             <th class="pb-3 pr-3 font-medium">Status</th>
-            <th class="pb-3 pr-3 font-medium">Input oleh</th>
-            <th class="pb-3 pr-3 font-medium">Close oleh</th>
+            <th class="pb-3 pr-3 font-medium">Durasi Penanganan</th>
+            <th class="pb-3 pr-3 font-medium">Update Terakhir</th>
             <th class="pb-3 font-medium">Aksi</th>
           </tr>
         </thead>
@@ -516,7 +613,10 @@ onMounted(async () => {
             :key="item.id"
             class="border-b border-border/50 hover:bg-muted/30"
           >
-            <td class="py-3 pr-3 text-xs text-muted">
+            <td
+              class="py-3 pr-3 text-xs text-muted"
+              :title="`Input oleh: ${item.creator_name || '—'} pukul ${formatTimeId(item.created_at) || '—'}${item.cleared_at ? ` · Clear oleh: ${item.clearer_name || '—'} pukul ${formatTimeId(item.cleared_at) || '—'}` : ''}`"
+            >
               {{ item.report_date || '—' }}
               <span class="block text-[11px] text-muted/80">{{ formatTimeId(item.created_at) || '—' }}</span>
               <span
@@ -534,13 +634,21 @@ onMounted(async () => {
             <td class="py-3 pr-3 text-xs">{{ item.odc_name || '—' }}</td>
             <td class="py-3 pr-3 max-w-[12rem] truncate">{{ item.problem || '—' }}</td>
             <td class="py-3 pr-3"><Badge :variant="statusVariant(item.status)">{{ item.status }}</Badge></td>
-            <td class="py-3 pr-3 text-xs text-foreground">
-              {{ item.creator_name || '—' }}
-              <span class="block text-[11px] text-muted/80">{{ formatTimeId(item.created_at) || '—' }}</span>
+            <td class="py-3 pr-3 text-xs text-foreground" :title="updateTotalTitle(item)">
+              <span class="inline-flex items-center gap-1 font-medium">
+                <Clock3 class="h-3.5 w-3.5 text-muted" />
+                {{ incidentAge(item) == null ? '—' : formatDuration(incidentAge(item)) }}
+              </span>
+              <span class="block text-[11px] text-muted/80">
+                Update: {{ item.updates_count ?? 0 }} · {{ formatDurationLong(item.updates_duration_minutes ?? 0) }}
+              </span>
             </td>
             <td class="py-3 pr-3 text-xs text-foreground">
-              {{ item.clearer_name || '—' }}
-              <span class="block text-[11px] text-muted/80">{{ formatTimeId(item.cleared_at) || '—' }}</span>
+              <template v-if="item.last_update_at">
+                <span class="font-medium">{{ formatDateId(item.last_update_at) }}</span>
+                <span class="block text-[11px] text-muted/80">{{ formatTimeId(item.last_update_at) }} · {{ item.updates_count ?? 0 }} update</span>
+              </template>
+              <span v-else class="text-muted">Belum ada update</span>
             </td>
             <td class="py-3">
               <div class="flex gap-1">
@@ -713,12 +821,39 @@ onMounted(async () => {
       @close="closeUpdate"
     >
       <div class="rounded-xl border border-border bg-muted/30 p-3 text-sm">
-        <p class="font-medium text-foreground">
-          {{ kindLabel(updateItem?.gamas_kind ?? '') }} · {{ updateItem?.location_label || '—' }}
-        </p>
-        <p class="mt-1 text-xs text-muted">ODC/Site: {{ updateItem?.odc_name || '—' }}</p>
-        <p class="mt-1 break-words text-xs text-muted">Problem: {{ updateItem?.problem || '—' }}</p>
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="font-medium text-foreground">
+              {{ kindLabel(updateItem?.gamas_kind ?? '') }} · {{ updateItem?.location_label || '—' }}
+            </p>
+            <p class="mt-1 text-xs text-muted">ODC/Site: {{ updateItem?.odc_name || '—' }}</p>
+            <p class="mt-1 break-words text-xs text-muted">Problem: {{ updateItem?.problem || '—' }}</p>
+          </div>
+          <Badge :variant="statusVariant(updateItem?.status ?? '')">{{ updateItem?.status || '—' }}</Badge>
+        </div>
+        <div class="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3 sm:grid-cols-3">
+          <div>
+            <p class="text-[11px] text-muted">Waktu mulai gangguan</p>
+            <p class="text-xs font-medium text-foreground">
+              {{ updateItem?.start_problem ? formatDateId(updateItem.start_problem) : (updateItem?.created_at ? formatDateId(updateItem.created_at) : '—') }}
+            </p>
+            <p v-if="updateItem?.created_at" class="text-[11px] text-muted/80">Input {{ formatTimeId(updateItem.created_at) }} WIB</p>
+          </div>
+          <div>
+            <p class="text-[11px] text-muted">Usia gangguan</p>
+            <p class="text-xs font-medium text-foreground">
+              {{ updateItem && incidentAge(updateItem) != null ? formatDurationLong(incidentAge(updateItem)) : '—' }}
+            </p>
+          </div>
+          <div>
+            <p class="text-[11px] text-muted">Total durasi update</p>
+            <p class="text-xs font-medium text-foreground">
+              {{ formatDurationLong((updateItem?.updates_timed_count ?? 0) > 0 ? (updateItem?.updates_duration_minutes ?? 0) : null) }}
+            </p>
+          </div>
+        </div>
       </div>
+
       <div class="mt-4">
         <label for="gamas-update-textarea" class="mb-1.5 block text-sm font-medium">
           Update / Progress <span class="text-danger">*</span>
@@ -733,21 +868,58 @@ onMounted(async () => {
       </div>
       <p v-if="updateError" class="mt-2 text-sm text-danger">{{ updateError }}</p>
 
-      <div class="mt-5 border-t border-border pt-4">
-        <h3 class="mb-3 text-sm font-semibold text-foreground">Riwayat Update</h3>
-        <p v-if="updatesLoading" class="py-4 text-center text-sm text-muted">Memuat riwayat...</p>
-        <div v-else-if="updates.length" class="max-h-64 space-y-2 overflow-y-auto pr-1">
-          <div
-            v-for="u in updates"
-            :key="u.id"
-            class="rounded-xl border border-border bg-muted/30 p-3"
-          >
-            <p class="break-words text-sm text-foreground">{{ u.update_text }}</p>
-            <p class="mt-1.5 text-[11px] text-muted">
-              {{ u.author_name || 'Petugas' }} · {{ formatUpdateTime(u.created_at) }}
+      <div class="mt-4 rounded-xl border border-border p-3">
+        <div class="mb-2 flex items-center gap-2">
+          <Timer class="h-4 w-4 text-info" />
+          <h3 class="text-sm font-semibold text-foreground">Rentang Waktu Update</h3>
+        </div>
+        <div class="grid gap-2 text-xs sm:grid-cols-3">
+          <div>
+            <p class="text-muted">Mulai (saat popup dibuka)</p>
+            <p class="font-medium text-foreground">{{ formatUpdateTime(updateStartedAt) }}</p>
+          </div>
+          <div>
+            <p class="text-muted">Selesai (saat disimpan)</p>
+            <p class="font-medium text-foreground">Berjalan · {{ formatTickTime() }}</p>
+          </div>
+          <div>
+            <p class="text-muted">Durasi sementara</p>
+            <p class="font-medium text-foreground">
+              {{ elapsedSinceStart() == null ? '—' : formatDurationLong(elapsedSinceStart()) }}
+              <span class="text-[10px] text-muted">(belum final)</span>
             </p>
           </div>
         </div>
+      </div>
+
+      <div class="mt-5 border-t border-border pt-4">
+        <div class="mb-3 flex items-center justify-between">
+          <h3 class="mb-0 text-sm font-semibold text-foreground">Riwayat Update</h3>
+          <span class="text-[11px] text-muted">Terbaru di atas · {{ updates.length }} catatan</span>
+        </div>
+        <p v-if="updatesLoading" class="py-4 text-center text-sm text-muted">Memuat riwayat...</p>
+        <ol
+          v-else-if="updates.length"
+          class="relative max-h-64 space-y-4 overflow-y-auto border-l border-border pl-5 pr-1"
+        >
+          <li v-for="u in updates" :key="u.id" class="relative">
+            <span class="absolute -left-[1.4rem] top-1 h-2.5 w-2.5 rounded-full border-2 border-card bg-primary"></span>
+            <div class="rounded-xl border border-border bg-muted/30 p-3">
+              <p class="break-words text-sm text-foreground">{{ u.update_text }}</p>
+              <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
+                <span>{{ u.author_name || 'Petugas' }}</span>
+                <span>{{ formatUpdateTime(u.created_at) }}</span>
+                <span
+                  v-if="u.ended_at && u.duration_minutes !== null"
+                  :title="`${formatUpdateTime(u.started_at)} — ${formatUpdateTime(u.ended_at)}`"
+                >
+                  {{ formatDurationLong(u.duration_minutes) }}
+                </span>
+                <span v-else class="text-amber-600">Durasi belum tersedia</span>
+              </div>
+            </div>
+          </li>
+        </ol>
         <p v-else class="py-4 text-center text-sm text-muted">Belum ada riwayat update</p>
       </div>
 

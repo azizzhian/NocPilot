@@ -196,6 +196,7 @@ export interface DashboardStats {
       total: number
       open_all: number
       clear: number
+      update_duration_minutes: number
     }
     by_kind: Array<{
       kind: string
@@ -973,6 +974,14 @@ export interface DailyGamasItem {
   clearer_name?: string | null
   cleared_at?: string | null
   created_at?: string | null
+  /** Jumlah catatan update progress (agregat dari tabel riwayat). */
+  updates_count?: number
+  /** Jumlah update yang memiliki rentang waktu valid. */
+  updates_timed_count?: number
+  /** Akumulasi durasi update yang valid untuk GAMAS ini (menit). */
+  updates_duration_minutes?: number
+  /** Waktu update terakhir (ISO 8601), null bila belum ada update. */
+  last_update_at?: string | null
   /** Open item dari tanggal sebelum rentang yang sedang dilihat */
   is_carryover?: boolean
 }
@@ -984,10 +993,13 @@ export interface GamasUpdate {
   created_by: number | null
   author_name: string | null
   created_at: string | null
+  started_at: string | null
+  ended_at: string | null
+  duration_minutes: number | null
 }
 
 export interface GamasStatsResponse {
-  summary: { total: number; open_all: number; clear: number }
+  summary: { total: number; open_all: number; clear: number; update_duration_minutes: number }
   by_kind: Array<{ kind: string; label: string; total: number; open: number; clear: number }>
   by_odc: Array<{ odc_name: string; total: number; open: number; clear: number }>
 }
@@ -1009,8 +1021,8 @@ export const gamasApi = {
   create: (data: Record<string, unknown>) => api.post('/gamas', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/gamas/${id}`, data),
   updates: (id: number) => api.get<{ data: GamasUpdate[] }>(`/gamas/${id}/updates`),
-  storeUpdate: (id: number, update_text: string) =>
-    api.post<{ message: string; data: GamasUpdate }>(`/gamas/${id}/updates`, { update_text }),
+  storeUpdate: (id: number, payload: { update_text: string; started_at?: string | null }) =>
+    api.post<{ message: string; data: GamasUpdate }>(`/gamas/${id}/updates`, payload),
   destroy: (id: number) => api.delete(`/gamas/${id}`),
   updateStatus: (id: number, status: string) => api.patch(`/gamas/${id}/status`, { status }),
   exportExcel: (params: GamasListParams) =>

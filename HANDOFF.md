@@ -36,6 +36,12 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 
 ## Sudah selesai
 
+- **Incident Management Dashboard GAMAS + Timeline Progress** (permintaan user, 2026-11-21) — kode **selesai & terverifikasi otomatis**:
+  - Migration baru `2026_11_21_030000_add_time_range_to_daily_gamas_updates.php`: `started_at`, `ended_at`, `duration_minutes` (semua nullable). **Tidak ada tabel duplikat**, riwayat lama tetap NULL tanpa backfill → UI menampilkan "Durasi belum tersedia". Migration sudah dijalankan lokal.
+  - `GamasController::storeUpdate`: `started_at` dikirim frontend saat popup dibuka (dari `serverNow()`), `ended_at = now()` backend saat simpan, durasi `intdiv` detik→menit (floor, clamp 0). Tolak 422 `errors.started_at` untuk waktu depan, sebelum `created_at` GAMAS, dan tumpang tindih dengan `ended_at` update terakhir. Tanpa `started_at` → simpan NULL (kompatibel klien lama). `serializeUpdate` ekspos 3 field baru. `index` menambah agregat `updates_count`, `updates_timed_count`, `updates_duration_minutes`, `last_update_at` (tanpa N+1). Endpoint/route tidak berubah.
+  - `GamasStatsService::forRange` + `summary.update_duration_minutes` — dipakai `/gamas/stats` dan dashboard `gamas_summary`.
+  - Frontend `GamasView.vue`: KPI ke-4 "Total Durasi Update" + ringkasan dalam kartu "Ringkasan Insiden"; tabel 9 kolom sesuai permintaan (Input/Close oleh dipindah ke tooltip kolom Tanggal); popup Update direnovasi (identitas + status + waktu mulai/usia/total durasi, seksi "Rentang Waktu Update" dengan elapsed sementara, riwayat timeline dot+garis terbaru di atas, durasi per update atau "Durasi belum tersedia"); `load()` setelah simpan agar tabel & KPI sinkron. Helper `formatDurationLong()` ("37 menit", "3 jam 45 menit") ditambahkan di `lib/utils.ts`, format lama tidak diubah.
+  - Verifikasi: `composer test` **36 lolos / 250 assertions** (3 test baru + 1 test existing diperkuat di `GamasUpdateTest`), `npm run build:web` lolos, `php artisan migrate` lokal OK, `php -l` OK.
 - **Auto-clear ikut baris pembuat di Performa Komplain** (permintaan user, 2026-11-21) — kode **selesai & terverifikasi otomatis**: baris "System / Scheduler" dihapus dari tabel; komplain `auto_cleared` digabung ke baris `created_by` (Clear, kategori, rata-rata durasi, SLA) dan kolom Clear memberi penanda `(N auto)` + tooltip. Filter NOC di `$cleared` kini `cleared_by = user` ATAU (`auto_cleared` dan `created_by = user`) agar angka per-NOC konsisten. Kartu ringkasan (Auto-clear, Clear periode, SLA sistem) dan activity log/serializer "System / Scheduler" tidak diubah. Verifikasi: `composer test` **33 lolos / 202 assertions** (1 test baru di `DashboardComplaintSlaTest`), `npm run build:web` lolos.
 - **Minimum umur 5 menit sebelum Clear komplain** (permintaan user, 2026-11-21) — kode **selesai & terverifikasi otomatis**:
   - Aturan hanya untuk **transisi bukan Clear → Clear** di PATCH status & PUT complaint; edit komplain yang sudah Clear (no-op status) tidak divalidasi umur lagi. `storeComplaint` juga menolak 422 (`errors.status`) bila komplain baru dibuat langsung dengan status Clear.
@@ -85,6 +91,7 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 
 ## Langkah berikutnya
 
+- **Verifikasi manual Update Progress GAMAS**: buka `/gamas` → klik tombol Update pada baris On-Progress & Clear (termasuk carry-over) → popup "Tambah Update" menampilkan identitas GAMAS + pesan "Belum ada riwayat update" bila kosong → isi Update/Progress → Simpan → entri baru muncul di atas, toast sukses, textarea kosong, popup tetap terbuka → Batal → buka lagi → riwayat masih ada; textarea kosong → error; status & Action GAMAS tidak berubah; Clear dengan Action kosong tetap memunculkan popup Action; hapus GAMAS yang punya riwayat → riwayat ikut terhapus.
 - **Verifikasi manual minimum umur Clear komplain**: buka `/komplain` → komplain baru (Action terisi) menampilkan pill Clear disabled + "Clear tersedia dalam mm:ss" & tooltip, countdown turun tiap detik (data hari ini & carry-over), otomatis aktif tepat setelah 5 menit tanpa reload. Form **Tambah Komplain**: opsi Clear selalu disabled + pesan "Komplain baru tidak dapat langsung di-Clear..."; kirim status Clear via Postman → 422 `errors.status`. Klik Clear sebelum 5 menit → tidak ada request; coba PATCH/PUT via Postman → 422 dengan pesan "Komplain belum dapat di-Clear. Minimal waktu penanganan adalah 5 menit."; Action kosong → popup "Action Wajib Diisi" tetap muncul (prioritas error Action); form Edit komplain muda → opsi Clear disabled + pesan; komplain yang sudah Clear tetap bisa diedit; petugas lain/auto-clear 30 menit tidak berubah.
 - **Verifikasi manual pembatasan Clear komplain**: login sebagai pembuat → pill Clear aktif & berhasil Clear; login sebagai petugas lain/admin → pill Clear ada ikon gembok, tooltip tampil, klik tidak berfungsi; buka form Edit komplain orang lain → opsi Clear disabled + pesan; coba PATCH/PUT status Clear via API dengan user lain → 403; coba ubah ke On-Progress/Menunggu Konfirmasi dengan user lain → 403; auto-clear 30 menit tetap jalan & activity log menunjukkan "System / Scheduler" (bukan nama pembuat).
 - **Verifikasi manual Performa Komplain auto-clear**: buka Dashboard → tidak ada lagi baris "System / Scheduler" di tabel; komplain auto-clear masuk ke baris pembuat dengan penanda "(N auto)" di kolom Clear + tooltip; ubah filter NOC → baris petugas bersangkutan tetap menyertakan auto-clear miliknya; kartu "Auto-clear", "Clear periode", dan "Persen Komplain (SLA ≤ 60 menit)" di ringkasan tidak berubah; activity log auto-clear tetap "System / Scheduler".
@@ -111,6 +118,12 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 - (Perlu keputusan) Karena API jaringan tidak ber-middleware permission, noc yang membuka favorit OLT otomatis bisa **tambah/edit/hapus** data OLT. Bila ingin read-only, perlu gate tambahan (`network.manage`) di UI.
 
 ## File disentuh
+
+- **Incident Management GAMAS (2026-11-21)**:
+  - `apps/backend/database/migrations/2026_11_21_030000_add_time_range_to_daily_gamas_updates.php`, `app/Models/DailyGamasUpdate.php` (kolom + cast baru)
+  - `apps/backend/app/Http/Controllers/Api/GamasController.php` (`storeUpdate`, `serializeUpdate`, `index`), `app/Services/Gamas/GamasStatsService.php` (`update_duration_minutes`)
+  - `apps/backend/tests/Feature/GamasUpdateTest.php` (3 test baru + 1 diperkuat)
+  - `apps/frontend/src/services/api.ts` (`GamasUpdate`, `gamasApi.storeUpdate`, agregat list), `apps/frontend/src/lib/utils.ts` (`formatDurationLong`), `apps/frontend/src/views/GamasView.vue` (dashboard, tabel 9 kolom, popup timeline)
 
 - **Auto-clear di Performa Komplain (2026-11-21)**:
   - `apps/backend/app/Http/Controllers/Api/DashboardController.php` (grup baris System/Scheduler dihapus, filter NOC auto-clear)
@@ -204,3 +217,5 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 - Item "Menunggu Konfirmasi" = **open**: ikut carry-over, hitungan `*_open`, dan badge `input_harian`.
 - Kolom `handling_minutes`/`performance_category` hanya terisi untuk komplain yang clear **setelah** fitur ini; data lama = NULL (dashboard abaikan, avg jadi `—`).
 - Format durasi duplikat di **2 tempat** dengan aturan yang sama: `formatDuration` (frontend) dan `App\Support\DurationFormat::minutes` (backend/export). Kalau aturan berubah, ubah keduanya + `DurationFormatTest`.
+- Format durasi **timeline GAMAS** memakai helper ketiga `formatDurationLong` (`lib/utils.ts`) yang menulis "menit" lengkap (`37 menit`, `3 jam 45 menit`) — sengaja tidak mengubah format lama "mnt" untuk komplain/dashboard.
+- **Test GAMAS time-range**: `GamasUpdateTest` mem-freeze waktu via `Carbon::setTestNow()`; `report_date` harus di-backdate lewat `DB::table()->update()` (cast `date` SQLite menyimpan `YYYY-MM-DD 00:00:00`, kalau tidak `whereBetween` tidak cocok).

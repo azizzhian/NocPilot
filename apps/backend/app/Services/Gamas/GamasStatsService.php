@@ -3,6 +3,7 @@
 namespace App\Services\Gamas;
 
 use App\Models\DailyGamas;
+use App\Models\DailyGamasUpdate;
 use App\Support\ReportStatus;
 
 class GamasStatsService
@@ -11,7 +12,7 @@ class GamasStatsService
      * Statistik gamas untuk rentang tanggal (dipakai halaman Gamas & widget dashboard).
      *
      * @return array{
-     *     summary: array{total: int, open_all: int, clear: int},
+     *     summary: array{total: int, open_all: int, clear: int, update_duration_minutes: int},
      *     by_kind: list<array{kind: string, label: string, total: int, open: int, clear: int}>,
      *     by_odc: list<array{odc_name: string, total: int, open: int, clear: int}>
      * }
@@ -32,6 +33,11 @@ class GamasStatsService
             ->count();
 
         $clear = $this->clearedInRangeQuery($from, $to)->count();
+
+        // Akumulasi durasi update yang valid (riwayat lama tanpa rentang waktu tidak menyumbang).
+        $updateDurationMinutes = (int) DailyGamasUpdate::query()
+            ->whereHas('gamas', fn ($q) => $q->whereBetween('report_date', [$from, $to]))
+            ->sum('duration_minutes');
 
         $kindRows = DailyGamas::query()
             ->whereBetween('report_date', [$from, $to])
@@ -85,6 +91,7 @@ class GamasStatsService
                 'total' => $total,
                 'open_all' => $openAll,
                 'clear' => $clear,
+                'update_duration_minutes' => $updateDurationMinutes,
             ],
             'by_kind' => $byKind,
             'by_odc' => $byOdc,

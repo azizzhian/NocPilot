@@ -12,6 +12,7 @@ use App\Services\Gamas\GamasStatsService;
 use App\Support\ExcelExport;
 use App\Support\ReportStatus;
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -36,6 +37,12 @@ class GamasController extends Controller
 
         $items = DailyGamas::query()
             ->with(['creator:id,name', 'clearer:id,name'])
+            ->withCount([
+                'updates',
+                'updates as updates_timed_count' => fn ($q) => $q->whereNotNull('duration_minutes'),
+            ])
+            ->withMax('updates as last_update_at', 'created_at')
+            ->withSum('updates as updates_duration_minutes', 'duration_minutes')
             ->when($search !== '', function ($q) use ($search) {
                 // Search global: abaikan filter periode, status & ODC
                 $q->where(function ($inner) use ($search) {
@@ -59,7 +66,17 @@ class GamasController extends Controller
             ->orderByDesc('id')
             ->limit(500)
             ->get()
-            ->map(fn (DailyGamas $g) => $this->serializer->serialize($g, $from));
+            ->map(function (DailyGamas $g) use ($from) {
+                $row = $this->serializer->serialize($g, $from);
+                $row['updates_count'] = (int) ($g->updates_count ?? 0);
+                $row['updates_timed_count'] = (int) ($g->updates_timed_count ?? 0);
+                $row['updates_duration_minutes'] = (int) ($g->updates_duration_minutes ?? 0);
+                $row['last_update_at'] = $g->last_update_at
+                    ? Carbon::parse($g->last_update_at)->toIso8601String()
+                    : null;
+
+                return $row;
+            });
 
         return response()->json(['data' => $items]);
     }
@@ -193,13 +210,59 @@ class GamasController extends Controller
     {
         $request->merge([
             'update_text' => trim((string) $request->input('update_text')),
+            'started_at' => $request->filled('started_at') ? $request->input('started_at') : null,
         ]);
         $data = $request->validate([
             'update_text' => 'required|string|max:2000',
+            'started_at' => 'nullable|date',
         ]);
+
+        $startedAt = null;
+        $endedAt = null;
+        $durationMinutes = null;
+
+        if ($data['started_at'] !== null) {
+            try {
+                $startedAt = Carbon::parse($data['started_at']);
+                $endedAt = now();
+            } catch (\Throwable) {
+                throw ValidationException::withMessages([
+                    'started_at' => 'Waktu mulai update tidak valid.',
+                ]);
+            }
+
+            if ($startedAt->getTimestamp() > $endedAt->getTimestamp() + 5) {
+                throw ValidationException::withMessages([
+                    'started_at' => 'Waktu mulai tidak boleh lebih akhir dari waktu selesai.',
+                ]);
+            }
+
+            $createdAt = $dailyGamas->created_at;
+            if ($createdAt instanceof CarbonInterface && $startedAt->getTimestamp() < $createdAt->getTimestamp()) {
+                throw ValidationException::withMessages([
+                    'started_at' => 'Waktu mulai tidak boleh sebelum gangguan dibuat.',
+                ]);
+            }
+
+            $lastUpdate = $dailyGamas->updates()
+                ->whereNotNull('ended_at')
+                ->orderByDesc('ended_at')
+                ->first();
+            if ($lastUpdate?->ended_at instanceof CarbonInterface
+                && $startedAt->getTimestamp() < $lastUpdate->ended_at->getTimestamp()) {
+                throw ValidationException::withMessages([
+                    'started_at' => 'Waktu mulai bertabrakan dengan update terakhir. Selesaikan update tersebut terlebih dahulu.',
+                ]);
+            }
+
+            $durationMinutes = (int) max(0, intdiv($endedAt->getTimestamp() - $startedAt->getTimestamp(), 60));
+        }
 
         $update = $dailyGamas->updates()->create([
             'update_text' => $data['update_text'],
+            'started_at' => $startedAt,
+            'ended_at' => $endedAt,
+            'duration_minutes' => $durationMinutes,
             'created_by' => $request->user()?->id,
         ]);
         $update->load('author:id,name');
@@ -282,6 +345,9 @@ class GamasController extends Controller
             'created_by' => $update->created_by,
             'author_name' => $update->author?->name,
             'created_at' => $update->created_at?->toIso8601String(),
+            'started_at' => $update->started_at?->toIso8601String(),
+            'ended_at' => $update->ended_at?->toIso8601String(),
+            'duration_minutes' => $update->duration_minutes,
         ];
     }
 
