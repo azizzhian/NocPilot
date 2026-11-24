@@ -18,12 +18,17 @@ const props = withDefaults(
     /** Prefill rentang */
     from?: string
     to?: string
+    /** Filter sumber tiket (khusus section ticket) */
+    source?: 'all' | 'direct' | 'complaint'
+    status?: string
   }>(),
   {
     title: '',
     date: '',
     from: '',
     to: '',
+    source: 'all',
+    status: undefined,
   },
 )
 
@@ -90,6 +95,8 @@ async function generate() {
       section: props.section,
       from: fromDate.value,
       to: toDate.value,
+      source: props.section === 'ticket' ? props.source : undefined,
+      status: props.section === 'ticket' ? props.status : undefined,
     })
     text.value = data.text ?? ''
     flash(data.message || 'Berhasil di-generate.')

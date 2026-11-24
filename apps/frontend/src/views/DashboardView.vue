@@ -13,7 +13,7 @@ import { dashboardApi, odcApi, type DashboardStats, type DashboardSpecialist } f
 import { useAuthStore } from '@/stores/auth'
 import { todayInput } from '@/lib/date-input'
 import { formatDuration } from '@/lib/utils'
-import { Activity, Trophy, Award, Cable, Timer, Siren, ListChecks } from 'lucide-vue-next'
+import { Activity, Trophy, Award, Cable, Timer, Siren, ListChecks, Ticket } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -36,6 +36,7 @@ const heatmap = ref<DashboardStats['heatmap']>({ days: [], rows: [] })
 const recentActivities = ref<DashboardStats['recent_activities']>([])
 const nocUsers = ref<DashboardStats['noc_users']>([])
 const complaintPerformance = ref<NonNullable<DashboardStats['complaint_performance']> | null>(null)
+const ticketSummary = ref<DashboardStats['ticket_summary'] | null>(null)
 const gamasSummary = ref<DashboardStats['gamas_summary'] | null>(null)
 
 const showKpis = computed(() => auth.can('dashboard.widget.kpis'))
@@ -44,6 +45,7 @@ const showClearByNoc = computed(() => auth.can('dashboard.widget.clear_by_noc'))
 const showNocPerformance = computed(() => auth.can('dashboard.widget.noc_performance'))
 const showComplaintPerformance = computed(() => auth.can('dashboard.widget.complaint_performance'))
 const showGamas = computed(() => auth.can('dashboard.widget.gamas'))
+const showTickets = computed(() => auth.can('ticket.view'))
 const showRecent = computed(() => auth.can('dashboard.widget.recent'))
 
 const shiftOptions = [
@@ -337,6 +339,7 @@ async function load() {
     odcStats.value = data.odc_stats ?? []
     odcPage.value = 1
     complaintPerformance.value = data.complaint_performance ?? null
+    ticketSummary.value = data.ticket_summary ?? null
     gamasSummary.value = data.gamas_summary ?? null
     charts.value = data.charts ?? emptyCharts()
     heatmap.value = data.heatmap ?? { days: [], rows: [] }
@@ -413,6 +416,7 @@ onMounted(async () => {
         :value="kpi.value"
         :open="kpi.open"
         :clear="kpi.clear"
+        :clear-hint="kpi.key === 'complaints' ? 'Termasuk Menunggu Konfirmasi setelah 30 menit & komplain yang dieskalasikan ke tiket' : undefined"
         :split-status="Boolean(kpi.split_status)"
         :color="kpi.color"
         :icon="kpi.icon ?? 'router'"
@@ -479,7 +483,7 @@ onMounted(async () => {
     <div v-if="!loading && showClearByNoc" class="mt-6">
       <ChartCard
         title="Performa NOC per Kategori"
-        subtitle="Stacked bar — pembagian kerja (Clear + On-Progress) tiap orang"
+        subtitle="Stacked bar — pembagian kerja (Clear termasuk Menunggu Konfirmasi ≥30 menit & eskalasi tiket + On-Progress) tiap orang"
         :categories="stacked.categories"
         :series="stacked.series"
         type="bar"
@@ -497,7 +501,7 @@ onMounted(async () => {
             <Trophy class="h-4 w-4 text-primary" />
             <h3 class="text-sm font-semibold text-foreground">Leaderboard</h3>
           </div>
-          <p class="mt-1 text-xs text-muted">On-Progress vs Clear per kategori — ranking by total (Clear + On-Progress)</p>
+          <p class="mt-1 text-xs text-muted">On-Progress vs Clear per kategori — ranking by total (Clear termasuk Menunggu Konfirmasi ≥30 menit & eskalasi tiket)</p>
         </div>
         <div v-if="nocPerformance.length" class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -567,12 +571,12 @@ onMounted(async () => {
           </div>
           <p class="mt-1 text-xs text-muted">
             Alur: On-Progress → Menunggu Konfirmasi → Clear (auto-clear 30 menit tanpa konfirmasi pelanggan).
-            Durasi dihitung dari input sampai clear.
+            Menunggu Konfirmasi baru dihitung Clear setelah 30 menit; durasi/SLA tetap dari Clear final.
           </p>
         </div>
 
         <!-- Ringkasan atas -->
-        <div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-6">
+        <div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-7">
           <div class="rounded-xl border border-border bg-muted/20 p-3">
             <p class="text-[11px] text-muted">Total komplain</p>
             <p class="mt-0.5 text-2xl font-bold text-foreground">{{ complaintPerformance.summary.total }}</p>
@@ -581,12 +585,12 @@ onMounted(async () => {
           <div class="rounded-xl border border-border bg-warning/5 p-3">
             <p class="text-[11px] text-muted">Sedang ditangani</p>
             <p class="mt-0.5 text-2xl font-bold text-warning">{{ complaintPerformance.summary.open_all }}</p>
-            <p class="text-[11px] text-muted">{{ complaintPerformance.summary.in_progress }} On-Progress · {{ complaintPerformance.summary.waiting }} menunggu konfirmasi</p>
+            <p class="text-[11px] text-muted">{{ complaintPerformance.summary.in_progress }} On-Progress · {{ complaintPerformance.summary.waiting }} menunggu konfirmasi (≥30 menit dihitung Clear)</p>
           </div>
           <div class="rounded-xl border border-border bg-info/5 p-3">
             <p class="text-[11px] text-muted">Rata-rata durasi</p>
             <p class="mt-0.5 text-2xl font-bold text-info">{{ fmtDuration(complaintPerformance.summary.avg_minutes) }}</p>
-            <p class="text-[11px] text-muted">{{ complaintPerformance.summary.clear }} komplain clear</p>
+            <p class="text-[11px] text-muted">{{ complaintPerformance.summary.clear_final ?? 0 }} komplain Clear final (durasi/SLA)</p>
           </div>
           <div class="rounded-xl border border-border bg-muted/20 p-3">
             <p class="text-[11px] text-muted">Auto-clear</p>
@@ -596,7 +600,12 @@ onMounted(async () => {
           <div class="rounded-xl border border-border bg-success/5 p-3">
             <p class="text-[11px] text-muted">Clear periode</p>
             <p class="mt-0.5 text-2xl font-bold text-success">{{ complaintPerformance.summary.clear }}</p>
-            <p class="text-[11px] text-muted">input: {{ complaintPerformance.summary.total }} · open: {{ complaintPerformance.summary.open }}</p>
+            <p class="text-[11px] text-muted">termasuk menunggu ≥30 menit & tiket · open: {{ complaintPerformance.summary.open }}</p>
+          </div>
+          <div class="rounded-xl border border-border bg-primary/5 p-3">
+            <p class="text-[11px] text-muted">Dieskalasi ke Tiket</p>
+            <p class="mt-0.5 text-2xl font-bold text-primary">{{ complaintPerformance.summary.escalated ?? 0 }}</p>
+            <p class="text-[11px] text-muted">terhubung tiket · dihitung Clear di performa</p>
           </div>
           <div class="rounded-xl border border-border p-3" :class="complaintSlaTone.box">
             <div class="flex items-center gap-1.5">
@@ -635,13 +644,13 @@ onMounted(async () => {
                 <th class="pb-2 pr-3" rowspan="2">Petugas NOC</th>
                 <th class="pb-1 pr-2 text-center" colspan="3">Komplain</th>
                 <th class="pb-2 pr-2 text-right" rowspan="2">Persen Komplain</th>
-                <th class="pb-1 pr-2 text-center" colspan="4">Kategori performa (clear periode)</th>
+                <th class="pb-1 pr-2 text-center" colspan="4">Kategori performa (Clear final)</th>
                 <th class="pb-2 text-right" rowspan="2">Rata-rata durasi</th>
               </tr>
               <tr class="border-b border-border text-left text-[10px] text-muted">
                 <th class="pb-2 pr-2 text-right font-medium">Total</th>
                 <th class="pb-2 pr-2 text-right font-medium">Ditangani</th>
-                <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+                <th class="pb-2 pr-2 text-right font-medium" title="Termasuk Menunggu Konfirmasi setelah 30 menit & komplain dengan tiket">Clear</th>
                 <th class="pb-2 pr-2 text-right font-medium text-success">Cepat</th>
                 <th class="pb-2 pr-2 text-right font-medium text-info">Lambat</th>
                 <th class="pb-2 pr-2 text-right font-medium text-warning">Cukup</th>
@@ -686,6 +695,32 @@ onMounted(async () => {
           </table>
         </div>
         <p v-else class="py-8 text-center text-sm text-muted">Belum ada komplain di periode ini.</p>
+      </Card>
+    </div>
+
+    <!-- 4a1. Statistik Ticket -->
+    <div v-if="!loading && showTickets && ticketSummary" class="mt-6">
+      <Card class="p-5">
+        <div class="mb-4">
+          <div class="flex items-center gap-2">
+            <Ticket class="h-4 w-4 text-primary" />
+            <h3 class="text-sm font-semibold text-foreground">Statistik Ticket</h3>
+          </div>
+          <p class="mt-1 text-xs text-muted">
+            Satu modul ticket untuk dua sumber: tiket langsung dan tiket dari eskalasi komplain.
+          </p>
+        </div>
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div v-for="card in [
+            { label: 'Total Tiket', value: ticketSummary.total, tone: 'text-foreground' },
+            { label: 'Tiket Aktif', value: ticketSummary.active, tone: 'text-warning' },
+            { label: 'Dari Komplain', value: ticketSummary.from_complaint, tone: 'text-info' },
+            { label: 'Tiket Selesai', value: ticketSummary.finished, tone: 'text-success' },
+          ]" :key="card.label" class="rounded-xl border border-border bg-muted/20 p-3">
+            <p class="text-[11px] text-muted">{{ card.label }}</p>
+            <p class="mt-0.5 text-xl font-bold" :class="card.tone">{{ card.value }}</p>
+          </div>
+        </div>
       </Card>
     </div>
 
@@ -938,7 +973,7 @@ onMounted(async () => {
       <div class="mb-4">
         <h3 class="text-sm font-semibold text-foreground">Detail Performa Seluruh NOC</h3>
         <p class="text-xs text-muted">
-          OP = On-Progress · Clear = selesai · Rata-rata/hari dari {{ periodDays }} hari (berdasarkan total Clear + On-Progress)
+          OP = On-Progress · Clear termasuk Menunggu Konfirmasi ≥30 menit & komplain dengan tiket · Rata-rata/hari dari {{ periodDays }} hari
         </p>
       </div>
       <div v-if="nocPerformance.length" class="overflow-x-auto">

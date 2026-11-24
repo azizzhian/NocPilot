@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Services\Gamas\GamasStatsService;
 use App\Support\ComplaintSla;
 use App\Support\ReportStatus;
+use App\Support\TicketStatus;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -124,6 +125,7 @@ class DashboardController extends Controller
             'odc_stats' => $odcStats,
             'complaint_client_share' => $complaintClientShare,
             'complaint_performance' => $complaintPerformance,
+            'ticket_summary' => $this->ticketSummary($from, $to, $odcName),
             'gamas_summary' => $gamasSummary,
             'charts' => $charts,
             'heatmap' => $this->weeklyHeatmap($to, $userId, $odcName),
@@ -272,25 +274,11 @@ class DashboardController extends Controller
             'complaints' => (clone $complaints)
                 ->when($userId, fn ($q) => $q->where('created_by', $userId))
                 ->count(),
-            'complaints_open' => DailyComplaint::query()
-                ->whereBetween('report_date', [$fromDate, $toDate])
-                ->where(function ($q) {
-                    $q->whereNull('status')
-                        ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
-                })
-                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
-                ->when($userId, fn ($q) => $q->where('created_by', $userId))
+            'complaints_open' => $this->countComplaintOpens($fromDate, $toDate, $userId, $odcName),
+            'complaints_open_all' => $this->countComplaintOpens(null, $toDate, $userId, $odcName),
+            'complaints_clear' => $this->complaintClearLikeRows($from, $to, $odcName)
+                ->filter(fn (DailyComplaint $row) => $userId === null || $this->complaintClearActor($row) === $userId)
                 ->count(),
-            'complaints_open_all' => DailyComplaint::query()
-                ->whereDate('report_date', '<=', $toDate)
-                ->where(function ($q) {
-                    $q->whereNull('status')
-                        ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
-                })
-                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
-                ->when($userId, fn ($q) => $q->where('created_by', $userId))
-                ->count(),
-            'complaints_clear' => $this->countClearsInRange(DailyComplaint::class, $from, $to, $userId, $odcName),
             'dismantles' => $this->countDismantleOpenedInRange($from, $to, $userId, $odcName),
             'dismantles_open' => $this->countDismantleOpens($fromDate, $toDate, $userId, $odcName),
             'dismantles_open_all' => $this->countDismantleOpensUpTo($toDate, $userId, $odcName),
@@ -446,7 +434,7 @@ class DashboardController extends Controller
         $activationClears = $odcName
             ? collect()
             : $this->groupClears(DailyActivation::class, $fromDate, $toDate);
-        $complaintClears = $this->groupClears(DailyComplaint::class, $fromDate, $toDate, $odcName);
+        $complaintClears = $this->groupComplaintClears($from, $to, $odcName);
         $dismantleClears = $this->groupDismantleClears($fromDate, $toDate, $odcName);
         $cctvClears = $odcName
             ? collect()
@@ -459,7 +447,7 @@ class DashboardController extends Controller
         $activationOpens = $odcName
             ? collect()
             : $this->groupOpens(DailyActivation::class, $fromDate, $toDate);
-        $complaintOpens = $this->groupOpens(DailyComplaint::class, $fromDate, $toDate, $odcName);
+        $complaintOpens = $this->groupComplaintOpens($fromDate, $toDate, $odcName);
         $dismantleOpens = $this->groupDismantleOpens($fromDate, $toDate, $odcName);
         $cctvOpens = $odcName
             ? collect()
@@ -600,19 +588,52 @@ class DashboardController extends Controller
      *
      * @return array{summary: array<string, mixed>, rows: list<array<string, mixed>>}
      */
+    protected function ticketSummary(Carbon $from, Carbon $to, ?string $odcName = null): array
+    {
+        $query = ReportTicket::query()
+            ->whereDate('opened_at', '>=', $from->toDateString())
+            ->whereDate('opened_at', '<=', $to->toDateString())
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName));
+
+        $tickets = (clone $query)->get(['source', 'status']);
+        $counts = (clone $query)
+            ->selectRaw('status, COUNT(*) as total')
+            ->groupBy('status')
+            ->pluck('total', 'status');
+
+        $countStatus = fn (string $status): int => (int) ($counts[$status] ?? 0);
+
+        return [
+            'total' => $tickets->count(),
+            'direct' => $tickets->filter(fn ($t) => $t->source !== 'complaint')->count(),
+            'from_complaint' => $tickets->filter(fn ($t) => $t->source === 'complaint')->count(),
+            'open' => $countStatus(TicketStatus::OPEN),
+            'assigned' => $countStatus(TicketStatus::ASSIGNED),
+            'on_site' => $countStatus(TicketStatus::ON_SITE),
+            'in_progress' => $countStatus(TicketStatus::IN_PROGRESS),
+            'completed' => $countStatus(TicketStatus::COMPLETED),
+            'clear' => $countStatus(TicketStatus::LEGACY_CLEAR) + $countStatus(TicketStatus::LEGACY_CLOSED),
+            'close' => $countStatus(TicketStatus::LEGACY_CLEAR) + $countStatus(TicketStatus::LEGACY_CLOSED),
+            'cancelled' => $countStatus(TicketStatus::CANCELLED),
+            'active' => $countStatus(TicketStatus::LEGACY_ON_PROGRESS),
+            'finished' => $countStatus(TicketStatus::LEGACY_CLEAR) + $countStatus(TicketStatus::LEGACY_CLOSED),
+        ];
+    }
+
     protected function complaintPerformance(Carbon $from, Carbon $to, ?int $userId, ?string $odcName = null, ?int $shift = null): array
     {
         $fromDate = $from->toDateString();
         $toDate = $to->toDateString();
         $fromStart = $from->copy()->startOfDay();
         $toEnd = $to->copy()->endOfDay();
+        $asOf = $this->complaintPerformanceAsOf($toDate);
 
         $inputs = DailyComplaint::query()
             ->whereBetween('report_date', [$fromDate, $toDate])
             ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
             ->when($userId, fn ($q) => $q->where('created_by', $userId))
             ->when($shift, fn ($q) => $q->where('shift', $shift))
-            ->get(['id', 'created_by', 'status', 'parent_complaint_id']);
+            ->get(['id', 'created_by', 'status', 'parent_complaint_id', 'ticket_id', 'escalated_at', 'handled_at']);
 
         $cleared = DailyComplaint::query()
             ->where('status', ReportStatus::CLEAR)
@@ -633,18 +654,31 @@ class DashboardController extends Controller
             ->when($shift, fn ($q) => $q->where('shift', $shift))
             ->get(['id', 'created_by', 'cleared_by', 'status', 'handling_minutes', 'performance_category', 'auto_cleared']);
 
+        $clearLike = $this->complaintClearLikeRows($from, $to, $odcName)
+            ->when($shift, fn ($rows) => $rows->filter(fn ($c) => (int) ($c->shift ?? 0) === $shift))
+            ->when($userId, function ($rows) use ($userId) {
+                return $rows->filter(function ($c) use ($userId) {
+                    if ($c->status === ReportStatus::CLEAR) {
+                        return (int) ($c->cleared_by ?? 0) === $userId
+                            || ((bool) $c->auto_cleared && (int) ($c->created_by ?? 0) === $userId);
+                    }
+                    if ($c->status === ReportStatus::WAITING_CONFIRMATION) {
+                        return (int) ($c->handled_by ?? $c->created_by ?? 0) === $userId;
+                    }
+
+                    return (int) ($c->created_by ?? 0) === $userId;
+                });
+            });
+
         $openBase = DailyComplaint::query()
             ->whereDate('report_date', '<=', $toDate)
             ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
             ->when($userId, fn ($q) => $q->where('created_by', $userId))
             ->when($shift, fn ($q) => $q->where('shift', $shift));
 
-        $openAll = (clone $openBase)
-            ->where(function ($q) {
-                $q->whereNull('status')
-                    ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
-            })
-            ->count();
+        $openAllQuery = clone $openBase;
+        $this->scopeComplaintOpen($openAllQuery, $toDate);
+        $openAll = $openAllQuery->count();
         $inProgressAll = (clone $openBase)->where('status', ReportStatus::ON_PROGRESS)->count();
         $waitingAll = (clone $openBase)->where('status', ReportStatus::WAITING_CONFIRMATION)->count();
 
@@ -668,6 +702,8 @@ class DashboardController extends Controller
             'in_progress' => 0,
             'waiting' => 0,
             'clear' => 0,
+            'clear_final' => 0,
+            'escalated' => 0,
             'auto_cleared' => 0,
             'durations' => [],
             'sla_items' => [],
@@ -678,7 +714,7 @@ class DashboardController extends Controller
             $key = (string) ($c->created_by ?? 0);
             $byUser[$key] ??= $emptyRow();
             $byUser[$key]['total']++;
-            if (ReportStatus::isOpen($c->status)) {
+            if (! $this->isComplaintPerformanceClear($c, $asOf)) {
                 $byUser[$key]['open']++;
             }
             if ($c->status === ReportStatus::ON_PROGRESS) {
@@ -687,12 +723,21 @@ class DashboardController extends Controller
             if ($c->status === ReportStatus::WAITING_CONFIRMATION) {
                 $byUser[$key]['waiting']++;
             }
+            if ($c->ticket_id || $c->escalated_at) {
+                $byUser[$key]['escalated']++;
+            }
+        }
+
+        foreach ($clearLike as $c) {
+            $key = (string) ($this->complaintClearActor($c, true) ?? 0);
+            $byUser[$key] ??= $emptyRow();
+            $byUser[$key]['clear']++;
         }
 
         foreach ($cleared as $c) {
             $key = (string) ($c->cleared_by ?? $c->created_by ?? 0);
             $byUser[$key] ??= $emptyRow();
-            $byUser[$key]['clear']++;
+            $byUser[$key]['clear_final']++;
             $byUser[$key]['sla_items'][] = $c;
             if ($c->auto_cleared) {
                 $byUser[$key]['auto_cleared']++;
@@ -735,11 +780,13 @@ class DashboardController extends Controller
         return [
             'summary' => [
                 'total' => $inputs->count(),
-                'open' => $inputs->filter(fn (DailyComplaint $c) => ReportStatus::isOpen($c->status))->count(),
+                'open' => $inputs->filter(fn (DailyComplaint $c) => ! $this->isComplaintPerformanceClear($c, $asOf))->count(),
                 'open_all' => $openAll,
                 'in_progress' => $inProgressAll,
                 'waiting' => $waitingAll,
-                'clear' => $cleared->count(),
+                'clear' => $clearLike->count(),
+                'clear_final' => $cleared->count(),
+                'escalated' => $inputs->filter(fn (DailyComplaint $c) => (bool) $c->ticket_id || (bool) $c->escalated_at)->count(),
                 'avg_minutes' => $avgMinutes,
                 'auto_cleared' => $cleared->filter(fn (DailyComplaint $c) => (bool) $c->auto_cleared)->count(),
                 'repeat' => $inputs->filter(fn (DailyComplaint $c) => (bool) $c->parent_complaint_id)->count(),
@@ -765,33 +812,13 @@ class DashboardController extends Controller
         $toEnd = $to->copy()->endOfDay();
 
         $complaintClears = $this->mergeOdcCounts(
-            DailyComplaint::query()
-                ->selectRaw('odc_name, COUNT(*) as total')
-                ->where('status', ReportStatus::CLEAR)
-                ->where(function ($q) use ($fromStart, $toEnd, $fromDate, $toDate) {
-                    $q->whereBetween('cleared_at', [$fromStart, $toEnd])
-                        ->orWhere(function ($q2) use ($fromDate, $toDate) {
-                            $q2->whereNull('cleared_at')
-                                ->whereBetween('report_date', [$fromDate, $toDate]);
-                        });
-                })
-                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
-                ->groupBy('odc_name')
-                ->get(),
+            $this->complaintClearLikeRows($from, $to, $odcName)
+                ->map(fn (DailyComplaint $row) => (object) ['odc_name' => $row->odc_name, 'total' => 1]),
             'odc_name',
         );
 
         $complaintOpens = $this->mergeOdcCounts(
-            DailyComplaint::query()
-                ->selectRaw('odc_name, COUNT(*) as total')
-                ->whereDate('report_date', '<=', $toDate)
-                ->where(function ($q) {
-                    $q->whereNull('status')
-                        ->orWhereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
-                })
-                ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
-                ->groupBy('odc_name')
-                ->get(),
+            $this->complaintOpenRowsByOdc($toDate, $odcName),
             'odc_name',
         );
 
@@ -1746,6 +1773,182 @@ class DashboardController extends Controller
             ->groupBy('created_by')
             ->get()
             ->keyBy('created_by');
+    }
+
+    /** Batas penilaian performa: jangan menghitung clear-like yang belum terjadi (periode masa depan). */
+    protected function complaintPerformanceAsOf(string $toDate): Carbon
+    {
+        $endOfPeriod = Carbon::parse($toDate)->endOfDay();
+
+        return now()->lessThan($endOfPeriod) ? now() : $endOfPeriod;
+    }
+
+    /**
+     * Satu baris komplain dibaca "Clear" pada agregat performa bila:
+     * status Clear, punya eskalasi tiket, atau Menunggu Konfirmasi yang sudah lewat
+     * 30 menit sejak handled_at. Data lama tanpa handled_at tetap dihitung Clear.
+     */
+    protected function isComplaintPerformanceClear(DailyComplaint $complaint, Carbon $asOf): bool
+    {
+        if (ReportStatus::isClear($complaint->status) || ! empty($complaint->escalated_at)) {
+            return true;
+        }
+
+        if ($complaint->status !== ReportStatus::WAITING_CONFIRMATION) {
+            return false;
+        }
+
+        if (! $complaint->handled_at) {
+            return true;
+        }
+
+        return $complaint->handled_at->copy()
+            ->addMinutes(DailyComplaint::WAITING_CONFIRMATION_MINUTES)
+            ->lessThanOrEqualTo($asOf);
+    }
+
+    /**
+     * Komplain yang dibaca "Clear" pada agregat performa:
+     * Clear (cleared_at), Menunggu Konfirmasi yang sudah lewat 30 menit (handled_at + 30 menit),
+     * atau punya tiket eskalasi (escalated_at).
+     * Data lama tanpa timestamp memakai report_date sebagai fallback.
+     *
+     * @return \Illuminate\Support\Collection<int, DailyComplaint>
+     */
+    protected function complaintClearLikeRows(Carbon $from, Carbon $to, ?string $odcName = null)
+    {
+        $fromDate = $from->toDateString();
+        $toDate = $to->toDateString();
+        $fromStart = $from->copy()->startOfDay();
+        $toEnd = $to->copy()->endOfDay();
+        $waitingWindow = [
+            $fromStart->copy()->subMinutes(DailyComplaint::WAITING_CONFIRMATION_MINUTES),
+            $this->complaintPerformanceAsOf($toDate)
+                ->subMinutes(DailyComplaint::WAITING_CONFIRMATION_MINUTES),
+        ];
+
+        return DailyComplaint::query()
+            ->select([
+                'id', 'status', 'created_by', 'cleared_by', 'handled_by',
+                'cleared_at', 'handled_at', 'escalated_at', 'report_date',
+                'odc_name', 'shift', 'handling_minutes', 'performance_category', 'auto_cleared',
+            ])
+            ->where(function ($q) use ($fromStart, $toEnd, $fromDate, $toDate, $waitingWindow) {
+                $q->where(function ($q1) use ($fromStart, $toEnd, $fromDate, $toDate) {
+                    $q1->whereRaw('LOWER(status) = ?', [strtolower(ReportStatus::CLEAR)])
+                        ->where(function ($q2) use ($fromStart, $toEnd, $fromDate, $toDate) {
+                            $q2->whereBetween('cleared_at', [$fromStart, $toEnd])
+                                ->orWhere(function ($q3) use ($fromDate, $toDate) {
+                                    $q3->whereNull('cleared_at')
+                                        ->whereBetween('report_date', [$fromDate, $toDate]);
+                                });
+                        });
+                })
+                ->orWhere(function ($q1) use ($waitingWindow, $fromDate, $toDate) {
+                    $q1->whereRaw('LOWER(status) = ?', [strtolower(ReportStatus::WAITING_CONFIRMATION)])
+                        ->where(function ($q2) use ($waitingWindow, $fromDate, $toDate) {
+                            $q2->whereBetween('handled_at', $waitingWindow)
+                                ->orWhere(function ($q3) use ($fromDate, $toDate) {
+                                    $q3->whereNull('handled_at')
+                                        ->whereBetween('report_date', [$fromDate, $toDate]);
+                                });
+                        });
+                })
+                ->orWhere(function ($q1) use ($fromStart, $toEnd) {
+                    $q1->whereNotNull('escalated_at')
+                        ->whereBetween('escalated_at', [$fromStart, $toEnd])
+                        ->whereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)]);
+                });
+            })
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->get();
+    }
+
+    /**
+     * Atribusi Clear: eskalasi ke pembuat komplain, Menunggu Konfirmasi ke penangani,
+     * Clear ke cleared_by. Fallback ke created_by dipakai widget Performa Komplain
+     * agar auto-clear tetap masuk ke baris pembuat.
+     */
+    protected function complaintClearActor(DailyComplaint $complaint, bool $fallbackToCreator = false): ?int
+    {
+        if ($complaint->status === ReportStatus::WAITING_CONFIRMATION) {
+            $actor = $complaint->handled_by ?? ($fallbackToCreator ? $complaint->created_by : null);
+        } elseif ($complaint->escalated_at && $complaint->status !== ReportStatus::CLEAR) {
+            $actor = $complaint->created_by;
+        } else {
+            $actor = $complaint->cleared_by ?? ($fallbackToCreator ? $complaint->created_by : null);
+        }
+
+        return $actor ? (int) $actor : null;
+    }
+
+    /**
+     * Komplain yang masih open: bukan Clear, bukan eskalasi tiket, dan Menunggu Konfirmasi
+     * yang belum lewat 30 menit sejak handled_at. Data lama tanpa handled_at tetap Clear.
+     */
+    protected function scopeComplaintOpen($query, string $toDate): void
+    {
+        $cutoff = $this->complaintPerformanceAsOf($toDate)
+            ->subMinutes(DailyComplaint::WAITING_CONFIRMATION_MINUTES);
+
+        $query->whereNull('escalated_at')
+            ->where(function ($q) use ($cutoff) {
+                $q->whereNull('status')
+                    ->orWhere(function ($q1) use ($cutoff) {
+                        $q1->whereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::CLEAR)])
+                            ->where(function ($q2) use ($cutoff) {
+                                $q2->whereRaw('LOWER(status) <> ?', [strtolower(ReportStatus::WAITING_CONFIRMATION)])
+                                    ->orWhere('handled_at', '>', $cutoff);
+                            });
+                    });
+            });
+    }
+
+    /** @return \Illuminate\Support\Collection<int, object> */
+    protected function complaintOpenRowsByOdc(string $toDate, ?string $odcName = null)
+    {
+        $query = DailyComplaint::query()
+            ->select('odc_name', DB::raw('COUNT(*) as total'))
+            ->whereDate('report_date', '<=', $toDate)
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName));
+        $this->scopeComplaintOpen($query, $toDate);
+
+        return $query->groupBy('odc_name')->get();
+    }
+
+    protected function countComplaintOpens(?string $fromDate, string $toDate, ?int $userId = null, ?string $odcName = null): int
+    {
+        $query = DailyComplaint::query()
+            ->when(
+                $fromDate,
+                fn ($q) => $q->whereBetween('report_date', [$fromDate, $toDate]),
+                fn ($q) => $q->whereDate('report_date', '<=', $toDate),
+            )
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName))
+            ->when($userId, fn ($q) => $q->where('created_by', $userId));
+        $this->scopeComplaintOpen($query, $toDate);
+
+        return $query->count();
+    }
+
+    /** @return \Illuminate\Support\Collection<int|string, object> */
+    protected function groupComplaintClears(Carbon $from, Carbon $to, ?string $odcName = null)
+    {
+        return $this->complaintClearLikeRows($from, $to, $odcName)
+            ->groupBy(fn (DailyComplaint $row) => $this->complaintClearActor($row) ?? 0)
+            ->map(fn ($rows) => (object) ['total' => $rows->count()]);
+    }
+
+    protected function groupComplaintOpens(string $fromDate, string $toDate, ?string $odcName = null)
+    {
+        $query = DailyComplaint::query()
+            ->select('created_by', DB::raw('COUNT(*) as total'))
+            ->whereBetween('report_date', [$fromDate, $toDate])
+            ->whereNotNull('created_by')
+            ->when($odcName, fn ($q) => $q->where('odc_name', $odcName));
+        $this->scopeComplaintOpen($query, $toDate);
+
+        return $query->groupBy('created_by')->get()->keyBy('created_by');
     }
 
     /** @param  class-string  $model */

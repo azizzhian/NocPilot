@@ -43,7 +43,7 @@ class DailyEntryController extends Controller
         $carbon = Carbon::parse($date);
         $with = ['creator:id,name', 'clearer:id,name'];
 
-        $complaints = DailyComplaint::with($with)
+        $complaints = DailyComplaint::with([...$with, 'ticket:id,status'])
             ->where(fn ($q) => $this->forSelectedDateOrStillOpen($q, $carbon))
             ->orderByDesc('report_date')
             ->orderByDesc('id')
@@ -962,7 +962,7 @@ class DailyEntryController extends Controller
 
         $sla = $this->complaintSlaForFiltered($query);
         $items = (clone $query)
-            ->with(['creator:id,name', 'clearer:id,name', 'customer:id,name,customer_code,odc_id'])
+            ->with(['creator:id,name', 'clearer:id,name', 'customer:id,name,customer_code,odc_id', 'ticket:id,status'])
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->limit(500)
@@ -1415,7 +1415,7 @@ class DailyEntryController extends Controller
 
     protected function assertComplaintOwner(DailyComplaint $complaint, ?int $userId, string $message): void
     {
-        if ((int) ($complaint->created_by ?? 0) !== (int) ($userId ?? 0)) {
+        if (! $complaint->isOwnedBy($userId)) {
             abort(403, $message);
         }
     }
@@ -1431,7 +1431,7 @@ class DailyEntryController extends Controller
             return;
         }
 
-        if ((int) ($complaint->created_by ?? 0) !== (int) ($userId ?? 0)) {
+        if (! $complaint->isOwnedBy($userId)) {
             $message = $newStatus === ReportStatus::CLEAR
                 ? 'Hanya pembuat komplain yang dapat melakukan Clear.'
                 : 'Hanya pembuat komplain yang dapat mengubah status komplain.';

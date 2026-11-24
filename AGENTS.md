@@ -65,7 +65,7 @@ composer test --working-dir=apps/backend       # test backend (SQLite in-memory)
   - `Mikrotik/`, `Monitoring/` (RouterMonitor, SnmpPoller) — collector
   - `Dismantle/DismantleImportService`, `Customer/*Import*` — import Excel
   - `Auth/LoginMathCaptcha`, `Auth/TelegramAuthVerifier`, `Phone/PhoneNormalizer`, `Audit/ActivityLogger`
-- `app/Support/` — `ReportStatus` (konstanta status), `AppSetting`, `ExcelExport`, `ReportTemplateDefaults`, `SimpleTemplateEngine`
+- `app/Support/` — `ReportStatus` (konstanta status komplain), `TicketStatus` (workflow tiket), `AppSetting`, `ExcelExport`, `ReportTemplateDefaults`, `SimpleTemplateEngine`
 - `app/Models/Concerns/HasDailyAttribution.php` — `created_by` / `cleared_by` / `cleared_at` (siapa input, siapa clear)
 - `app/Console/Commands/` — `SyncRoutersCommand` (`routers:sync`), `RecordDeployCommand` (`app:record-deploy`, mencatat commit deploy ke tabel `app_updates` → notifikasi "update aplikasi" di Header), import pelanggan
 - `database/seeders/DatabaseSeeder.php` — role, user, data demo
@@ -82,6 +82,7 @@ composer test --working-dir=apps/backend       # test backend (SQLite in-memory)
 - `components/network/ResourceListView.vue` — CRUD generik untuk halaman master (OLT, ODC, ODP, POP, Lokasi, dll.)
 - `components/ui/` — komponen dasar (Button, Input, Select, Modal, Toast, DateRangePicker, ...)
 - `components/daily/` — komponen Input Harian (ComplaintHistoryPanel, CustomerAutocomplete, DailyStatusBadge, ...)
+- `components/tickets/` — `TicketFormModal.vue` (satu form tiket langsung + eskalasi), `TicketDetailModal.vue`, `TicketUpdateModal.vue`
 - `views/stubs/` — **tidak dipakai** (tidak di-import router). Jangan edit file di sini.
 
 ## 5. Aturan bisnis penting
@@ -126,6 +127,28 @@ Hampir semua list/dashboard punya filter ODC. Nilai `__none__` atau `Tanpa ODC` 
 - Riwayat update (`daily_gamas_updates`) punya `started_at`/`ended_at`/`duration_minutes` (nullable). `started_at` direkam frontend saat popup Update dibuka (dari `serverNow()`), `ended_at = now()` backend saat simpan, durasi = `intdiv` detik→menit. Klien lama tanpa `started_at` tetap diterima dengan ketiga kolom NULL → tampil "Durasi belum tersedia" (jangan mengarang durasi). Waktu depan/sebelum `created_at` GAMAS/tumpang tindih dengan `ended_at` update terakhir ditolak 422 `errors.started_at`.
 - **Usia gangguan** (`created_at` → `cleared_at`/`now()`) dan **total durasi update** (akumulasi `duration_minutes` valid) adalah dua metrik berbeda — jangan disamakan. Keduanya dipakai di tabel/popup Gamas; total durasi juga ada di `GamasStatsService::summary.update_duration_minutes` (dipakai `/gamas/stats` & dashboard `gamas_summary`).
 
+### Eskalasi Komplain → Ticket (2026-11-23)
+- **Satu modul tiket**: `report_tickets` (menu `/report/ticket`, `ReportTicketView.vue`) — modul `Ticket` legacy (`TicketController`, `tickets`, `ticket_activities`) tetap dead code, jangan dihidupkan. Tiket langsung (`source=direct`, `complaint_id=NULL`) dan tiket eskalasi (`source=complaint`) lewat **satu** endpoint `POST /report-tickets` dan **satu** form `components/tickets/TicketFormModal.vue`.
+- `App\Support\TicketStatus` = satu sumber kebenaran workflow: status baru `Open|Assigned|On-Site|In-Progress|Completed|Cancelled` + status lama `On-Progress|Clear|Closed` tetap dikenal sebagai *clear-like*. `activeStatuses()` dipakai untuk cegah tiket aktif ganda & proteksi auto-clear; `finishedStatuses()` untuk sinkronisasi clear. Jangan menambah workflow status kedua.
+- Relasi: `report_tickets.complaint_id` (nullable, **nullOnDelete**) + `source_snapshot` (arsip data komplain); `daily_complaints.ticket_id` + `escalated_at`. **Status komplain tetap 3** — penanda eskalasi memakai flag terpisah, bukan status ke-4.
+- Sinkronisasi: tiket selesai → komplain `Menunggu Konfirmasi` dengan **`handled_at = now()`** (timer auto-clear 30 menit dimulai ulang, bukan memakai waktu lama saat tiket masih aktif); tiket dibatalkan → komplain `On-Progress`, flag eskalasi dilepas. Auto-clear melewati komplain yang punya tiket aktif (`whereNotExists` + `lockForUpdate`). Tiket langsung tidak memengaruhi auto-clear mana pun.
+- Riwayat pekerjaan tiket = tabel `report_ticket_updates` (endpoint `GET/POST /report-tickets/{id}/updates`), **terpisah** dari activity log komplain. Aksi lain: `POST /{id}/assign`, `POST /{id}/start`, `PATCH /{id}/status`, `GET /{id}`. Foto dokumentasi opsional tersimpan di disk `public` (`ticket-photos`).
+- Eskalasi dibuat dalam `DB::transaction` + `lockForUpdate()` pada baris komplain; `escalation_reason` wajib. Satu komplain hanya satu tiket aktif; tiket Cancelled/Closed mengizinkan eskalasi ulang dan tercatat di activity log. Clear manual (Action wajib, pembuat, umur ≥5 menit) tidak berubah.
+
+### Status Report Ticket (revisi 2026-11-23)
+- Form tiket baru hanya menawarkan **On-Progress** (default) dan **Close**. Nilai yang disimpan untuk Close adalah status lama **`Closed`** (tidak ada nilai DB baru); label UI `Closed → Close`, `Clear → Clear` (historis tetap tampil apa adanya). Status extended `Open|Assigned|On-Site|In-Progress|Completed|Cancelled` tetap dikenal & tiket lama tetap bisa diedit, tetapi tidak ditawarkan sebagai opsi baru; filter "Lainnya" menyediakannya.
+- `App\Support\TicketStatus`: `formOptions()` = `[On-Progress, Closed]`, `closeStatuses()` = `[Clear, Closed]`, `kpiActiveStatuses()` = `[On-Progress]`. `activeStatuses()` **tidak diubah** (Open/Assigned/On-Site/In-Progress/On-Progress tetap melindungi komplain dari auto-clear). KPI "Tiket Aktif" hanya On-Progress; "Tiket Selesai" = Clear + Closed (Completed/Cancelled tidak termasuk).
+- Transisi ke `Closed`/`Clear` **wajib Action** (`action` field), dicatat di `cleared_by`/`cleared_at`/`closed_at` + `work_completed_at`. Tiket eskalasi yang ditutup (termasuk saat create langsung dengan status Close) → komplain `Menunggu Konfirmasi` dengan `handled_at = now()`, bukan auto-Clear.
+- Filter `status=Close` mencakup `Clear` + `Closed` (dimapping backend). Export, Generate Report, dan Dashboard memakai label/status agregat yang sama. Jangan menambah nilai status baru ke DB atau mengubah status lama.
+
+### Clear-like di performa Dashboard (2026-11-23, direvisi 2026-11-23)
+- Untuk **agregat performa Dashboard** (stacked bar "Performa NOC per Kategori", leaderboard, detail performa, KPI Komplain, Statistik ODC, widget Performa Komplain), yang dihitung **Clear** = `Clear` + **`Menunggu Konfirmasi` yang sudah lewat 30 menit sejak `handled_at`** + **komplain yang masih punya `escalated_at`** (dieskalasikan ke tiket). Menunggu Konfirmasi yang belum 30 menit tetap **open**. Data lama tanpa `handled_at` tetap dihitung Clear. `weeklyHeatmap` sengaja tidak mengikuti aturan ini.
+- Atribusi: eskalasi → `created_by` komplain, Menunggu Konfirmasi → `handled_by`, Clear → `cleared_by`. Di widget Performa Komplain, auto-clear (`cleared_by = null`) tetap masuk baris `created_by`.
+- Sumber waktu Clear-like: `cleared_at` / `handled_at + 30 menit` / `escalated_at`, fallback `report_date` untuk data lama. Helper satu-satunya: `DashboardController::isComplaintPerformanceClear()` (row-aware, memakai `DailyComplaint::WAITING_CONFIRMATION_MINUTES`) + `complaintPerformanceAsOf()` (batasi ke `min(now(), akhir periode)`), `complaintClearLikeRows()`, `complaintClearActor()`, `scopeComplaintOpen()`. `ReportStatus::isPerformanceClear()`/`performanceClearStatuses()` **sudah dihapus** — status saja tidak bisa menyatakan aturan waktu.
+- Aturan 30 menit ini **hanya agregat Dashboard**: status komplain di `/komplain`, carry-over, auto-clear scheduler, dan validasi Action tidak berubah. Komplain tetap berstatus `Menunggu Konfirmasi` sampai scheduler auto-clear; yang berubah hanya angka Clear di Dashboard.
+- **Jangan** mengubah `isClear()`/`isOpen()` demi aturan ini — auto-clear, validasi Action, dan SLA bergantung pada definisi lama. SLA/durasi/kategori performa tetap dari **Clear final** saja lewat `summary.clear_final` / `rows[].clear_final`.
+- Eskalasi tiket (`POST /report-tickets` dengan `complaint_id`) hanya boleh oleh **pembuat komplain** (`DailyComplaint::isOwnedBy()`); non-pembuat (termasuk admin) → 403. Tombol "Buat Tiket" di daftar komplain mengikuti aturan yang sama.
+
 ### Permission
 - Backend: middleware `permission:<nama>`. Frontend: `auth.can('<nama>')` + `meta.permission`. Role `administrator` = semua akses.
 - Permission baru: tambahkan di `config/permissions.php` (groups + role_defaults), lalu buat migration baru yang menyinkronkan (contoh: `2026_07_31_110000_sync_customizable_permissions.php`).
@@ -159,6 +182,8 @@ Hampir semua list/dashboard punya filter ODC. Nilai `__none__` atau `Tanpa ODC` 
 - **2026-09-22** — `olt_name` wajib diisi saat input Aktivasi supaya aktivasi selalu bisa dipetakan ke ODC.
 - **2026-11-20** — Gamas dipisah dari Komplain: tabel sendiri `daily_gamas`, permission `gamas.view`, menu `/gamas`; komplain selalu individu. Alur gamas sederhana On-Progress/Clear.
 - **2026-11-21** — Clear manual komplain wajib berusia ≥5 menit sejak `created_at` (presisi detik). Validasi backend di `DailyEntryController` (termasuk store dengan status Clear), countdown frontend memakai offset header `Date`; auto-clear tidak terkena aturan ini.
+- **2026-11-23** — Eskalasi komplain ke tiket memakai **satu modul tiket aktif** (`ReportTicket`); tiket langsung & tiket eskalasi memakai endpoint/form/workflow yang sama. Flag eskalasi terpisah (status komplain tetap 3), permissionExisting `ticket.view`/`ticket.manage` (route tiket kini di-gate middleware), auto-clear dikecualikan bila ada tiket aktif.
+- **2026-11-23** — Performa Dashboard memakai definisi **clear-like** (Clear + Menunggu Konfirmasi ≥30 menit sejak `handled_at` + eskalasi tiket) untuk stacked bar, leaderboard, KPI, Statistik ODC, dan widget Performa Komplain; SLA/durasi tetap dari Clear final. Eskalasi tiket hanya untuk pembuat komplain. Data lama tanpa `handled_at` tetap dihitung Clear.
 
 ## 8. Utang teknis yang diketahui
 

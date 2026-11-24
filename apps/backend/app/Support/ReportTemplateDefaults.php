@@ -150,6 +150,9 @@ Nama: {{customer_name}}
 Problem: {{problem}}
 Action: {{action}}
 Status: {{status}}
+Sumber: {{source}}
+No. Komplain Asal: {{complaint_number}}
+Alasan Eskalasi: {{escalation_reason}}
 Tgl Open: {{opened_at}}
 Tgl Close: {{closed_at}}
 

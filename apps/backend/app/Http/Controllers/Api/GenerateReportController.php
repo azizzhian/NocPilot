@@ -97,6 +97,8 @@ class GenerateReportController extends Controller
             'from' => 'nullable|date',
             'to' => 'nullable|date',
             'report_date' => 'nullable|date',
+            'source' => 'nullable|in:all,direct,complaint',
+            'status' => 'nullable|string|max:50',
         ]);
 
         $section = $data['section'];
@@ -112,7 +114,7 @@ class GenerateReportController extends Controller
             // Monitoring: pakai data DB terakhir (job/scheduler), tanpa syncAll agar tidak timeout.
             $text = $section === 'monitoring'
                 ? $monitorReport->generate()
-                : $generator->generateSection($section, $from, $to);
+                : $generator->generateSection($section, $from, $to, $data['source'] ?? null, $data['status'] ?? null);
         } catch (\Throwable $e) {
             report($e);
 

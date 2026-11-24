@@ -171,6 +171,8 @@ export interface DashboardStats {
       in_progress: number
       waiting: number
       clear: number
+      clear_final: number
+      escalated: number
       avg_minutes: number | null
       auto_cleared: number
       repeat: number
@@ -185,11 +187,28 @@ export interface DashboardStats {
       in_progress: number
       waiting: number
       clear: number
+      clear_final: number
+      escalated: number
       auto_cleared: number
       avg_minutes: number | null
       categories: Record<string, number>
       sla: ComplaintSlaSummary
     }>
+  }
+  ticket_summary?: {
+    total: number
+    direct: number
+    from_complaint: number
+    open: number
+    assigned: number
+    on_site: number
+    in_progress: number
+    completed: number
+    clear: number
+    close: number
+    cancelled: number
+    active: number
+    finished: number
   }
   gamas_summary?: {
     summary: {
@@ -636,31 +655,99 @@ export const dismantleApi = {
   },
 }
 
+export interface ReportTicketUpdateItem {
+  id: number
+  report_ticket_id: number
+  type: string
+  check_result: string | null
+  repair_action: string | null
+  material: string | null
+  photo: string | null
+  work_started_at: string | null
+  work_ended_at: string | null
+  note: string | null
+  author_name: string | null
+  created_at: string | null
+}
+
 export interface ReportTicketItem {
   id: number
+  source?: 'direct' | 'complaint' | string
+  complaint_id?: number | null
+  complaint_number?: string | null
+  customer_id?: number | null
   location: string | null
   odc_name?: string | null
   customer_code: string | null
   customer_name: string
+  customer_phone?: string | null
+  job_type?: string | null
+  priority?: string | null
+  visit_schedule?: string | null
+  source_snapshot?: Record<string, unknown> | null
   problem: string | null
   action: string | null
   status: 'On-Progress' | 'Clear' | 'Closed' | string
+  status_label?: string
   opened_at: string | null
   closed_at: string | null
   notes: string | null
+  escalation_reason?: string | null
+  escalated_at?: string | null
+  assigned_to?: number | null
+  assignee_name?: string | null
+  assigned_at?: string | null
+  work_started_at?: string | null
+  work_completed_at?: string | null
+  updates?: ReportTicketUpdateItem[]
   creator_name?: string | null
   clearer_name?: string | null
   cleared_at?: string | null
   created_at?: string | null
 }
 
+export interface ReportTicketStats {
+  total: number
+  active: number
+  from_complaint: number
+  finished: number
+  close_count: number
+  direct: number
+  status_counts: Record<string, number>
+  status_options: string[]
+  form_options: string[]
+  legacy_options: string[]
+  on_progress: number
+  clear: number
+  closed: number
+  open: number
+  assigned: number
+  on_site: number
+  in_progress: number
+  completed: number
+  cancelled: number
+}
+
 export const reportTicketApi = {
   list: (params?: Record<string, unknown>) =>
     api.get<PaginatedResponse<ReportTicketItem>>('/report-tickets', { params }),
-  stats: () => api.get<Record<string, number>>('/report-tickets/stats'),
+  stats: (params?: Record<string, unknown>) =>
+    api.get<ReportTicketStats>('/report-tickets/stats', { params }),
+  show: (id: number) => api.get<{ data: ReportTicketItem }>(`/report-tickets/${id}`),
   create: (data: Record<string, unknown>) => api.post('/report-tickets', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/report-tickets/${id}`, data),
   destroy: (id: number) => api.delete(`/report-tickets/${id}`),
+  assign: (id: number, assignedTo: number, note?: string) =>
+    api.post(`/report-tickets/${id}/assign`, { assigned_to: assignedTo, note }),
+  start: (id: number, note?: string) => api.post(`/report-tickets/${id}/start`, { note }),
+  setStatus: (id: number, status: string, note?: string) =>
+    api.patch(`/report-tickets/${id}/status`, { status, note }),
+  updates: (id: number) =>
+    api.get<{ data: ReportTicketUpdateItem[] }>(`/report-tickets/${id}/updates`),
+  storeUpdate: (id: number, data: FormData | Record<string, unknown>) =>
+    api.post(`/report-tickets/${id}/updates`, data, data instanceof FormData
+      ? { headers: { 'Content-Type': 'multipart/form-data' } }
+      : undefined),
   exportExcel: (params?: Record<string, unknown>) =>
     downloadFile('/report-tickets/export', `report-ticket-${Date.now()}.xlsx`, params),
 }
@@ -681,7 +768,15 @@ export interface ActivityLogItem {
 }
 
 export const activityApi = {
-  list: (params?: { search?: string; type?: string; scope?: 'audit' | 'activity'; page?: number; per_page?: number }) =>
+  list: (params?: {
+    search?: string
+    type?: string
+    scope?: 'audit' | 'activity'
+    subject_type?: string
+    subject_id?: number
+    page?: number
+    per_page?: number
+  }) =>
     api.get<PaginatedResponse<ActivityLogItem>>('/activity-logs', { params }),
   export: (params?: { scope?: 'audit' | 'activity'; type?: string }) => {
     const q = new URLSearchParams()
@@ -794,6 +889,11 @@ export interface DailyEntryItem {
   /** Sisa waktu auto-clear (menit), hanya untuk status Menunggu Konfirmasi */
   waiting_minutes_left?: number
   is_repeat?: boolean
+  /** Eskalasi ke modul Ticket (satu modul tiket, dua sumber) */
+  ticket_id?: number | null
+  ticket_status?: string | null
+  escalated_at?: string | null
+  complaint_number?: string | null
 }
 
 export interface ComplaintHistoryItem {
@@ -1105,8 +1205,14 @@ export const generateReportApi = {
   index: (date?: string) => api.get<GenerateReportIndexData>('/reports/generate', { params: { date } }),
   generate: (data: { report_date: string; responsible_name: string }) =>
     api.post<GenerateReportResult>('/reports/generate', data, { timeout: 180_000 }),
-  generateSection: (data: { section: ReportSection; from: string; to: string; report_date?: string }) =>
-    api.post<SectionReportResult>('/reports/generate/section', data, { timeout: 180_000 }),
+  generateSection: (data: {
+    section: ReportSection
+    from: string
+    to: string
+    report_date?: string
+    source?: 'all' | 'direct' | 'complaint'
+    status?: string
+  }) => api.post<SectionReportResult>('/reports/generate/section', data, { timeout: 180_000 }),
   history: (page = 1) =>
     api.get<{ data: ReportSnapshotListItem[]; current_page: number; last_page: number }>(
       '/reports/generate/history',

@@ -17,6 +17,8 @@ class ActivityLogController extends Controller
         $request->validate([
             'scope' => ['nullable', Rule::in(['audit', 'activity'])],
             'type' => ['nullable', 'string', 'max:50'],
+            'subject_type' => ['nullable', 'string', 'max:255'],
+            'subject_id' => ['nullable', 'integer'],
             'search' => ['nullable', 'string', 'max:255'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
@@ -35,6 +37,13 @@ class ActivityLogController extends Controller
 
         if ($type = $request->string('type')->toString()) {
             $query->where('type', $type);
+        }
+
+        if ($subjectType = $request->string('subject_type')->toString()) {
+            $query->where('subject_type', $subjectType);
+        }
+        if ($request->filled('subject_id')) {
+            $query->where('subject_id', $request->integer('subject_id'));
         }
 
         return ActivityLogResource::collection(

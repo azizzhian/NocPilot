@@ -62,7 +62,7 @@ class ReportGeneratorService
      *
      * @param  'complaint'|'gamas'|'activation'|'cctv'|'noc'|'dismantle'|'ticket'|'monitoring'  $section
      */
-    public function generateSection(string $section, Carbon $from, ?Carbon $to = null): string
+    public function generateSection(string $section, Carbon $from, ?Carbon $to = null, ?string $source = null, ?string $status = null): string
     {
         $this->pppoeByName = [];
         $to ??= $from->copy();
@@ -89,7 +89,7 @@ class ReportGeneratorService
             'cctv' => ['cctv_setups' => $this->dailyCctvSetups($from, $to)],
             'noc' => $this->nocUpdateOnlyContext($from, $to),
             'dismantle' => ['dismantles' => $this->moduleDismantles($from, $to)],
-            'ticket' => ['tickets' => $this->reportTickets($from, $to)],
+            'ticket' => ['tickets' => $this->reportTickets($from, $to, $source, $status)],
             default => [],
         };
 
@@ -220,11 +220,15 @@ class ReportGeneratorService
     }
 
     /** @return array<int, array<string, string>> */
-    private function reportTickets(Carbon $from, Carbon $to): array
+    private function reportTickets(Carbon $from, Carbon $to, ?string $source = null, ?string $status = null): array
     {
+        $statuses = \App\Support\TicketStatus::filterStatuses($status);
+
         return \App\Models\ReportTicket::query()
             ->whereDate('opened_at', '>=', $from->toDateString())
             ->whereDate('opened_at', '<=', $to->toDateString())
+            ->when(in_array($source, ['direct', 'complaint'], true), fn ($q) => $q->where('source', $source))
+            ->when($statuses !== null, fn ($q) => $q->whereIn('status', $statuses))
             ->orderByRaw("CASE WHEN status = 'Clear' OR status = 'Closed' THEN 1 ELSE 0 END")
             ->orderBy('opened_at')
             ->get()
@@ -235,7 +239,10 @@ class ReportGeneratorService
                 'customer_name' => $t->customer_name ?: '-',
                 'problem' => $t->problem ?: '-',
                 'action' => $t->action ?: '-',
-                'status' => $t->status ?: '-',
+                'status' => $t->status ? \App\Support\TicketStatus::displayLabel($t->status) : '-',
+                'source' => $t->source === 'complaint' ? 'Dari Komplain' : 'Tiket Langsung',
+                'complaint_number' => $t->source_complaint_number ?: '-',
+                'escalation_reason' => $t->escalation_reason ?: '-',
                 'opened_at' => $this->formatDate($t->opened_at),
                 'closed_at' => $this->formatDate($t->closed_at, true),
             ])

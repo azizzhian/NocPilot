@@ -48,6 +48,8 @@ class DailyComplaint extends Model
         'shift',
         'parent_complaint_id',
         'complaint_group_id',
+        'ticket_id',
+        'escalated_at',
         'handled_at',
         'handled_by',
         'auto_cleared',
@@ -66,6 +68,7 @@ class DailyComplaint extends Model
             'end_problem' => 'date',
             'cleared_at' => 'datetime',
             'handled_at' => 'datetime',
+            'escalated_at' => 'datetime',
             'auto_cleared' => 'boolean',
             'handling_minutes' => 'integer',
             'shift' => 'integer',
@@ -85,6 +88,43 @@ class DailyComplaint extends Model
     public function handler(): BelongsTo
     {
         return $this->belongsTo(User::class, 'handled_by');
+    }
+
+    public function ticket(): BelongsTo
+    {
+        return $this->belongsTo(ReportTicket::class, 'ticket_id');
+    }
+
+    public function activeTicket(): ?ReportTicket
+    {
+        return $this->tickets()
+            ->whereIn('status', \App\Support\TicketStatus::activeStatuses())
+            ->latest('id')
+            ->first();
+    }
+
+    public function tickets(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(ReportTicket::class, 'complaint_id');
+    }
+
+    public function hasActiveTicket(): bool
+    {
+        return $this->tickets()
+            ->whereIn('status', \App\Support\TicketStatus::activeStatuses())
+            ->exists();
+    }
+
+    public function complaintNumber(): string
+    {
+        $date = $this->report_date?->format('Ymd') ?: $this->created_at?->format('Ymd') ?: '00000000';
+
+        return 'KM-'.$date.'-'.str_pad((string) $this->id, 5, '0', STR_PAD_LEFT);
+    }
+
+    public function isOwnedBy(?int $userId): bool
+    {
+        return $userId !== null && (int) ($this->created_by ?? 0) === $userId;
     }
 
     public function isWaitingConfirmation(): bool

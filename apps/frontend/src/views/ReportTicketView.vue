@@ -1,24 +1,29 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import Card from '@/components/ui/Card.vue'
 import Badge from '@/components/ui/Badge.vue'
 import Button from '@/components/ui/Button.vue'
-import Input from '@/components/ui/Input.vue'
 import SearchInput from '@/components/ui/SearchInput.vue'
 import Select from '@/components/ui/Select.vue'
 import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 import Modal from '@/components/ui/Modal.vue'
-import Textarea from '@/components/ui/Textarea.vue'
 import SectionReportModal from '@/components/report/SectionReportModal.vue'
-import { reportTicketApi, odcApi, locationApi, type ReportTicketItem } from '@/services/api'
+import TicketFormModal from '@/components/tickets/TicketFormModal.vue'
+import TicketDetailModal from '@/components/tickets/TicketDetailModal.vue'
+import { reportTicketApi, odcApi, type ReportTicketItem, type ReportTicketStats } from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
 import { todayInput, formatTimeId } from '@/lib/date-input'
-import { Plus, Pencil, Trash2, Download, FileText } from 'lucide-vue-next'
+import { ticketStatusLabel, ticketStatusVariant } from '@/lib/ticket-status'
+import { Plus, Pencil, Trash2, Download, FileText, Eye } from 'lucide-vue-next'
 
 const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
 const search = ref('')
 const statusFilter = ref('all')
+const sourceFilter = ref<'all' | 'direct' | 'complaint'>('all')
 const fromDate = ref('')
 const toDate = ref('')
 const odcName = ref('')
@@ -26,52 +31,60 @@ const clearMode = ref(false)
 const currentPage = ref(1)
 const lastPage = ref(1)
 const odcs = ref<{ id: number; name: string }[]>([])
-const locations = ref<{ name: string; odc_name: string | null }[]>([])
 const items = ref<ReportTicketItem[]>([])
-const stats = ref<Record<string, number>>({})
+const stats = ref<Partial<ReportTicketStats>>({})
+const statsFailed = ref(false)
+const statsError = ref('')
 const loading = ref(true)
 const exporting = ref(false)
-const showModal = ref(false)
-const saving = ref(false)
-const editingId = ref<number | null>(null)
+const formOpen = ref(false)
+const formEditingId = ref<number | null>(null)
+const detailOpen = ref(false)
+const detailId = ref<number | null>(null)
 const error = ref('')
 const deleteTarget = ref<ReportTicketItem | null>(null)
 const deleting = ref(false)
 const reportModalOpen = ref(false)
 
-const ticketType = ref<'customer' | 'general'>('customer')
+const statusChips = ['On-Progress', 'Close'] as const
+const legacyStatuses = computed(() => stats.value.legacy_options ?? [])
 
-const form = ref({
-  location: '',
-  odc_name: '',
-  customer_code: '',
-  customer_name: '',
-  problem: '',
-  action: '',
-  status: 'On-Progress',
-  opened_at: todayInput(),
-  closed_at: '',
-  notes: '',
-})
-
-const statusTabs = [
-  { key: 'all', label: 'Semua' },
-  { key: 'On-Progress', label: 'On-Progress' },
-  { key: 'Clear', label: 'Clear' },
-  { key: 'Closed', label: 'Closed' },
-]
-
-function setTicketType(type: 'customer' | 'general') {
-  ticketType.value = type
-  if (type === 'general') {
-    form.value.customer_code = ''
-  }
+function statusCount(status: string): number | string {
+  if (statsFailed.value) return '—'
+  if (status === 'Close') return stats.value.close_count ?? 0
+  return stats.value.status_counts?.[status] ?? 0
 }
 
-function statusVariant(status: string) {
-  if (status === 'Clear') return 'success'
-  if (status === 'Closed') return 'secondary'
-  return 'warning'
+const scopedTotal = computed(() => statsFailed.value
+  ? '—'
+  : Object.values(stats.value.status_counts ?? {}).reduce((sum, value) => sum + value, 0))
+
+function apiError(reason: unknown, fallback: string): string {
+  const err = reason as { response?: { data?: { message?: string } } }
+  return err.response?.data?.message || fallback
+}
+
+function toggleStatus(status: string) {
+  clearMode.value = false
+  statusFilter.value = statusFilter.value === status ? 'all' : status
+}
+
+function onLegacyStatus(value: string | number) {
+  clearMode.value = false
+  statusFilter.value = String(value)
+}
+
+function kpiCards() {
+  return [
+    { label: 'Total Tiket', value: statsFailed.value ? '—' : (stats.value.total ?? 0), tone: 'text-foreground' },
+    { label: 'Tiket Aktif', value: statsFailed.value ? '—' : (stats.value.active ?? 0), tone: 'text-warning' },
+    { label: 'Dari Komplain', value: statsFailed.value ? '—' : (stats.value.from_complaint ?? 0), tone: 'text-info' },
+    { label: 'Tiket Selesai', value: statsFailed.value ? '—' : (stats.value.finished ?? 0), tone: 'text-success' },
+  ]
+}
+
+function sourceLabel(item: ReportTicketItem) {
+  return item.source === 'complaint' ? 'Dari Komplain' : 'Tiket Langsung'
 }
 
 function listParams() {
@@ -81,6 +94,7 @@ function listParams() {
     from: fromDate.value || undefined,
     to: toDate.value || undefined,
     odc_name: odcName.value || undefined,
+    source: sourceFilter.value === 'all' ? undefined : sourceFilter.value,
     mode: clearMode.value ? 'clear' : undefined,
   }
 }
@@ -94,45 +108,36 @@ async function loadOdcs() {
   }
 }
 
-async function loadLocations() {
-  try {
-    const res = await locationApi.list({ per_page: 200, status: 'active' })
-    locations.value = (res.data.data as { name?: string; odc?: { name?: string } | null }[]).map((l) => ({
-      name: String(l.name ?? ''),
-      odc_name: l.odc?.name ? String(l.odc.name) : null,
-    })).filter((l) => l.name)
-  } catch {
-    locations.value = []
-  }
-}
-
-function onLocationChange(value: string | number) {
-  const name = String(value ?? '')
-  form.value.location = name
-  const match = locations.value.find((l) => l.name === name)
-  if (match?.odc_name) {
-    form.value.odc_name = match.odc_name
-  }
-}
-
 async function load(page = currentPage.value) {
   loading.value = true
   error.value = ''
-  try {
-    const [listRes, statsRes] = await Promise.all([
-      reportTicketApi.list({ ...listParams(), page }),
-      reportTicketApi.stats(),
-    ])
-    items.value = listRes.data.data
-    const meta = listRes.data.meta
+  const params = listParams()
+
+  const [listResult, statsResult] = await Promise.allSettled([
+    reportTicketApi.list({ ...params, page }),
+    reportTicketApi.stats(params),
+  ])
+
+  if (listResult.status === 'fulfilled') {
+    items.value = listResult.value.data.data
+    const meta = listResult.value.data.meta
     currentPage.value = meta?.current_page ?? page
     lastPage.value = meta?.last_page ?? 1
-    stats.value = statsRes.data
-  } catch {
-    error.value = 'Gagal memuat ticket.'
-  } finally {
-    loading.value = false
+  } else {
+    items.value = []
+    error.value = apiError(listResult.reason, 'Gagal memuat daftar ticket.')
   }
+
+  if (statsResult.status === 'fulfilled') {
+    stats.value = statsResult.value.data
+    statsFailed.value = false
+    statsError.value = ''
+  } else {
+    statsFailed.value = true
+    statsError.value = apiError(statsResult.reason, 'Gagal memuat statistik ticket.')
+  }
+
+  loading.value = false
 }
 
 async function exportExcel() {
@@ -148,67 +153,27 @@ async function exportExcel() {
 }
 
 function openCreate() {
-  editingId.value = null
-  ticketType.value = 'customer'
-  form.value = {
-    location: '',
-    odc_name: '',
-    customer_code: '',
-    customer_name: '',
-    problem: '',
-    action: '',
-    status: 'On-Progress',
-    opened_at: todayInput(),
-    closed_at: '',
-    notes: '',
-  }
-  showModal.value = true
+  formEditingId.value = null
+  formOpen.value = true
 }
 
 function openEdit(item: ReportTicketItem) {
-  editingId.value = item.id
-  ticketType.value = item.customer_code ? 'customer' : 'general'
-  form.value = {
-    location: item.location ?? '',
-    odc_name: item.odc_name ?? '',
-    customer_code: item.customer_code ?? '',
-    customer_name: item.customer_name,
-    problem: item.problem ?? '',
-    action: item.action ?? '',
-    status: item.status,
-    opened_at: item.opened_at ?? '',
-    closed_at: item.closed_at ?? '',
-    notes: item.notes ?? '',
-  }
-  showModal.value = true
+  formEditingId.value = item.id
+  formOpen.value = true
 }
 
-async function submit() {
-  saving.value = true
-  error.value = ''
-  try {
-    const payload = {
-      ...form.value,
-      customer_code: ticketType.value === 'general' ? null : (form.value.customer_code || null),
-      opened_at: form.value.opened_at || null,
-      closed_at: form.value.closed_at || null,
-    }
-    if (editingId.value) {
-      await reportTicketApi.update(editingId.value, payload)
-    } else {
-      await reportTicketApi.create(payload)
-    }
-    showModal.value = false
-    await load()
-  } catch (e: unknown) {
-    const err = e as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } }
-    const first = err.response?.data?.errors
-      ? Object.values(err.response.data.errors).flat()[0]
-      : undefined
-    error.value = first ?? err.response?.data?.message ?? 'Gagal menyimpan ticket.'
-  } finally {
-    saving.value = false
-  }
+function openDetail(item: ReportTicketItem) {
+  detailId.value = item.id
+  detailOpen.value = true
+}
+
+function viewComplaint(id: number) {
+  detailOpen.value = false
+  router.push(`/komplain?open=${id}`)
+}
+
+async function onFormSaved() {
+  await load()
 }
 
 function requestDelete(item: ReportTicketItem) {
@@ -231,7 +196,7 @@ async function confirmDelete() {
 }
 
 let searchTimeout: ReturnType<typeof setTimeout>
-watch([search, statusFilter, fromDate, toDate, odcName, clearMode], () => {
+watch([search, statusFilter, sourceFilter, fromDate, toDate, odcName, clearMode], () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => load(1), 400)
 })
@@ -251,85 +216,124 @@ function applyRouteQuery() {
     clearMode.value = true
     statusFilter.value = 'all'
   }
+  if (q.source === 'direct' || q.source === 'complaint') {
+    sourceFilter.value = q.source
+  }
 }
 
 onMounted(async () => {
   applyRouteQuery()
-  await Promise.all([loadOdcs(), loadLocations()])
+  await loadOdcs()
   await load(1)
+  if (typeof route.query.open === 'string') {
+    const id = Number(route.query.open)
+    if (Number.isFinite(id) && id > 0) {
+      detailId.value = id
+      detailOpen.value = true
+    }
+  }
 })
 </script>
 
 <template>
   <AppLayout title="Report Ticket" subtitle="Ticket operasional: lokasi, pelanggan, problem, status">
-    <div class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-      <Card
-        v-for="item in [
-          { label: 'Total', key: 'total' },
-          { label: 'On-Progress', key: 'on_progress' },
-          { label: 'Clear', key: 'clear' },
-          { label: 'Closed', key: 'closed' },
-        ]"
-        :key="item.key"
-        padding="sm"
-      >
-        <p class="text-xl font-bold text-primary">{{ stats[item.key] ?? 0 }}</p>
-        <p class="text-xs text-muted">{{ item.label }}</p>
+    <div class="mb-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+      <Card v-for="card in kpiCards()" :key="card.label" padding="sm" class="py-3">
+        <p class="text-[11px] text-muted">{{ card.label }}</p>
+        <p class="mt-0.5 text-xl font-semibold" :class="card.tone">{{ card.value }}</p>
       </Card>
     </div>
 
-    <div v-if="error && !showModal" class="mb-4 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+    <div v-if="error && !formOpen" class="mb-2 rounded-xl border border-danger/30 bg-danger/5 px-4 py-2.5 text-sm text-danger">
       {{ error }}
+    </div>
+    <div v-if="statsError && !formOpen" class="mb-2 rounded-xl border border-warning/30 bg-warning/5 px-4 py-2.5 text-sm text-foreground">
+      Statistik ticket gagal dimuat — KPI dan jumlah status ditampilkan sebagai “—”. {{ statsError }}
     </div>
 
     <div
       v-if="odcName === '__none__'"
-      class="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-foreground"
+      class="mb-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2 text-sm text-foreground"
     >
       Menampilkan ticket <span class="font-semibold">Tanpa ODC</span> — isi ODC/Site untuk revisi.
       <button type="button" class="ml-2 text-xs text-primary underline" @click="odcName = ''">Hapus filter</button>
     </div>
     <div
       v-if="clearMode"
-      class="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm text-foreground"
+      class="mb-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-2 text-sm text-foreground"
     >
-      Filter dari dashboard: ticket <span class="font-semibold">Clear/Closed</span> menurut tanggal clear.
+      Filter dari dashboard: ticket <span class="font-semibold">selesai</span> menurut tanggal clear.
       <button type="button" class="ml-2 text-xs text-primary underline" @click="clearMode = false">Hapus</button>
     </div>
 
-    <div class="mb-4 flex flex-wrap items-end gap-3">
-      <SearchInput v-model="search" placeholder="Cari nama / ID / lokasi..." class="max-w-sm" />
-      <DateRangePicker v-model:from="fromDate" v-model:to="toDate" class="w-64" />
-      <div>
-        <label class="mb-1 block text-[11px] text-muted">ODC / Site</label>
-        <Select v-model="odcName" class="w-44">
-          <option value="">Semua ODC</option>
-          <option value="__none__">Tanpa ODC</option>
-          <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
-        </Select>
+    <Card class="mb-4 p-3">
+      <div class="flex flex-wrap items-end gap-2">
+        <SearchInput
+          v-model="search"
+          placeholder="Cari pelanggan / lokasi / no. tiket"
+          class="min-w-[12rem] flex-1 sm:max-w-xs"
+        />
+        <DateRangePicker v-model:from="fromDate" v-model:to="toDate" class="w-full sm:w-56" />
+        <div>
+          <label class="mb-1 block text-[11px] text-muted">Sumber</label>
+          <Select v-model="sourceFilter" class="w-36">
+            <option value="all">Semua</option>
+            <option value="direct">Tiket Langsung</option>
+            <option value="complaint">Dari Komplain</option>
+          </Select>
+        </div>
+        <div>
+          <label class="mb-1 block text-[11px] text-muted">ODC / Site</label>
+          <Select v-model="odcName" class="w-40">
+            <option value="">Semua ODC</option>
+            <option value="__none__">Tanpa ODC</option>
+            <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
+          </Select>
+        </div>
+        <div class="ml-auto flex gap-2">
+          <Button variant="outline" @click="reportModalOpen = true">
+            <FileText class="h-4 w-4" /> Generate
+          </Button>
+          <Button variant="outline" :disabled="exporting" @click="exportExcel">
+            <Download class="h-4 w-4" /> {{ exporting ? 'Export...' : 'Excel' }}
+          </Button>
+          <Button v-if="auth.can('ticket.manage')" @click="openCreate"><Plus class="h-4 w-4" /> Tambah Ticket</Button>
+        </div>
       </div>
-      <div class="flex gap-1 overflow-x-auto">
-        <button
-          v-for="tab in statusTabs"
-          :key="tab.key"
-          type="button"
-          class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition"
-          :class="statusFilter === tab.key ? 'bg-primary text-white' : 'border border-border text-muted hover:bg-muted'"
-          @click="statusFilter = tab.key"
-        >
-          {{ tab.label }}
+
+      <div class="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border pt-2.5">
+        <span class="mr-1 text-[11px] text-muted">Status</span>
+        <button type="button" @click="statusFilter = 'all'; clearMode = false">
+          <Badge
+            variant="outline"
+            class="cursor-pointer"
+            :class="statusFilter === 'all' && !clearMode ? 'ring-2 ring-primary/50' : ''"
+          >
+            Semua · {{ scopedTotal }}
+          </Badge>
         </button>
+        <button v-for="s in statusChips" :key="s" type="button" @click="toggleStatus(s)">
+          <Badge
+            :variant="ticketStatusVariant(s)"
+            class="cursor-pointer transition-opacity"
+            :class="statusFilter === s ? 'ring-2 ring-primary/50' : 'opacity-80 hover:opacity-100'"
+          >
+            {{ ticketStatusLabel(s) }} · {{ statusCount(s) }}
+          </Badge>
+        </button>
+        <div class="ml-1 flex items-center gap-1">
+          <span class="text-[11px] text-muted">Lainnya</span>
+          <Select
+            :model-value="legacyStatuses.includes(statusFilter) ? statusFilter : ''"
+            class="w-32"
+            @update:model-value="onLegacyStatus"
+          >
+            <option value="">— pilih —</option>
+            <option v-for="s in legacyStatuses" :key="s" :value="s">{{ ticketStatusLabel(s) }} · {{ statusCount(s) }}</option>
+          </Select>
+        </div>
       </div>
-      <div class="ml-auto flex gap-2">
-        <Button variant="outline" @click="reportModalOpen = true">
-          <FileText class="h-4 w-4" /> Generate
-        </Button>
-        <Button variant="outline" :disabled="exporting" @click="exportExcel">
-          <Download class="h-4 w-4" /> {{ exporting ? 'Export...' : 'Excel' }}
-        </Button>
-        <Button @click="openCreate"><Plus class="h-4 w-4" /> Tambah Ticket</Button>
-      </div>
-    </div>
+    </Card>
 
     <Card class="overflow-x-auto">
       <table class="w-full text-sm">
@@ -341,6 +345,7 @@ onMounted(async () => {
             <th class="pb-3 pr-3 font-medium">Nama</th>
             <th class="pb-3 pr-3 font-medium">Problem</th>
             <th class="pb-3 pr-3 font-medium">Status</th>
+            <th class="pb-3 pr-3 font-medium">Sumber</th>
             <th class="pb-3 pr-3 font-medium">Tgl Open</th>
             <th class="pb-3 pr-3 font-medium">Input oleh</th>
             <th class="pb-3 pr-3 font-medium">Tgl Close</th>
@@ -350,10 +355,10 @@ onMounted(async () => {
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="11" class="py-10 text-center text-muted">Memuat...</td>
+            <td colspan="12" class="py-10 text-center text-muted">Memuat...</td>
           </tr>
           <tr v-else-if="!items.length">
-            <td colspan="11" class="py-10 text-center text-muted">Belum ada ticket.</td>
+            <td colspan="12" class="py-10 text-center text-muted">Belum ada ticket.</td>
           </tr>
           <tr
             v-for="item in items"
@@ -365,7 +370,19 @@ onMounted(async () => {
             <td class="py-3 pr-3 font-mono text-xs">{{ item.customer_code || '—' }}</td>
             <td class="py-3 pr-3 font-medium">{{ item.customer_name }}</td>
             <td class="py-3 pr-3 max-w-[12rem] truncate">{{ item.problem || '—' }}</td>
-            <td class="py-3 pr-3"><Badge :variant="statusVariant(item.status)">{{ item.status }}</Badge></td>
+            <td class="py-3 pr-3">
+              <Badge :variant="ticketStatusVariant(item.status)">
+                {{ item.status_label || ticketStatusLabel(item.status) }}
+              </Badge>
+            </td>
+            <td class="py-3 pr-3 text-xs">
+              <Badge :variant="item.source === 'complaint' ? 'info' : 'secondary'">
+                {{ sourceLabel(item) }}
+              </Badge>
+              <span v-if="item.complaint_number" class="mt-1 block font-mono text-[10px] text-muted">
+                {{ item.complaint_number }}
+              </span>
+            </td>
             <td class="py-3 pr-3 text-xs text-muted">
               {{ item.opened_at || '—' }}
               <span class="block text-[11px] text-muted/80">{{ formatTimeId(item.created_at) || '—' }}</span>
@@ -378,6 +395,9 @@ onMounted(async () => {
             <td class="py-3 pr-3 text-xs text-foreground">{{ item.clearer_name || '—' }}</td>
             <td class="py-3">
               <div class="flex gap-1">
+                <button type="button" class="rounded-lg p-1.5 text-primary hover:bg-primary/10" title="Detail ticket" @click="openDetail(item)">
+                  <Eye class="h-4 w-4" />
+                </button>
                 <button type="button" class="rounded-lg p-1.5 text-muted hover:bg-muted" @click="openEdit(item)">
                   <Pencil class="h-4 w-4" />
                 </button>
@@ -402,108 +422,6 @@ onMounted(async () => {
     </div>
 
     <Modal
-      :open="showModal"
-      :title="editingId ? 'Edit Ticket' : 'Tambah Ticket'"
-      size="lg"
-      @close="showModal = false"
-    >
-      <div class="grid gap-4 sm:grid-cols-2">
-        <div class="sm:col-span-2">
-          <label class="mb-1.5 block text-sm font-medium">Tipe Ticket</label>
-          <div class="flex gap-1 rounded-xl border border-border p-1">
-            <button
-              type="button"
-              :class="[
-                'flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-                ticketType === 'customer' ? 'bg-primary text-white' : 'text-muted hover:bg-muted',
-              ]"
-              @click="setTicketType('customer')"
-            >
-              Pelanggan
-            </button>
-            <button
-              type="button"
-              :class="[
-                'flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-                ticketType === 'general' ? 'bg-primary text-white' : 'text-muted hover:bg-muted',
-              ]"
-              @click="setTicketType('general')"
-            >
-              General
-            </button>
-          </div>
-        </div>
-        <div>
-          <label class="mb-1.5 block text-sm font-medium">Lokasi</label>
-          <Select
-            :model-value="form.location"
-            @update:model-value="onLocationChange"
-          >
-            <option value="">— Pilih lokasi —</option>
-            <option v-for="l in locations" :key="l.name" :value="l.name">
-              {{ l.name }}{{ l.odc_name ? ` → ${l.odc_name}` : '' }}
-            </option>
-          </Select>
-        </div>
-        <div>
-          <label class="mb-1.5 block text-sm font-medium">ODC / Site</label>
-          <Select v-model="form.odc_name">
-            <option value="">— Pilih ODC —</option>
-            <option v-for="o in odcs" :key="o.id" :value="o.name">{{ o.name }}</option>
-          </Select>
-          <p class="mt-1 text-[11px] text-muted">Terisi otomatis jika lokasi sudah di-map ke ODC</p>
-        </div>
-        <div v-if="ticketType === 'customer'">
-          <label class="mb-1.5 block text-sm font-medium">ID Pelanggan</label>
-          <Input v-model="form.customer_code" />
-        </div>
-        <div :class="ticketType === 'general' ? 'sm:col-span-2' : ''">
-          <label class="mb-1.5 block text-sm font-medium">
-            {{ ticketType === 'general' ? 'Judul / Nama' : 'Nama Pelanggan' }}
-          </label>
-          <Input
-            v-model="form.customer_name"
-            :placeholder="ticketType === 'general' ? 'Contoh: Gangguan jalur umum' : ''"
-            required
-          />
-        </div>
-        <div class="sm:col-span-2">
-          <label class="mb-1.5 block text-sm font-medium">Problem</label>
-          <Input v-model="form.problem" />
-        </div>
-        <div class="sm:col-span-2">
-          <label class="mb-1.5 block text-sm font-medium">Action</label>
-          <Textarea v-model="form.action" :rows="3" />
-        </div>
-        <div>
-          <label class="mb-1.5 block text-sm font-medium">Status</label>
-          <Select v-model="form.status">
-            <option value="On-Progress">On-Progress</option>
-            <option value="Clear">Clear</option>
-            <option value="Closed">Closed</option>
-          </Select>
-        </div>
-        <div>
-          <label class="mb-1.5 block text-sm font-medium">Tgl Open</label>
-          <Input v-model="form.opened_at" type="date" />
-        </div>
-        <div>
-          <label class="mb-1.5 block text-sm font-medium">Tgl Close</label>
-          <Input v-model="form.closed_at" type="date" />
-        </div>
-        <div class="sm:col-span-2">
-          <label class="mb-1.5 block text-sm font-medium">Notes</label>
-          <Textarea v-model="form.notes" :rows="2" />
-        </div>
-      </div>
-      <p v-if="error && showModal" class="mt-3 text-sm text-danger">{{ error }}</p>
-      <template #footer>
-        <Button variant="outline" @click="showModal = false">Batal</Button>
-        <Button :disabled="saving" @click="submit">{{ saving ? 'Menyimpan...' : 'Simpan' }}</Button>
-      </template>
-    </Modal>
-
-    <Modal
       :open="!!deleteTarget"
       title="Hapus Ticket"
       :subtitle="deleteTarget ? `Yakin ingin menghapus ${deleteTarget.customer_name}? Tindakan ini tidak bisa dibatalkan.` : undefined"
@@ -521,9 +439,26 @@ onMounted(async () => {
       </template>
     </Modal>
 
+    <TicketFormModal
+      :open="formOpen"
+      :editing-id="formEditingId"
+      @close="formOpen = false"
+      @saved="onFormSaved"
+    />
+
+    <TicketDetailModal
+      :open="detailOpen"
+      :ticket-id="detailId"
+      @close="detailOpen = false"
+      @changed="load"
+      @view-complaint="viewComplaint"
+    />
+
     <SectionReportModal
       v-model:open="reportModalOpen"
       section="ticket"
+      :source="sourceFilter"
+      :status="statusFilter === 'all' ? undefined : statusFilter"
       :from="fromDate || todayInput()"
       :to="toDate || fromDate || todayInput()"
     />

@@ -72,9 +72,21 @@ Route::prefix('v1')->group(function () {
         Route::post('/dismantles/import', [DismantleController::class, 'import']);
         Route::apiResource('dismantles', DismantleController::class);
 
-        Route::get('/report-tickets/stats', [ReportTicketController::class, 'stats']);
-        Route::get('/report-tickets/export', [ReportTicketController::class, 'export']);
-        Route::apiResource('report-tickets', ReportTicketController::class);
+        // Satu modul ticket: tiket langsung & tiket dari komplain memakai endpoint yang sama.
+        Route::prefix('report-tickets')->middleware('permission:ticket.view')->group(function () {
+            Route::get('/stats', [ReportTicketController::class, 'stats']);
+            Route::get('/export', [ReportTicketController::class, 'export']);
+            Route::get('/{reportTicket}/updates', [ReportTicketController::class, 'updates']);
+            Route::post('/{reportTicket}/updates', [ReportTicketController::class, 'storeUpdate'])->middleware('permission:ticket.manage');
+            Route::post('/{reportTicket}/assign', [ReportTicketController::class, 'assign'])->middleware('permission:ticket.manage');
+            Route::post('/{reportTicket}/start', [ReportTicketController::class, 'start'])->middleware('permission:ticket.manage');
+            Route::patch('/{reportTicket}/status', [ReportTicketController::class, 'setStatus'])->middleware('permission:ticket.manage');
+            Route::get('/', [ReportTicketController::class, 'index']);
+            Route::post('/', [ReportTicketController::class, 'store'])->middleware('permission:ticket.manage');
+            Route::get('/{reportTicket}', [ReportTicketController::class, 'show']);
+            Route::put('/{reportTicket}', [ReportTicketController::class, 'update'])->middleware('permission:ticket.manage');
+            Route::delete('/{reportTicket}', [ReportTicketController::class, 'destroy'])->middleware('permission:ticket.manage');
+        });
 
         Route::get('/technicians', [UserController::class, 'technicians']);
 

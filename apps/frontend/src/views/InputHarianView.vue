@@ -11,6 +11,8 @@ import KpiCard from '@/components/dashboard/KpiCard.vue'
 import CustomerAutocomplete from '@/components/daily/CustomerAutocomplete.vue'
 import ComplaintDataList from '@/components/daily/ComplaintDataList.vue'
 import ComplaintKpiCard from '@/components/daily/ComplaintKpiCard.vue'
+import TicketFormModal from '@/components/tickets/TicketFormModal.vue'
+import TicketDetailModal from '@/components/tickets/TicketDetailModal.vue'
 import DailyStatusBadge from '@/components/daily/DailyStatusBadge.vue'
 import DailyNocAttribution from '@/components/daily/DailyNocAttribution.vue'
 import Modal from '@/components/ui/Modal.vue'
@@ -58,6 +60,12 @@ const editingCctvId = ref<number | null>(null)
 const editingDismantleId = ref<number | null>(null)
 const editingComplaintId = ref<number | null>(null)
 const editingNocId = ref<number | null>(null)
+const ticketFormOpen = ref(false)
+const ticketComplaint = ref<DailyEntryItem | null>(null)
+const ticketDetailOpen = ref(false)
+const ticketDetailId = ref<number | null>(null)
+const complaintDetail = ref<DailyEntryItem | null>(null)
+const complaintDetailOpen = ref(false)
 
 const activationForm = ref({
   customer_name: '',
@@ -1029,6 +1037,40 @@ function showToast(message: string, variant: 'success' | 'error' = 'success') {
   toast.value = { message, variant }
 }
 
+function openTicketForm(item: DailyEntryItem) {
+  if (!auth.can('ticket.manage')) {
+    showToast('Anda tidak memiliki permission untuk membuat ticket.', 'error')
+    return
+  }
+  if (!isComplaintOwner(item)) {
+    showToast('Hanya pembuat komplain yang dapat membuat tiket dari komplain.', 'error')
+    return
+  }
+  ticketComplaint.value = item
+  ticketFormOpen.value = true
+}
+
+async function onTicketSaved() {
+  showToast('Ticket berhasil dibuat dari komplain.')
+  await load()
+}
+
+function viewTicket(id: number) {
+  ticketDetailId.value = id
+  ticketDetailOpen.value = true
+}
+
+function viewComplaintFromTicket(id: number) {
+  ticketDetailOpen.value = false
+  const item = data.value?.complaints.find((c) => c.id === id)
+  if (!item) {
+    showToast('Komplain asal tidak ditemukan pada filter tanggal ini.', 'error')
+    return
+  }
+  complaintDetail.value = item
+  complaintDetailOpen.value = true
+}
+
 function requestDelete(type: string, id: number, label?: string) {
   if (type === 'complaint') {
     const item = data.value?.complaints.find((c) => c.id === id)
@@ -1193,10 +1235,23 @@ async function loadTechnicians() {
   }
 }
 
+function tryOpenComplaintFromQuery() {
+  const raw = route.query.open
+  if (typeof raw !== 'string') return
+  const id = Number(raw)
+  const item = data.value?.complaints.find((c) => c.id === id)
+  if (item) {
+    complaintDetail.value = item
+    complaintDetailOpen.value = true
+  }
+}
+
+watch(() => route.query.open, () => tryOpenComplaintFromQuery())
+
 onMounted(() => {
   applyRouteQuery()
   void loadTechnicians()
-  void load().finally(() => startPoll())
+  void load().then(() => tryOpenComplaintFromQuery()).finally(() => startPoll())
 })
 
 onUnmounted(stopPoll)
@@ -1360,6 +1415,8 @@ onUnmounted(stopPoll)
           @clear-needs-action="openActionClear"
           @mark-clear="({ type, id }) => markItemClear(type, id)"
           @set-status="({ type, id, status }) => setItemStatus(type, id, status)"
+          @create-ticket="openTicketForm"
+          @view-ticket="viewTicket"
         />
 
         <Card v-else>
@@ -1810,6 +1867,43 @@ onUnmounted(stopPoll)
       :from="filterFrom || date"
       :to="filterTo || filterFrom || date"
     />
+
+    <TicketFormModal
+      :open="ticketFormOpen"
+      :complaint="ticketComplaint"
+      @close="ticketFormOpen = false"
+      @saved="onTicketSaved"
+    />
+
+    <TicketDetailModal
+      :open="ticketDetailOpen"
+      :ticket-id="ticketDetailId"
+      @close="ticketDetailOpen = false"
+      @changed="load"
+      @view-complaint="viewComplaintFromTicket"
+    />
+
+    <Modal
+      :open="complaintDetailOpen"
+      title="Detail Komplain"
+      :subtitle="complaintDetail ? `${complaintDetail.complaint_number || '#' + complaintDetail.id} · ${complaintDetail.customer_name || ''}` : undefined"
+      size="md"
+      @close="complaintDetailOpen = false"
+    >
+      <div v-if="complaintDetail" class="space-y-2 text-sm">
+        <p><span class="text-muted">Tanggal:</span> {{ complaintDetail.report_date }}</p>
+        <p><span class="text-muted">Pelanggan:</span> {{ complaintDetail.customer_name || '—' }} ({{ complaintDetail.customer_code || '—' }})</p>
+        <p><span class="text-muted">Telepon:</span> {{ complaintDetail.phone_normalized || '—' }}</p>
+        <p><span class="text-muted">ODC/Site:</span> {{ complaintDetail.odc_name || '—' }}</p>
+        <p><span class="text-muted">Status:</span> {{ complaintDetail.status }}</p>
+        <p><span class="text-muted">Input oleh:</span> {{ complaintDetail.creator_name || '—' }} · {{ complaintDetail.created_at?.slice(0, 16).replace('T', ' ') }}</p>
+        <p><span class="text-muted">Problem:</span> {{ complaintDetail.problem || '—' }}</p>
+        <p><span class="text-muted">Action:</span> {{ complaintDetail.action || '—' }}</p>
+      </div>
+      <template #footer>
+        <Button variant="outline" @click="complaintDetailOpen = false">Tutup</Button>
+      </template>
+    </Modal>
 
     <Toast
       v-if="toast"

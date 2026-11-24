@@ -31,6 +31,7 @@ import {
   RotateCcw,
   Router,
   Signal,
+  Ticket,
   Timer,
   Trash2,
   Wifi,
@@ -52,6 +53,8 @@ const emit = defineEmits<{
   'clear-needs-action': [id: number]
   'mark-clear': [payload: { type: string; id: number }]
   'set-status': [payload: { type: string; id: number; status: string }]
+  'create-ticket': [item: DailyEntryItem]
+  'view-ticket': [id: number]
 }>()
 
 /** Timer auto-clear "Menunggu Konfirmasi" (menit) — sama dengan backend. */
@@ -349,6 +352,48 @@ function isComplaintLocked(item: DailyEntryItem): boolean {
   return ownerId == null || userId == null || Number(ownerId) !== Number(userId)
 }
 
+const activeTicketStatuses = ['Open', 'Assigned', 'On-Site', 'In-Progress', 'On-Progress']
+const ticketPendingId = ref<number | null>(null)
+let ticketPendingTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearTicketPending() {
+  ticketPendingId.value = null
+  if (ticketPendingTimer) {
+    clearTimeout(ticketPendingTimer)
+    ticketPendingTimer = null
+  }
+}
+
+function canCreateTicket(item: DailyEntryItem): boolean {
+  return auth.can('ticket.manage')
+    && !isComplaintLocked(item)
+    && !isClear(item.status)
+    && !item.ticket_id
+    && !activeTicketStatuses.includes(item.ticket_status ?? '')
+    && ticketPendingId.value !== item.id
+}
+
+function canShowTicketAction(item: DailyEntryItem): boolean {
+  return auth.can('ticket.manage')
+    && !isClear(item.status)
+    && !item.ticket_id
+    && !activeTicketStatuses.includes(item.ticket_status ?? '')
+}
+
+function onCreateTicket(item: DailyEntryItem) {
+  if (!canCreateTicket(item)) return
+  ticketPendingId.value = item.id
+  if (ticketPendingTimer) clearTimeout(ticketPendingTimer)
+  ticketPendingTimer = setTimeout(clearTicketPending, 6000)
+  closeMenu()
+  emit('create-ticket', item)
+}
+
+watch(
+  () => props.items.map((i) => `${i.id}:${i.ticket_id}:${i.ticket_status}`).join('|'),
+  clearTicketPending,
+)
+
 function statusPillTitle(item: DailyEntryItem, status: string): string {
   if (status === 'Clear' && !isComplaintLocked(item)) {
     if (complaintClearRemainingSeconds(item.created_at, clearTick.value) === null) {
@@ -402,7 +447,10 @@ watch(
   },
 )
 
-onUnmounted(clearStatusPending)
+onUnmounted(() => {
+  clearStatusPending()
+  clearTicketPending()
+})
 
 async function openHistory(item: DailyEntryItem) {
   historyTitle.value = item.customer_name?.trim()
@@ -544,6 +592,14 @@ watch(
                       Berulang
                     </button>
                     <span
+                      v-if="item.ticket_id"
+                      class="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+                      :title="`Komplain ini memiliki ticket #${item.ticket_id} (${item.ticket_status || '—'})`"
+                    >
+                      <Ticket class="h-3 w-3" />
+                      Dialihkan ke Tiket
+                    </span>
+                    <span
                       v-if="isClear(item.status) && isClearedFromPreviousDay(item)"
                       class="inline-flex items-center rounded-full bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success"
                       :title="'Laporan dari ' + formatDate(item.report_date)"
@@ -592,6 +648,35 @@ watch(
                       <Timer class="h-3 w-3" />
                       {{ clearHint(item) }}
                     </span>
+                    <button
+                      v-if="item.ticket_id && auth.can('ticket.view')"
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2.5 py-1 text-[11px] font-medium text-primary transition hover:bg-primary/10"
+                      @click.stop="emit('view-ticket', item.ticket_id!)"
+                    >
+                      <Ticket class="h-3 w-3" />
+                      Lihat Tiket #{{ item.ticket_id }}
+                    </button>
+                    <button
+                      v-else-if="canCreateTicket(item)"
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2.5 py-1 text-[11px] font-medium text-primary transition hover:bg-primary/10 disabled:cursor-wait disabled:opacity-60"
+                      :disabled="ticketPendingId === item.id"
+                      @click.stop="onCreateTicket(item)"
+                    >
+                      <Ticket class="h-3 w-3" />
+                      {{ ticketPendingId === item.id ? 'Membuat...' : 'Buat Tiket' }}
+                    </button>
+                    <button
+                      v-else-if="canShowTicketAction(item)"
+                      type="button"
+                      disabled
+                      class="inline-flex cursor-not-allowed items-center gap-1 rounded-full border border-primary/40 px-2.5 py-1 text-[11px] font-medium text-primary opacity-60"
+                      title="Hanya pembuat komplain yang dapat membuat tiket dari komplain."
+                    >
+                      <Lock class="h-3 w-3" />
+                      Buat Tiket
+                    </button>
                   </div>
                   <p class="break-words text-sm text-muted">{{ locationLine(item) }}</p>
                   <p :class="['break-words text-sm font-medium', accentFor(item, index).problem]">
@@ -729,6 +814,14 @@ watch(
                       <RotateCcw class="h-3 w-3" />
                       Berulang
                     </button>
+                    <span
+                      v-if="item.ticket_id"
+                      class="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+                      :title="`Komplain ini memiliki ticket #${item.ticket_id} (${item.ticket_status || '—'})`"
+                    >
+                      <Ticket class="h-3 w-3" />
+                      Dialihkan ke Tiket
+                    </span>
                     <template v-if="isWaiting(item)">
                       <span
                         class="inline-flex items-center gap-1 rounded-full bg-info/10 px-2 py-0.5 text-[11px] font-medium text-info"
@@ -777,6 +870,35 @@ watch(
                       <Timer class="h-3 w-3" />
                       {{ clearHint(item) }}
                     </span>
+                    <button
+                      v-if="item.ticket_id && auth.can('ticket.view')"
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2.5 py-1 text-[11px] font-medium text-primary transition hover:bg-primary/10"
+                      @click.stop="emit('view-ticket', item.ticket_id!)"
+                    >
+                      <Ticket class="h-3 w-3" />
+                      Lihat Tiket #{{ item.ticket_id }}
+                    </button>
+                    <button
+                      v-else-if="canCreateTicket(item)"
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2.5 py-1 text-[11px] font-medium text-primary transition hover:bg-primary/10 disabled:cursor-wait disabled:opacity-60"
+                      :disabled="ticketPendingId === item.id"
+                      @click.stop="onCreateTicket(item)"
+                    >
+                      <Ticket class="h-3 w-3" />
+                      {{ ticketPendingId === item.id ? 'Membuat...' : 'Buat Tiket' }}
+                    </button>
+                    <button
+                      v-else-if="canShowTicketAction(item)"
+                      type="button"
+                      disabled
+                      class="inline-flex cursor-not-allowed items-center gap-1 rounded-full border border-primary/40 px-2.5 py-1 text-[11px] font-medium text-primary opacity-60"
+                      title="Hanya pembuat komplain yang dapat membuat tiket dari komplain."
+                    >
+                      <Lock class="h-3 w-3" />
+                      Buat Tiket
+                    </button>
                   </div>
                   <p class="break-words text-sm text-muted">{{ locationLine(item) }}</p>
                   <p :class="['break-words text-sm font-medium', accentFor(item, index).problem]">
@@ -877,6 +999,16 @@ watch(
             <Lock v-if="isComplaintLocked(menuItem)" class="h-4 w-4 text-danger" />
             <Trash2 v-else class="h-4 w-4" />
             Hapus Komplain
+          </button>
+        </div>
+        <div v-if="menuItem && canCreateTicket(menuItem)">
+          <button
+            type="button"
+            class="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-foreground transition hover:bg-muted"
+            @click="onCreateTicket(menuItem)"
+          >
+            <Ticket class="h-4 w-4 text-muted" />
+            Buat Tiket
           </button>
         </div>
       </div>

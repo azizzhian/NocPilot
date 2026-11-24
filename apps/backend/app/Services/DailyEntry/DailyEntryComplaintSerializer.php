@@ -29,6 +29,10 @@ class DailyEntryComplaintSerializer
 
         $row['waiting_minutes_left'] = $complaint->waitingMinutesLeft();
         $row['is_repeat'] = (bool) $complaint->parent_complaint_id;
+        $row['ticket_id'] = $complaint->ticket_id;
+        $row['ticket_status'] = $complaint->ticket?->status;
+        $row['escalated_at'] = $complaint->escalated_at?->toIso8601String();
+        $row['complaint_number'] = $complaint->complaintNumber();
 
         if ($complaint->handled_at) {
             $row['handled_at'] = $complaint->handled_at->toIso8601String();

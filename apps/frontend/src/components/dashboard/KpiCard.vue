@@ -13,6 +13,7 @@ const props = defineProps<{
   total?: number
   open?: number | null
   clear?: number | null
+  clearHint?: string | null
   splitStatus?: boolean
   color: string
   icon: string
@@ -84,7 +85,7 @@ const percentage = computed(() =>
             <p class="text-xl font-bold tracking-tight text-danger">{{ formatNumber(open ?? 0) }}</p>
           </div>
           <div class="rounded-lg bg-success/10 px-2 py-1.5">
-            <p class="text-[10px] font-medium uppercase tracking-wide text-success">Clear</p>
+            <p class="text-[10px] font-medium uppercase tracking-wide text-success" :title="clearHint ?? undefined">Clear</p>
             <p class="text-xl font-bold tracking-tight text-success">{{ formatNumber(clear ?? 0) }}</p>
           </div>
         </div>
