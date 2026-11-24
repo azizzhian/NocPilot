@@ -63,6 +63,16 @@ class DashboardPerformanceClearLikeTest extends TestCase
         return ReportTicket::firstOrFail();
     }
 
+    protected function closeTicket(User $closer, ReportTicket $ticket): void
+    {
+        $this->grantTicketPermission($closer);
+
+        $this->patchJson("/api/v1/report-tickets/{$ticket->id}/status", [
+            'status' => 'Closed',
+            'action' => 'Perbaikan selesai ditangani.',
+        ])->assertOk();
+    }
+
     public function test_menunggu_konfirmasi_lewat_30_menit_dihitung_clear_di_semua_tampilan_performa(): void
     {
         $creator = User::factory()->create(['name' => 'NOC Input']);
@@ -210,5 +220,77 @@ class DashboardPerformanceClearLikeTest extends TestCase
             ->assertJsonPath('summary.complaints_open', 1)
             ->assertJsonPath('complaint_performance.summary.clear', 0)
             ->assertJsonPath('complaint_performance.summary.open', 1);
+    }
+
+    public function test_poin_clear_diberikan_ke_pembuat_dan_penutup_tiket(): void
+    {
+        $creator = User::factory()->create(['name' => 'NOC Open']);
+        $closer = User::factory()->create(['name' => 'NOC Close']);
+        $complaint = $this->makeComplaint($creator);
+        $ticket = $this->escalate($creator, $complaint);
+        $this->closeTicket($closer, $ticket);
+
+        $response = $this->getJson($this->dashboardUrl())->assertOk();
+        $response->assertJsonPath('summary.complaints_clear', 1)
+            ->assertJsonPath('kpis.0.clear', 1)
+            ->assertJsonPath('complaint_performance.summary.clear', 1)
+            ->assertJsonPath('complaint_performance.summary.clear_final', 0)
+            ->assertJsonPath('complaint_performance.summary.escalated', 1);
+
+        $nocRows = collect($response->json('noc_performance'));
+        $widgetRows = collect($response->json('complaint_performance.rows'));
+
+        $creatorNoc = $nocRows->firstWhere('user_id', $creator->id);
+        $closerNoc = $nocRows->firstWhere('user_id', $closer->id);
+        $this->assertNotNull($creatorNoc);
+        $this->assertNotNull($closerNoc);
+        $this->assertSame(1, (int) $creatorNoc['complaints_clear']);
+        $this->assertSame(1, (int) $closerNoc['complaints_clear']);
+        $this->assertSame(0, (int) $creatorNoc['tickets_clear']);
+        $this->assertSame(1, (int) $closerNoc['tickets_clear']);
+
+        $creatorWidget = $widgetRows->firstWhere('user_id', $creator->id);
+        $closerWidget = $widgetRows->firstWhere('user_id', $closer->id);
+        $this->assertNotNull($creatorWidget);
+        $this->assertNotNull($closerWidget);
+        $this->assertSame(1, (int) $creatorWidget['clear']);
+        $this->assertSame(1, (int) $closerWidget['clear']);
+        $this->assertSame(1, (int) $creatorWidget['escalated']);
+        $this->assertSame(0, (int) $closerWidget['escalated']);
+    }
+
+    public function test_auto_clear_tetap_memberi_poin_ke_pembuat_dan_penutup(): void
+    {
+        $creator = User::factory()->create(['name' => 'NOC Open Auto']);
+        $closer = User::factory()->create(['name' => 'NOC Close Auto']);
+        $complaint = $this->makeComplaint($creator);
+        $ticket = $this->escalate($creator, $complaint);
+        $this->closeTicket($closer, $ticket);
+
+        DB::table('daily_complaints')->where('id', $complaint->id)->update([
+            'handled_at' => now()->subMinutes(31)->toDateTimeString(),
+        ]);
+        $this->artisan('complaint:auto-clear')->assertSuccessful();
+
+        $fresh = $complaint->fresh();
+        $this->assertSame('Clear', $fresh->status);
+        $this->assertTrue((bool) $fresh->auto_cleared);
+        $this->assertNull($fresh->cleared_by);
+        $this->assertSame($closer->id, (int) $fresh->handled_by);
+
+        $response = $this->getJson($this->dashboardUrl())->assertOk();
+        $response->assertJsonPath('summary.complaints_clear', 1)
+            ->assertJsonPath('complaint_performance.summary.clear_final', 1)
+            ->assertJsonPath('complaint_performance.summary.auto_cleared', 1);
+
+        $nocRows = collect($response->json('noc_performance'));
+        $this->assertSame(1, (int) $nocRows->firstWhere('user_id', $creator->id)['complaints_clear']);
+        $this->assertSame(1, (int) $nocRows->firstWhere('user_id', $closer->id)['complaints_clear']);
+
+        $widgetRows = collect($response->json('complaint_performance.rows'));
+        $this->assertSame(1, (int) $widgetRows->firstWhere('user_id', $creator->id)['clear']);
+        $this->assertSame(1, (int) $widgetRows->firstWhere('user_id', $closer->id)['clear']);
+        $this->assertSame(1, (int) $widgetRows->firstWhere('user_id', $creator->id)['clear_final']);
+        $this->assertSame(0, (int) $widgetRows->firstWhere('user_id', $closer->id)['clear_final']);
     }
 }

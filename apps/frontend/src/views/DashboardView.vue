@@ -416,7 +416,7 @@ onMounted(async () => {
         :value="kpi.value"
         :open="kpi.open"
         :clear="kpi.clear"
-        :clear-hint="kpi.key === 'complaints' ? 'Termasuk Menunggu Konfirmasi setelah 30 menit & komplain yang dieskalasikan ke tiket' : undefined"
+        :clear-hint="kpi.key === 'complaints' ? 'Termasuk Menunggu Konfirmasi setelah 30 menit & eskalasi tiket; poin per-NOC diberikan ke pembuat dan penutup bila berbeda' : undefined"
         :split-status="Boolean(kpi.split_status)"
         :color="kpi.color"
         :icon="kpi.icon ?? 'router'"
@@ -501,7 +501,7 @@ onMounted(async () => {
             <Trophy class="h-4 w-4 text-primary" />
             <h3 class="text-sm font-semibold text-foreground">Leaderboard</h3>
           </div>
-          <p class="mt-1 text-xs text-muted">On-Progress vs Clear per kategori — ranking by total (Clear termasuk Menunggu Konfirmasi ≥30 menit & eskalasi tiket)</p>
+          <p class="mt-1 text-xs text-muted">On-Progress vs Clear per kategori — ranking by total (Clear termasuk Menunggu Konfirmasi ≥30 menit & eskalasi tiket). Poin Clear diberikan ke pembuat dan penutup bila berbeda; total kasus tetap dihitung sekali.</p>
         </div>
         <div v-if="nocPerformance.length" class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -518,7 +518,7 @@ onMounted(async () => {
               </tr>
               <tr class="border-b border-border text-left text-[10px] text-muted">
                 <th class="pb-2 pr-2 text-right font-medium">OP</th>
-                <th class="pb-2 pr-2 text-right font-medium">Clear</th>
+                <th class="pb-2 pr-2 text-right font-medium" title="Poin Clear: pembuat + penutup bila berbeda (total kasus tetap 1)">Clear</th>
                 <th class="pb-2 pr-2 text-right font-medium">OP</th>
                 <th class="pb-2 pr-2 text-right font-medium">Clear</th>
                 <th class="pb-2 pr-2 text-right font-medium">OP</th>
@@ -650,7 +650,7 @@ onMounted(async () => {
               <tr class="border-b border-border text-left text-[10px] text-muted">
                 <th class="pb-2 pr-2 text-right font-medium">Total</th>
                 <th class="pb-2 pr-2 text-right font-medium">Ditangani</th>
-                <th class="pb-2 pr-2 text-right font-medium" title="Termasuk Menunggu Konfirmasi setelah 30 menit & komplain dengan tiket">Clear</th>
+                <th class="pb-2 pr-2 text-right font-medium" title="Termasuk Menunggu Konfirmasi ≥30 menit & eskalasi tiket; poin diberikan ke pembuat + penutup bila berbeda">Clear</th>
                 <th class="pb-2 pr-2 text-right font-medium text-success">Cepat</th>
                 <th class="pb-2 pr-2 text-right font-medium text-info">Lambat</th>
                 <th class="pb-2 pr-2 text-right font-medium text-warning">Cukup</th>

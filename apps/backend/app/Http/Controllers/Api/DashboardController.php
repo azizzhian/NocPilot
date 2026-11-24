@@ -277,7 +277,8 @@ class DashboardController extends Controller
             'complaints_open' => $this->countComplaintOpens($fromDate, $toDate, $userId, $odcName),
             'complaints_open_all' => $this->countComplaintOpens(null, $toDate, $userId, $odcName),
             'complaints_clear' => $this->complaintClearLikeRows($from, $to, $odcName)
-                ->filter(fn (DailyComplaint $row) => $userId === null || $this->complaintClearActor($row) === $userId)
+                ->filter(fn (DailyComplaint $row) => $userId === null
+                    || in_array($userId, $this->complaintClearActors($row), true))
                 ->count(),
             'dismantles' => $this->countDismantleOpenedInRange($from, $to, $userId, $odcName),
             'dismantles_open' => $this->countDismantleOpens($fromDate, $toDate, $userId, $odcName),
@@ -656,19 +657,9 @@ class DashboardController extends Controller
 
         $clearLike = $this->complaintClearLikeRows($from, $to, $odcName)
             ->when($shift, fn ($rows) => $rows->filter(fn ($c) => (int) ($c->shift ?? 0) === $shift))
-            ->when($userId, function ($rows) use ($userId) {
-                return $rows->filter(function ($c) use ($userId) {
-                    if ($c->status === ReportStatus::CLEAR) {
-                        return (int) ($c->cleared_by ?? 0) === $userId
-                            || ((bool) $c->auto_cleared && (int) ($c->created_by ?? 0) === $userId);
-                    }
-                    if ($c->status === ReportStatus::WAITING_CONFIRMATION) {
-                        return (int) ($c->handled_by ?? $c->created_by ?? 0) === $userId;
-                    }
-
-                    return (int) ($c->created_by ?? 0) === $userId;
-                });
-            });
+            ->when($userId, fn ($rows) => $rows->filter(
+                fn ($c) => in_array($userId, $this->complaintClearActors($c), true)
+            ));
 
         $openBase = DailyComplaint::query()
             ->whereDate('report_date', '<=', $toDate)
@@ -729,9 +720,11 @@ class DashboardController extends Controller
         }
 
         foreach ($clearLike as $c) {
-            $key = (string) ($this->complaintClearActor($c, true) ?? 0);
-            $byUser[$key] ??= $emptyRow();
-            $byUser[$key]['clear']++;
+            foreach ($this->complaintClearActors($c) as $actor) {
+                $key = (string) $actor;
+                $byUser[$key] ??= $emptyRow();
+                $byUser[$key]['clear']++;
+            }
         }
 
         foreach ($cleared as $c) {
@@ -1865,21 +1858,29 @@ class DashboardController extends Controller
     }
 
     /**
-     * Atribusi Clear: eskalasi ke pembuat komplain, Menunggu Konfirmasi ke penangani,
-     * Clear ke cleared_by. Fallback ke created_by dipakai widget Performa Komplain
-     * agar auto-clear tetap masuk ke baris pembuat.
+     * Atribusi poin Clear: pembuat komplain + penutup (handled_by saat menunggu konfirmasi
+     * atau cleared_by saat Clear). Satu komplain bisa memberi poin ke dua NOC berbeda.
+     * Auto-clear (cleared_by = null) tetap masuk ke pembuat + penangani terakhir.
+     *
+     * @return array<int, int>
      */
-    protected function complaintClearActor(DailyComplaint $complaint, bool $fallbackToCreator = false): ?int
+    protected function complaintClearActors(DailyComplaint $complaint): array
     {
-        if ($complaint->status === ReportStatus::WAITING_CONFIRMATION) {
-            $actor = $complaint->handled_by ?? ($fallbackToCreator ? $complaint->created_by : null);
-        } elseif ($complaint->escalated_at && $complaint->status !== ReportStatus::CLEAR) {
-            $actor = $complaint->created_by;
-        } else {
-            $actor = $complaint->cleared_by ?? ($fallbackToCreator ? $complaint->created_by : null);
+        $isClear = ReportStatus::isClear($complaint->status);
+        $isWaiting = strcasecmp((string) $complaint->status, ReportStatus::WAITING_CONFIRMATION) === 0;
+        $actors = [];
+
+        if ($complaint->created_by) {
+            $actors[] = (int) $complaint->created_by;
+        }
+        if (($isWaiting || $isClear) && $complaint->handled_by) {
+            $actors[] = (int) $complaint->handled_by;
+        }
+        if ($isClear && $complaint->cleared_by) {
+            $actors[] = (int) $complaint->cleared_by;
         }
 
-        return $actor ? (int) $actor : null;
+        return array_values(array_unique($actors));
     }
 
     /**
@@ -1934,9 +1935,14 @@ class DashboardController extends Controller
     /** @return \Illuminate\Support\Collection<int|string, object> */
     protected function groupComplaintClears(Carbon $from, Carbon $to, ?string $odcName = null)
     {
-        return $this->complaintClearLikeRows($from, $to, $odcName)
-            ->groupBy(fn (DailyComplaint $row) => $this->complaintClearActor($row) ?? 0)
-            ->map(fn ($rows) => (object) ['total' => $rows->count()]);
+        $counts = [];
+        foreach ($this->complaintClearLikeRows($from, $to, $odcName) as $row) {
+            foreach ($this->complaintClearActors($row) as $actor) {
+                $counts[$actor] = ($counts[$actor] ?? 0) + 1;
+            }
+        }
+
+        return collect($counts)->map(fn (int $total) => (object) ['total' => $total]);
     }
 
     protected function groupComplaintOpens(string $fromDate, string $toDate, ?string $odcName = null)
