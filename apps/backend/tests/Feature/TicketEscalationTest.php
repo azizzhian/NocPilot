@@ -61,14 +61,17 @@ class TicketEscalationTest extends TestCase
         $teknisi = User::factory()->create(['name' => 'Teknisi Lapangan']);
         $ticket = $this->makeTicket($user);
 
-        $this->postJson("/api/v1/report-tickets/{$ticket->id}/assign", ['assigned_to' => $teknisi->id])
+        $this->putJson("/api/v1/report-tickets/{$ticket->id}", ['assigned_to' => $teknisi->id])
             ->assertOk()
-            ->assertJsonPath('data.status', 'Assigned')
+            ->assertJsonPath('data.status', 'On-Progress')
             ->assertJsonPath('data.assignee_name', 'Teknisi Lapangan');
 
-        $this->postJson("/api/v1/report-tickets/{$ticket->id}/start", ['note' => 'Berangkat ke lokasi'])
-            ->assertOk()
-            ->assertJsonPath('data.status', 'In-Progress');
+        $this->postJson("/api/v1/report-tickets/{$ticket->id}/updates", [
+            'type' => 'started',
+            'note' => 'Berangkat ke lokasi',
+        ])->assertCreated()->assertJsonPath('data.type', 'started');
+        $this->assertSame('On-Progress', $ticket->fresh()->status);
+        $this->assertNotNull($ticket->fresh()->work_started_at);
 
         Storage::fake('public');
         $this->postJson("/api/v1/report-tickets/{$ticket->id}/updates", [
@@ -86,9 +89,10 @@ class TicketEscalationTest extends TestCase
             'created_by' => $user->id,
         ]);
 
-        $this->getJson("/api/v1/report-tickets/{$ticket->id}/updates")
+        $updates = $this->getJson("/api/v1/report-tickets/{$ticket->id}/updates")
             ->assertOk()
-            ->assertJsonCount(3, 'data');
+            ->json('data');
+        $this->assertEqualsCanonicalizing(['assigned', 'started', 'progress'], array_column($updates, 'type'));
 
         $this->patchJson("/api/v1/report-tickets/{$ticket->id}/status", [
             'status' => 'Close',
@@ -119,7 +123,7 @@ class TicketEscalationTest extends TestCase
             'escalation_reason' => 'Gangguan tidak dapat diselesaikan melalui remote troubleshooting.',
             'job_type' => 'Pengecekan kabel dropcore',
             'priority' => 'high',
-            'status' => 'Open',
+            'status' => 'On-Progress',
         ]);
 
         $response->assertCreated()
@@ -165,14 +169,14 @@ class TicketEscalationTest extends TestCase
 
         $this->postJson('/api/v1/report-tickets', [
             'complaint_id' => $complaint->id,
-            'status' => 'Open',
+            'status' => 'On-Progress',
         ])->assertUnprocessable()->assertJsonValidationErrors('escalation_reason');
 
         DB::table('daily_complaints')->where('id', $complaint->id)->update(['status' => 'Clear']);
         $this->postJson('/api/v1/report-tickets', [
             'complaint_id' => $complaint->id,
             'escalation_reason' => 'Perlu kunjungan teknisi.',
-            'status' => 'Open',
+            'status' => 'On-Progress',
         ])->assertUnprocessable()->assertJsonValidationErrors('complaint_id');
     }
 
@@ -183,7 +187,7 @@ class TicketEscalationTest extends TestCase
         $payload = [
             'complaint_id' => $complaint->id,
             'escalation_reason' => 'Membutuhkan pengecekan lapangan.',
-            'status' => 'Open',
+            'status' => 'On-Progress',
         ];
 
         $other = User::factory()->create(['name' => 'NOC Lain']);
@@ -208,7 +212,7 @@ class TicketEscalationTest extends TestCase
         $payload = [
             'complaint_id' => $complaint->id,
             'escalation_reason' => 'Butuh pengecekan lapangan.',
-            'status' => 'Open',
+            'status' => 'On-Progress',
         ];
 
         $this->postJson('/api/v1/report-tickets', $payload)->assertCreated();
@@ -219,9 +223,14 @@ class TicketEscalationTest extends TestCase
         $this->assertSame(1, ReportTicket::where('complaint_id', $complaint->id)->count());
 
         $ticket = ReportTicket::firstOrFail();
-        $this->patchJson("/api/v1/report-tickets/{$ticket->id}/status", ['status' => 'Cancelled'])
-            ->assertOk()
-            ->assertJsonPath('data.status', 'Cancelled');
+        DB::table('report_tickets')->where('id', $ticket->id)->update(['status' => 'Cancelled']);
+        DB::table('daily_complaints')->where('id', $complaint->id)->update([
+            'status' => 'On-Progress',
+            'escalated_at' => null,
+            'ticket_id' => null,
+            'handled_at' => null,
+            'handled_by' => null,
+        ]);
 
         $complaint->refresh();
         $this->assertNull($complaint->escalated_at);
@@ -241,7 +250,7 @@ class TicketEscalationTest extends TestCase
         $ticketResponse = $this->postJson('/api/v1/report-tickets', [
             'complaint_id' => $complaint->id,
             'escalation_reason' => 'Membutuhkan pengecekan jalur FO.',
-            'status' => 'Assigned',
+            'status' => 'On-Progress',
             'assigned_to' => $user->id,
         ])->assertCreated();
         $ticketId = $ticketResponse->json('data.id');
@@ -249,9 +258,12 @@ class TicketEscalationTest extends TestCase
         $this->artisan('complaint:auto-clear')->assertSuccessful();
         $this->assertSame('Menunggu Konfirmasi', $complaint->fresh()->status);
 
-        $this->patchJson("/api/v1/report-tickets/{$ticketId}/status", ['status' => 'Completed'])
+        $this->patchJson("/api/v1/report-tickets/{$ticketId}/status", [
+            'status' => 'Close',
+            'action' => 'Perbaikan selesai.',
+        ])
             ->assertOk()
-            ->assertJsonPath('data.status', 'Completed');
+            ->assertJsonPath('data.status', 'Closed');
 
         $complaint->refresh();
         $this->assertSame('Menunggu Konfirmasi', $complaint->status);
@@ -277,7 +289,10 @@ class TicketEscalationTest extends TestCase
         ]);
         $ticket = $this->createEscalationTicket($user, $complaint);
 
-        $this->patchJson("/api/v1/report-tickets/{$ticket->id}/status", ['status' => 'Completed'])->assertOk();
+        $this->patchJson("/api/v1/report-tickets/{$ticket->id}/status", [
+            'status' => 'Close',
+            'action' => 'Perbaikan selesai.',
+        ])->assertOk();
         $complaint->refresh();
         $this->assertSame('Menunggu Konfirmasi', $complaint->status);
         $this->assertNull($complaint->cleared_at);
@@ -458,6 +473,7 @@ class TicketEscalationTest extends TestCase
         $this->assertSame(1, $stats['status_counts']['On-Progress']);
         $this->assertSame(array_sum($stats['status_counts']), $stats['total']);
         $this->assertSame(['On-Progress', 'Closed'], $stats['form_options']);
+        $this->assertArrayNotHasKey('legacy_options', $stats);
 
         $closed = $this->getJson('/api/v1/report-tickets/stats?status=Close')->assertOk()->json();
         $this->assertSame(2, $closed['total']);
@@ -480,7 +496,7 @@ class TicketEscalationTest extends TestCase
         $all = $this->getJson('/api/v1/report-tickets/stats')->assertOk()->json();
         $this->assertSame(3, $all['total']);
         $this->assertSame(array_sum($all['status_counts']), $all['total']);
-        $this->assertSame(1, $all['active']);
+        $this->assertSame(2, $all['active']);
         $this->assertSame(1, $all['finished']);
         $this->assertSame(1, $all['from_complaint']);
 
@@ -488,9 +504,9 @@ class TicketEscalationTest extends TestCase
         $this->assertSame(1, $fromComplaint['total']);
         $this->assertSame(1, $fromComplaint['from_complaint']);
 
-        $openOnly = $this->getJson('/api/v1/report-tickets/stats?status=Open')->assertOk()->json();
-        $this->assertSame(1, $openOnly['total']);
-        $this->assertSame(1, $openOnly['status_counts']['Open']);
+        $onProgressOnly = $this->getJson('/api/v1/report-tickets/stats?status=On-Progress')->assertOk()->json();
+        $this->assertSame(2, $onProgressOnly['total']);
+        $this->assertSame(2, $onProgressOnly['status_counts']['On-Progress']);
 
         $byNumber = $this->getJson('/api/v1/report-tickets/stats?search=%23'.$direct->id)->assertOk()->json();
         $this->assertSame(1, $byNumber['total']);
@@ -569,6 +585,32 @@ class TicketEscalationTest extends TestCase
         $this->assertNull($complaint->cleared_by);
     }
 
+    public function test_status_extended_tidak_bisa_ditulis_via_api(): void
+    {
+        $user = $this->actor();
+        $ticket = $this->makeTicket($user);
+
+        foreach (['Open', 'Assigned', 'On-Site', 'In-Progress', 'Completed', 'Cancelled'] as $status) {
+            $this->patchJson("/api/v1/report-tickets/{$ticket->id}/status", [
+                'status' => $status,
+                'action' => 'Action penguji.',
+            ])->assertUnprocessable()->assertJsonValidationErrors('status');
+        }
+
+        $this->postJson('/api/v1/report-tickets', [
+            'customer_name' => 'Pelanggan Status Lama',
+            'problem' => 'Gangguan',
+            'status' => 'Assigned',
+        ])->assertUnprocessable()->assertJsonValidationErrors('status');
+
+        $this->postJson("/api/v1/report-tickets/{$ticket->id}/updates", [
+            'type' => 'cancelled',
+            'note' => 'Tidak didukung lagi.',
+        ])->assertUnprocessable()->assertJsonValidationErrors('type');
+
+        $this->assertSame('On-Progress', $ticket->fresh()->status);
+    }
+
     private function actor(): User
     {
         foreach (['ticket.view', 'ticket.manage'] as $name) {
@@ -615,7 +657,7 @@ class TicketEscalationTest extends TestCase
         $response = $this->postJson('/api/v1/report-tickets', [
             'complaint_id' => $complaint->id,
             'escalation_reason' => 'Membutuhkan kunjungan teknisi.',
-            'status' => 'Open',
+            'status' => 'On-Progress',
         ]);
 
         $response->assertCreated();

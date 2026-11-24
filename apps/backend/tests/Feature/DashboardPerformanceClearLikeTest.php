@@ -211,8 +211,14 @@ class DashboardPerformanceClearLikeTest extends TestCase
         $complaint = $this->makeComplaint($creator);
         $ticket = $this->escalate($creator, $complaint);
 
-        $this->patchJson("/api/v1/report-tickets/{$ticket->id}/status", ['status' => 'Cancelled'])
-            ->assertOk();
+        DB::table('report_tickets')->where('id', $ticket->id)->update(['status' => 'Cancelled']);
+        DB::table('daily_complaints')->where('id', $complaint->id)->update([
+            'status' => 'On-Progress',
+            'escalated_at' => null,
+            'ticket_id' => null,
+            'handled_at' => null,
+            'handled_by' => null,
+        ]);
 
         $this->assertNull($complaint->fresh()->escalated_at);
         $this->getJson($this->dashboardUrl())->assertOk()

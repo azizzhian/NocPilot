@@ -158,9 +158,6 @@ class ReportTicketController extends Controller
 
             if ($assigneeChanged) {
                 $reportTicket->assigned_at = ! empty($data['assigned_to']) ? now() : null;
-                if (! empty($data['assigned_to']) && TicketStatus::isActive($reportTicket->status)) {
-                    $reportTicket->status = TicketStatus::ASSIGNED;
-                }
             }
 
             $status = $reportTicket->status;
@@ -243,7 +240,6 @@ class ReportTicketController extends Controller
             'status_counts' => $distribution,
             'status_options' => $statusOptions,
             'form_options' => TicketStatus::formOptions(),
-            'legacy_options' => TicketStatus::legacyStatuses(),
         ]);
     }
 
@@ -291,72 +287,6 @@ class ReportTicketController extends Controller
         );
     }
 
-    public function assign(Request $request, ReportTicket $reportTicket): JsonResponse
-    {
-        $data = $request->validate([
-            'assigned_to' => 'required|integer|exists:users,id',
-            'note' => 'nullable|string|max:2000',
-        ]);
-
-        DB::transaction(function () use ($request, $reportTicket, $data) {
-            $reportTicket->assigned_to = (int) $data['assigned_to'];
-            $reportTicket->assigned_at = now();
-            if ($reportTicket->status === TicketStatus::OPEN || $reportTicket->status === ReportStatus::ON_PROGRESS) {
-                $reportTicket->status = TicketStatus::ASSIGNED;
-            }
-            $reportTicket->save();
-
-            $this->logUpdate($reportTicket, 'assigned', $request->user(), ['note' => $data['note'] ?? null]);
-            $this->activity->log(
-                'ticket',
-                'Ticket #'.$reportTicket->id.' ditugaskan ke user #'.$data['assigned_to'],
-                $request->user(),
-                $request,
-                $reportTicket,
-                ['assigned_to' => (int) $data['assigned_to']],
-            );
-        });
-
-        return response()->json([
-            'message' => 'Teknisi berhasil ditugaskan.',
-            'data' => new ReportTicketResource($reportTicket->fresh([
-                'creator:id,name', 'clearer:id,name', 'assignee:id,name', 'updates.author:id,name',
-            ])),
-        ]);
-    }
-
-    public function start(Request $request, ReportTicket $reportTicket): JsonResponse
-    {
-        $data = $request->validate([
-            'note' => 'nullable|string|max:2000',
-        ]);
-
-        DB::transaction(function () use ($request, $reportTicket, $data) {
-            $reportTicket->status = TicketStatus::IN_PROGRESS;
-            $reportTicket->work_started_at ??= now();
-            $reportTicket->save();
-
-            $this->logUpdate($reportTicket, 'started', $request->user(), [
-                'note' => $data['note'] ?? null,
-                'work_started_at' => $reportTicket->work_started_at,
-            ]);
-            $this->activity->log(
-                'ticket',
-                'Teknisi mulai mengerjakan ticket #'.$reportTicket->id,
-                $request->user(),
-                $request,
-                $reportTicket,
-            );
-        });
-
-        return response()->json([
-            'message' => 'Pekerjaan dimulai.',
-            'data' => new ReportTicketResource($reportTicket->fresh([
-                'creator:id,name', 'clearer:id,name', 'assignee:id,name', 'updates.author:id,name',
-            ])),
-        ]);
-    }
-
     public function updates(ReportTicket $reportTicket): JsonResponse
     {
         $items = $reportTicket->updates()->with('author:id,name')->get();
@@ -380,7 +310,7 @@ class ReportTicketController extends Controller
     public function storeUpdate(Request $request, ReportTicket $reportTicket): JsonResponse
     {
         $data = $request->validate([
-            'type' => ['nullable', Rule::in(['assigned', 'started', 'progress', 'completed', 'cancelled'])],
+            'type' => ['nullable', Rule::in(['started', 'progress', 'completed'])],
             'action' => 'nullable|string|max:2000',
             'check_result' => 'nullable|string|max:2000',
             'repair_action' => 'nullable|string|max:2000',
@@ -425,15 +355,8 @@ class ReportTicketController extends Controller
                 $this->syncClearFields($reportTicket, TicketStatus::CLOSE, $request->user()->id, $previous);
                 $reportTicket->save();
                 $this->applyTransition($reportTicket, TicketStatus::CLOSE, $request->user(), $request, $data['note'] ?? null);
-            } elseif ($type === 'cancelled') {
-                $reportTicket->status = TicketStatus::CANCELLED;
-                $this->syncClearFields($reportTicket, TicketStatus::CANCELLED, $request->user()->id, $previous);
-                $reportTicket->save();
-                $this->applyTransition($reportTicket, TicketStatus::CANCELLED, $request->user(), $request, $data['note'] ?? null);
             } elseif ($type === 'started') {
-                $reportTicket->status = TicketStatus::IN_PROGRESS;
                 $reportTicket->work_started_at ??= now();
-                $this->syncClearFields($reportTicket, TicketStatus::IN_PROGRESS, $request->user()->id, $previous);
                 $reportTicket->save();
             }
 
@@ -471,7 +394,7 @@ class ReportTicketController extends Controller
     public function setStatus(Request $request, ReportTicket $reportTicket): JsonResponse
     {
         $data = $request->validate([
-            'status' => ['required', Rule::in([...TicketStatus::options(), 'Close'])],
+            'status' => ['required', Rule::in([...TicketStatus::writableStatuses(), 'Close'])],
             'note' => 'nullable|string|max:2000',
             'action' => 'nullable|string|max:2000',
         ]);
@@ -578,7 +501,7 @@ class ReportTicketController extends Controller
             'assigned_to' => 'nullable|integer|exists:users,id',
             'problem' => 'nullable|string|max:255',
             'action' => 'nullable|string|max:2000',
-            'status' => 'sometimes|'.Rule::in([...TicketStatus::options(), 'Close']),
+            'status' => 'sometimes|'.Rule::in([...TicketStatus::writableStatuses(), 'Close']),
             'opened_at' => 'nullable|date',
             'closed_at' => 'nullable|date',
             'notes' => 'nullable|string',

@@ -39,17 +39,10 @@ class TicketStatus
         return [self::LEGACY_ON_PROGRESS, self::CLOSE];
     }
 
-    /** @return list<string> */
-    public static function legacyStatuses(): array
+    /** Satu-satunya status yang boleh ditulis; sisanya hanya untuk membaca data lama. @return list<string> */
+    public static function writableStatuses(): array
     {
-        return [
-            self::OPEN,
-            self::ASSIGNED,
-            self::ON_SITE,
-            self::IN_PROGRESS,
-            self::COMPLETED,
-            self::CANCELLED,
-        ];
+        return self::formOptions();
     }
 
     /** Status yang masih dikerjakan — dipakai untuk cegah tiket aktif ganda & proteksi auto-clear. */

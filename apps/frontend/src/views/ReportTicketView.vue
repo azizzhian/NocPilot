@@ -47,7 +47,6 @@ const deleting = ref(false)
 const reportModalOpen = ref(false)
 
 const statusChips = ['On-Progress', 'Close'] as const
-const legacyStatuses = computed(() => stats.value.legacy_options ?? [])
 
 function statusCount(status: string): number | string {
   if (statsFailed.value) return '—'
@@ -67,11 +66,6 @@ function apiError(reason: unknown, fallback: string): string {
 function toggleStatus(status: string) {
   clearMode.value = false
   statusFilter.value = statusFilter.value === status ? 'all' : status
-}
-
-function onLegacyStatus(value: string | number) {
-  clearMode.value = false
-  statusFilter.value = String(value)
 }
 
 function kpiCards() {
@@ -321,17 +315,6 @@ onMounted(async () => {
             {{ ticketStatusLabel(s) }} · {{ statusCount(s) }}
           </Badge>
         </button>
-        <div class="ml-1 flex items-center gap-1">
-          <span class="text-[11px] text-muted">Lainnya</span>
-          <Select
-            :model-value="legacyStatuses.includes(statusFilter) ? statusFilter : ''"
-            class="w-32"
-            @update:model-value="onLegacyStatus"
-          >
-            <option value="">— pilih —</option>
-            <option v-for="s in legacyStatuses" :key="s" :value="s">{{ ticketStatusLabel(s) }} · {{ statusCount(s) }}</option>
-          </Select>
-        </div>
       </div>
     </Card>
 

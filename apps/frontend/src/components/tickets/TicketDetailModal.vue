@@ -3,9 +3,8 @@ import { computed, ref, watch } from 'vue'
 import Modal from '@/components/ui/Modal.vue'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
-import Select from '@/components/ui/Select.vue'
 import TicketUpdateModal from '@/components/tickets/TicketUpdateModal.vue'
-import { reportTicketApi, technicianApi, type ReportTicketItem } from '@/services/api'
+import { reportTicketApi, type ReportTicketItem } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { formatTimeId } from '@/lib/date-input'
 import { isCloseStatus, ticketStatusLabel, ticketStatusVariant } from '@/lib/ticket-status'
@@ -20,10 +19,7 @@ const emit = defineEmits<{
 
 const auth = useAuthStore()
 const ticket = ref<ReportTicketItem | null>(null)
-const technicians = ref<{ id: number; name: string }[]>([])
-const selectedTechnician = ref('')
 const loading = ref(false)
-const busy = ref(false)
 const error = ref('')
 const updateModalOpen = ref(false)
 const updateMode = ref<'progress' | 'close'>('progress')
@@ -38,7 +34,6 @@ async function load() {
   try {
     const res = await reportTicketApi.show(props.ticketId)
     ticket.value = res.data.data
-    selectedTechnician.value = ticket.value?.assigned_to ? String(ticket.value.assigned_to) : ''
   } catch {
     error.value = 'Gagal memuat detail ticket.'
   } finally {
@@ -50,40 +45,10 @@ watch(
   () => [props.open, props.ticketId] as const,
   async ([open]) => {
     if (!open || !props.ticketId) return
-    const res = await technicianApi.list().catch(() => null)
-    technicians.value = res?.data.data ?? []
     await load()
   },
   { immediate: true },
 )
-
-async function act(fn: () => Promise<unknown>, success: string) {
-  busy.value = true
-  error.value = ''
-  try {
-    await fn()
-    await load()
-    emit('changed')
-  } catch (e: unknown) {
-    const err = e as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } }
-    const first = err.response?.data?.errors
-      ? Object.values(err.response.data.errors).flat()[0]
-      : undefined
-    error.value = first ?? err.response?.data?.message ?? success
-  } finally {
-    busy.value = false
-  }
-}
-
-function assign() {
-  if (!selectedTechnician.value || !ticket.value) return
-  act(() => reportTicketApi.assign(ticket.value!.id, Number(selectedTechnician.value)), 'Gagal menugaskan teknisi.')
-}
-
-function start() {
-  if (!ticket.value) return
-  act(() => reportTicketApi.start(ticket.value!.id), 'Gagal memulai pekerjaan.')
-}
 
 function openUpdate(mode: 'progress' | 'close') {
   updateMode.value = mode
@@ -151,23 +116,13 @@ function openUpdate(mode: 'progress' | 'close') {
       </div>
 
       <div v-if="canManage" class="flex flex-wrap items-end gap-2 rounded-xl border border-border p-3">
-        <div class="min-w-[12rem] flex-1">
-          <label class="mb-1 block text-[11px] text-muted">Assignment teknisi</label>
-          <Select v-model="selectedTechnician">
-            <option value="">— Pilih teknisi —</option>
-            <option v-for="t in technicians" :key="t.id" :value="t.id">{{ t.name }}</option>
-          </Select>
-        </div>
-        <Button size="sm" :disabled="busy || !selectedTechnician" @click="assign">Tugaskan</Button>
-        <Button size="sm" variant="outline" :disabled="busy" @click="start">Mulai Kerja</Button>
-        <Button size="sm" variant="outline" :disabled="busy" @click="openUpdate('progress')">
+        <Button size="sm" variant="outline" @click="openUpdate('progress')">
           <ClipboardList class="h-3.5 w-3.5" /> Update Pekerjaan
         </Button>
         <Button
           v-if="!isCloseStatus(ticket.status)"
           size="sm"
           variant="outline"
-          :disabled="busy"
           @click="openUpdate('close')"
         >
           Close Tiket

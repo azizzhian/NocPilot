@@ -716,7 +716,6 @@ export interface ReportTicketStats {
   status_counts: Record<string, number>
   status_options: string[]
   form_options: string[]
-  legacy_options: string[]
   on_progress: number
   clear: number
   closed: number
@@ -737,9 +736,6 @@ export const reportTicketApi = {
   create: (data: Record<string, unknown>) => api.post('/report-tickets', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/report-tickets/${id}`, data),
   destroy: (id: number) => api.delete(`/report-tickets/${id}`),
-  assign: (id: number, assignedTo: number, note?: string) =>
-    api.post(`/report-tickets/${id}/assign`, { assigned_to: assignedTo, note }),
-  start: (id: number, note?: string) => api.post(`/report-tickets/${id}/start`, { note }),
   setStatus: (id: number, status: string, note?: string) =>
     api.patch(`/report-tickets/${id}/status`, { status, note }),
   updates: (id: number) =>

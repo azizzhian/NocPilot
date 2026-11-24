@@ -78,8 +78,6 @@ Route::prefix('v1')->group(function () {
             Route::get('/export', [ReportTicketController::class, 'export']);
             Route::get('/{reportTicket}/updates', [ReportTicketController::class, 'updates']);
             Route::post('/{reportTicket}/updates', [ReportTicketController::class, 'storeUpdate'])->middleware('permission:ticket.manage');
-            Route::post('/{reportTicket}/assign', [ReportTicketController::class, 'assign'])->middleware('permission:ticket.manage');
-            Route::post('/{reportTicket}/start', [ReportTicketController::class, 'start'])->middleware('permission:ticket.manage');
             Route::patch('/{reportTicket}/status', [ReportTicketController::class, 'setStatus'])->middleware('permission:ticket.manage');
             Route::get('/', [ReportTicketController::class, 'index']);
             Route::post('/', [ReportTicketController::class, 'store'])->middleware('permission:ticket.manage');

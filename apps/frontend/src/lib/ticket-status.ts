@@ -1,14 +1,5 @@
 export const TICKET_FORM_STATUSES = ['On-Progress', 'Closed'] as const
 
-export const TICKET_LEGACY_STATUSES = [
-  'Open',
-  'Assigned',
-  'On-Site',
-  'In-Progress',
-  'Completed',
-  'Cancelled',
-] as const
-
 const labels: Record<string, string> = {
   Closed: 'Close',
   Close: 'Close',
