@@ -36,7 +36,11 @@ class DashboardPerformanceClearLikeTest extends TestCase
         ], $overrides));
 
         DB::table('daily_complaints')->where('id', $complaint->id)
-            ->update(['report_date' => today()->toDateString()]);
+            ->update([
+                'report_date' => today()->toDateString(),
+                'created_at' => now()->subMinutes(8)->toDateTimeString(),
+                'updated_at' => now()->subMinutes(8)->toDateTimeString(),
+            ]);
 
         return $complaint->refresh();
     }
@@ -166,7 +170,7 @@ class DashboardPerformanceClearLikeTest extends TestCase
         $response->assertJsonPath('summary.complaints_clear', 1)
             ->assertJsonPath('summary.complaints_open', 0)
             ->assertJsonPath('complaint_performance.summary.clear', 1)
-            ->assertJsonPath('complaint_performance.summary.clear_final', 0)
+            ->assertJsonPath('complaint_performance.summary.clear_final', 1)
             ->assertJsonPath('complaint_performance.summary.escalated', 1)
             ->assertJsonPath('complaint_performance.summary.open', 0);
 
@@ -240,7 +244,7 @@ class DashboardPerformanceClearLikeTest extends TestCase
         $response->assertJsonPath('summary.complaints_clear', 1)
             ->assertJsonPath('kpis.0.clear', 1)
             ->assertJsonPath('complaint_performance.summary.clear', 1)
-            ->assertJsonPath('complaint_performance.summary.clear_final', 0)
+            ->assertJsonPath('complaint_performance.summary.clear_final', 1)
             ->assertJsonPath('complaint_performance.summary.escalated', 1);
 
         $nocRows = collect($response->json('noc_performance'));
@@ -251,31 +255,28 @@ class DashboardPerformanceClearLikeTest extends TestCase
         $this->assertNotNull($creatorNoc);
         $this->assertNotNull($closerNoc);
         $this->assertSame(1, (int) $creatorNoc['complaints_clear']);
-        $this->assertSame(1, (int) $closerNoc['complaints_clear']);
+        $this->assertSame(0, (int) $closerNoc['complaints_clear']);
         $this->assertSame(0, (int) $creatorNoc['tickets_clear']);
         $this->assertSame(1, (int) $closerNoc['tickets_clear']);
 
         $creatorWidget = $widgetRows->firstWhere('user_id', $creator->id);
-        $closerWidget = $widgetRows->firstWhere('user_id', $closer->id);
         $this->assertNotNull($creatorWidget);
-        $this->assertNotNull($closerWidget);
         $this->assertSame(1, (int) $creatorWidget['clear']);
-        $this->assertSame(1, (int) $closerWidget['clear']);
         $this->assertSame(1, (int) $creatorWidget['escalated']);
-        $this->assertSame(0, (int) $closerWidget['escalated']);
+        $this->assertNull($widgetRows->firstWhere('user_id', $closer->id));
     }
 
     public function test_auto_clear_tetap_memberi_poin_ke_pembuat_dan_penutup(): void
     {
         $creator = User::factory()->create(['name' => 'NOC Open Auto']);
         $closer = User::factory()->create(['name' => 'NOC Close Auto']);
-        $complaint = $this->makeComplaint($creator);
-        $ticket = $this->escalate($creator, $complaint);
-        $this->closeTicket($closer, $ticket);
-
-        DB::table('daily_complaints')->where('id', $complaint->id)->update([
-            'handled_at' => now()->subMinutes(31)->toDateTimeString(),
+        Sanctum::actingAs($creator);
+        $complaint = $this->makeComplaint($creator, [
+            'status' => 'Menunggu Konfirmasi',
+            'handled_at' => now()->subMinutes(31),
+            'handled_by' => $closer->id,
         ]);
+
         $this->artisan('complaint:auto-clear')->assertSuccessful();
 
         $fresh = $complaint->fresh();

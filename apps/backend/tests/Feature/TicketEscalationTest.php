@@ -149,7 +149,7 @@ class TicketEscalationTest extends TestCase
         $complaint->refresh();
         $this->assertSame($ticket->id, $complaint->ticket_id);
         $this->assertTrue($complaint->hasActiveTicket());
-        $this->assertSame('On-Progress', $complaint->status);
+        $this->assertSame('Clear', $complaint->status);
 
         $this->assertDatabaseHas('activity_logs', [
             'type' => 'complaint',
@@ -178,6 +178,73 @@ class TicketEscalationTest extends TestCase
             'escalation_reason' => 'Perlu kunjungan teknisi.',
             'status' => 'On-Progress',
         ])->assertUnprocessable()->assertJsonValidationErrors('complaint_id');
+    }
+
+    public function test_eskalasi_sebelum_lima_menit_ditolak_dan_tepat_lima_menit_diizinkan(): void
+    {
+        $user = $this->actor();
+        $complaint = $this->makeComplaint($user);
+        DB::table('daily_complaints')->where('id', $complaint->id)->update([
+            'created_at' => now()->subSeconds(299)->toDateTimeString(),
+        ]);
+
+        $this->postJson('/api/v1/report-tickets', [
+            'complaint_id' => $complaint->id,
+            'escalation_reason' => 'Perlu kunjungan teknisi.',
+        ])->assertUnprocessable()->assertJsonValidationErrors('created_at');
+        $this->assertSame(0, ReportTicket::count());
+        $this->assertSame('On-Progress', $complaint->fresh()->status);
+
+        DB::table('daily_complaints')->where('id', $complaint->id)->update([
+            'created_at' => now()->subMinutes(5)->toDateTimeString(),
+        ]);
+        $this->postJson('/api/v1/report-tickets', [
+            'complaint_id' => $complaint->id,
+            'escalation_reason' => 'Perlu kunjungan teknisi.',
+        ])->assertCreated();
+    }
+
+    public function test_eskalasi_tanpa_action_ditolak(): void
+    {
+        $user = $this->actor();
+        $complaint = $this->makeComplaint($user);
+        DB::table('daily_complaints')->where('id', $complaint->id)->update(['action' => null]);
+
+        $this->postJson('/api/v1/report-tickets', [
+            'complaint_id' => $complaint->id,
+            'escalation_reason' => 'Perlu kunjungan teknisi.',
+        ])->assertUnprocessable()->assertJsonValidationErrors('action');
+        $this->assertSame(0, ReportTicket::count());
+        $this->assertSame('On-Progress', $complaint->fresh()->status);
+    }
+
+    public function test_eskalasi_mencatat_clear_atribusi_dan_metrik_komplain(): void
+    {
+        $user = $this->actor();
+        $complaint = $this->makeComplaint($user);
+
+        $this->postJson('/api/v1/report-tickets', [
+            'complaint_id' => $complaint->id,
+            'escalation_reason' => 'Perlu kunjungan teknisi.',
+            'action' => 'Teknisi melakukan pengecekan lapangan.',
+        ])->assertCreated();
+
+        $fresh = $complaint->fresh();
+        $this->assertSame('Clear', $fresh->status);
+        $this->assertSame($user->id, $fresh->cleared_by);
+        $this->assertNotNull($fresh->cleared_at);
+        $this->assertFalse((bool) $fresh->auto_cleared);
+        $this->assertSame(8, (int) $fresh->handling_minutes);
+        $this->assertSame('Cepat', $fresh->performance_category);
+        $this->assertNotNull($fresh->escalated_at);
+        $this->assertNotNull($fresh->end_problem);
+        $this->assertSame('Teknisi melakukan pengecekan lapangan.', $fresh->action);
+        $this->assertGreaterThan(0, DB::table('activity_logs')
+            ->where('type', 'complaint')
+            ->where('subject_type', DailyComplaint::class)
+            ->where('subject_id', $complaint->id)
+            ->where('action', 'like', '%di-Clear saat dibuatkan ticket%')
+            ->count());
     }
 
     public function test_eskalasi_hanya_bisa_dilakukan_oleh_pembuat_komplain(): void
@@ -239,7 +306,7 @@ class TicketEscalationTest extends TestCase
         $this->assertSame(2, ReportTicket::where('complaint_id', $complaint->id)->count());
     }
 
-    public function test_tiket_aktif_melindungi_komplain_dari_auto_clear_dan_timer_dimulai_ulang(): void
+    public function test_komplain_clear_saat_eskalasi_tidak_terkena_auto_clear_dan_data_lama_tetap_terlindungi(): void
     {
         $user = $this->actor();
         $complaint = $this->makeComplaint($user, 'Menunggu Konfirmasi');
@@ -255,6 +322,20 @@ class TicketEscalationTest extends TestCase
         ])->assertCreated();
         $ticketId = $ticketResponse->json('data.id');
 
+        $this->assertSame('Clear', $complaint->fresh()->status);
+        $this->artisan('complaint:auto-clear')->assertSuccessful();
+        $this->assertSame('Clear', $complaint->fresh()->status);
+        $this->assertFalse((bool) $complaint->fresh()->auto_cleared);
+
+        DB::table('daily_complaints')->where('id', $complaint->id)->update([
+            'status' => 'Menunggu Konfirmasi',
+            'handled_at' => now()->subMinutes(31)->toDateTimeString(),
+            'cleared_at' => null,
+            'cleared_by' => null,
+            'auto_cleared' => false,
+            'handling_minutes' => null,
+            'performance_category' => null,
+        ]);
         $this->artisan('complaint:auto-clear')->assertSuccessful();
         $this->assertSame('Menunggu Konfirmasi', $complaint->fresh()->status);
 
@@ -280,44 +361,52 @@ class TicketEscalationTest extends TestCase
         $this->assertTrue((bool) $complaint->auto_cleared);
     }
 
-    public function test_selesai_tiket_tidak_auto_clear_dan_aturan_clear_manual_tetap_berlaku(): void
+    public function test_tiket_close_tidak_mengubah_komplain_yang_sudah_clear_dan_clear_manual_tetap_berlaku(): void
     {
         $user = $this->actor();
         $complaint = $this->makeComplaint($user);
-        DB::table('daily_complaints')->where('id', $complaint->id)->update([
-            'created_at' => now()->subMinutes(2)->toDateTimeString(),
-        ]);
         $ticket = $this->createEscalationTicket($user, $complaint);
+        $clearedAt = $complaint->fresh()->cleared_at;
 
         $this->patchJson("/api/v1/report-tickets/{$ticket->id}/status", [
             'status' => 'Close',
             'action' => 'Perbaikan selesai.',
+        ])->assertOk()->assertJsonPath('data.status', 'Closed');
+        $complaint->refresh();
+        $this->assertSame('Clear', $complaint->status);
+        $this->assertTrue($complaint->cleared_at->equalTo($clearedAt));
+
+        $this->patchJson("/api/v1/report-tickets/{$ticket->id}/status", [
+            'status' => 'Close',
+            'action' => 'Perbaikan selesai (diperbarui).',
         ])->assertOk();
         $complaint->refresh();
-        $this->assertSame('Menunggu Konfirmasi', $complaint->status);
-        $this->assertNull($complaint->cleared_at);
+        $this->assertSame('Clear', $complaint->status);
+        $this->assertTrue($complaint->cleared_at->equalTo($clearedAt));
 
-        DB::table('daily_complaints')->where('id', $complaint->id)->update(['action' => null]);
-        $this->patchJson("/api/v1/daily-entry/complaint/{$complaint->id}/status", ['status' => 'Clear'])
+        $young = $this->makeComplaint($user);
+        DB::table('daily_complaints')->where('id', $young->id)->update([
+            'created_at' => now()->subMinutes(2)->toDateTimeString(),
+            'action' => null,
+        ]);
+        $this->patchJson("/api/v1/daily-entry/complaint/{$young->id}/status", ['status' => 'Clear'])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('action');
 
-        DB::table('daily_complaints')->where('id', $complaint->id)->update(['action' => 'Sudah dikerjakan teknisi.']);
-        $this->patchJson("/api/v1/daily-entry/complaint/{$complaint->id}/status", ['status' => 'Clear'])
+        DB::table('daily_complaints')->where('id', $young->id)->update(['action' => 'Sudah dikerjakan teknisi.']);
+        $this->patchJson("/api/v1/daily-entry/complaint/{$young->id}/status", ['status' => 'Clear'])
             ->assertUnprocessable()->assertJsonValidationErrors('created_at');
 
-        DB::table('daily_complaints')->where('id', $complaint->id)->update([
+        DB::table('daily_complaints')->where('id', $young->id)->update([
             'created_at' => now()->subMinutes(10)->toDateTimeString(),
         ]);
-        $this->patchJson("/api/v1/daily-entry/complaint/{$complaint->id}/status", [
-            'status' => 'Clear',
-            'action' => 'Sudah dikerjakan teknisi.',
-        ])->assertOk();
+        $this->patchJson("/api/v1/daily-entry/complaint/{$young->id}/status", ['status' => 'Clear'])
+            ->assertOk();
 
-        $complaint->refresh();
-        $this->assertSame('Clear', $complaint->status);
-        $this->assertSame($user->id, $complaint->cleared_by);
-        $this->assertFalse((bool) $complaint->auto_cleared);
+        $young->refresh();
+        $this->assertSame('Clear', $young->status);
+        $this->assertSame($user->id, $young->cleared_by);
+        $this->assertFalse((bool) $young->auto_cleared);
     }
 
     public function test_riwayat_komplain_dan_riwayat_tiket_tidak_saling_menimpa(): void
@@ -409,7 +498,7 @@ class TicketEscalationTest extends TestCase
         $this->assertSame($user->id, $ticket->cleared_by);
     }
 
-    public function test_close_pada_tiket_eskalasi_membuat_komplain_menunggu_konfirmasi(): void
+    public function test_close_pada_tiket_eskalasi_tetap_menjaga_komplain_clear(): void
     {
         $user = $this->actor();
         $complaint = $this->makeComplaint($user);
@@ -422,10 +511,11 @@ class TicketEscalationTest extends TestCase
         ])->assertCreated();
 
         $complaint->refresh();
-        $this->assertSame('Menunggu Konfirmasi', $complaint->status);
-        $this->assertNull($complaint->cleared_at);
-        $this->assertNotNull($complaint->handled_at);
+        $this->assertSame('Clear', $complaint->status);
+        $this->assertNotNull($complaint->cleared_at);
+        $this->assertNull($complaint->handled_at);
         $this->assertSame($response->json('data.id'), $complaint->ticket_id);
+        $this->assertSame('Konektor splitter diganti.', $complaint->action);
     }
 
     public function test_filter_close_menampilkan_status_clear_dan_closed(): void
@@ -626,7 +716,7 @@ class TicketEscalationTest extends TestCase
 
     private function makeComplaint(User $user, string $status = 'On-Progress'): DailyComplaint
     {
-        return DailyComplaint::create([
+        $complaint = DailyComplaint::create([
             'report_date' => today()->toDateString(),
             'complaint_type' => DailyComplaint::TYPE_INDIVIDUAL,
             'customer_name' => 'Pelanggan Uji',
@@ -638,6 +728,13 @@ class TicketEscalationTest extends TestCase
             'status' => $status,
             'created_by' => $user->id,
         ]);
+
+        DB::table('daily_complaints')->where('id', $complaint->id)->update([
+            'created_at' => now()->subMinutes(8)->toDateTimeString(),
+            'updated_at' => now()->subMinutes(8)->toDateTimeString(),
+        ]);
+
+        return $complaint->refresh();
     }
 
     private function makeTicket(User $user): ReportTicket

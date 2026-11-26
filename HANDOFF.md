@@ -4,8 +4,8 @@ Catatan tugas yang **sedang berjalan**, dipakai bergantian oleh Cursor dan OpenC
 Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan oleh `/worklog` saat tugas tuntas
 (ringkasannya dipindah ke `CHANGELOG.md`). Keputusan permanen ditulis di `AGENTS.md`, bukan di sini.
 
-- **Terakhir diperbarui**: 2026-11-23 oleh OpenCode
-- **Commit dasar**: `17b5f70` (update gamas) — pekerjaan eskalasi tiket belum di-commit
+- **Terakhir diperbarui**: 2026-11-26 oleh OpenCode
+- **Commit dasar**: `17b5f70` (update gamas) — pekerjaan eskalasi tiket & perubahan Clear-saat-eskalasi belum di-commit
 
 ## Tugas sekarang
 
@@ -17,6 +17,7 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
   - Frontend lain: `KpiCard` prop `clearHint` (tooltip Clear komplain), `api.ts` tipe `clear_final`, label/subtitle dashboard & widget disesuaikan ("Clear termasuk Menunggu Konfirmasi ≥30 menit & eskalasi tiket"; tooltip poin pembuat + penutup).
   - Verifikasi: `composer test --working-dir=apps/backend` **64 lolos / 560 assertions** (termasuk 8 test di `DashboardPerformanceClearLikeTest`, 2 test poin ganda pembuat/penutup saat tutup tiket & auto-clear, 1 test 403 non-pembuat, dan 1 test 422 status extended di `TicketEscalationTest`). `npm run build:web` lolos, `php -l` OK.
   - **Verifikasi manual yang tersisa**: buat komplain → "Tandai Selesai" → Dashboard cek Clear **belum naik** (masih open) sampai lewat 30 menit; setelah 30 menit Clear naik walau status di `/komplain` masih Menunggu Konfirmasi bila scheduler belum jalan; eskalasi komplain oleh NOC1 lalu tutup tiket oleh NOC2 → leaderboard/widget keduanya masing-masing +1 poin Clear, KPI atas tetap 1 kasus; coba eskalasi komplain orang lain → tombol gembok + 403; batalkan tiket → komplain kembali open; bandingkan SLA ≤60 menit tetap memakai `clear_final`.
+  - **Catatan 2026-11-26**: skenario "NOC1 eskalasi + NOC2 tutup tiket → dua poin Clear" & "batalkan tiket → komplain kembali open" **hanya berlaku untuk data lama**. Eskalasi baru kini meng-Clear komplain saat tiket dibuat (lihat entri Sudah selesai), sehingga penutup tiket hanya mendapat poin tiket dan komplain tetap Clear.
 
 - **Modul Gamas terpisah** (permintaan user, 2026-11-20) — kode **selesai** (backend, frontend, migration sudah `migrate`, `composer test` 7 lolos, `npm run build:web` lolos), tinggal verifikasi manual:
   - **Tabel baru `daily_gamas`** (`2026_11_20_000000_create_daily_gamas_table.php`): buat tabel (report_date, gamas_kind, location_label, impact, odc_name, problem, action, start/end_problem, status, shift, created_by, cleared_by, cleared_at) → **pindah data** baris `complaint_type='gamas'` dari `daily_complaints` (status `Menunggu Konfirmasi` → `On-Progress`, kolom handling/repeat TIDAK disalin) → **DELETE** baris gamas dari `daily_complaints`. Kolom gamas lama di `daily_complaints` tidak di-drop. Terverifikasi lokal: `gamas: 1`, `complaints gamas-type: 0`.
@@ -44,6 +45,13 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 - Favorit sidebar kini **global & bisa dibuka semua role** (admin mengontrol lewat `/settings`).
 
 ## Sudah selesai
+
+- **Buat Tiket hanya setelah 5 menit + komplain langsung Clear saat eskalasi** (permintaan user, 2026-11-26) — kode **selesai & terverifikasi otomatis**, tinggal verifikasi manual:
+  - Aturan umur eskalasi disamakan dengan Clear manual: helper bersama **`App\Support\ComplaintClearAge`** (`remainingSeconds()` + `assert()`, 300 detik dari `created_at`, pesan error identik). `DailyEntryController::assertComplaintMinimumAgeForClear()` kini mendelegasi ke helper ini; `ReportTicketController::assertCanEscalate()` memanggilnya **setelah** cek owner / status Clear / tiket aktif (prioritas error lama tetap). 422 `errors.created_at` bila <5 menit atau waktu input tidak valid.
+  - Saat `POST /report-tickets` dengan `complaint_id` berhasil: komplain **langsung `Clear`** (Action wajib → 422 `errors.action` bila kosong), `cleared_by`/`cleared_at` = pembuat tiket, `end_problem` default hari ini, `handling_minutes`/`performance_category` dari `created_at → cleared_at`, `auto_cleared=false`, `escalated_at`/`ticket_id` tetap terisi. Activity log + realtime `complaintUpdated` ikut ditulis. Berlaku untuk status tiket On-Progress **maupun** Close; tiket Close/Cancel kemudian **tidak** mengubah komplain yang sudah Clear (`syncComplaintOnFinish`/`syncComplaintOnCancel` early-return karena status Clear). Tiket langsung tidak terkena aturan ini.
+  - Frontend: `ComplaintDataList.vue` — tombol "Buat Tiket" disabled dengan ikon `Timer` + tooltip "Buat Tiket tersedia dalam mm:ss" (data hari ini, carry-over, menu konteks) memakai ticker 1 detik yang sudah ada; `InputHarianView::openTicketForm()` guard umur + toast; `TicketFormModal.vue` menandai Action wajib untuk eskalasi & validasi di `submit()`.
+  - Test: helper `makeComplaint` di `TicketEscalationTest` & `DashboardPerformanceClearLikeTest` kini backdate `created_at` 8 menit (kolom bukan `$fillable` → via `DB::table()->update()`). Test baru: 422 umur (4m59s ditolak, tepat 5m diizinkan), 422 Action kosong, atribusi/metrik Clear, Close/Cancel tidak mengubah komplain. Assertion lama disesuaikan: komplain pasca-eskalasi Clear, `clear_final` = 1, penutup tiket tidak lagi dapat poin Clear komplain (hanya poin tiket). Test auto-clear poin ganda ditulis ulang memakai komplain waiting non-eskalasi; test proteksi tiket aktif disimulasikan via DB untuk data lama.
+  - Verifikasi: `composer test --working-dir=apps/backend` **67 lolos / 587 assertions**, `npm run build:web` lolos, `php -l` OK. Tanpa migration/permission baru.
 
 - **Status extended tiket tidak dipakai lagi** (permintaan user, 2026-11-23): `Open|Assigned|On-Site|In-Progress|Completed|Cancelled` ditolak 422 lewat create/update/setStatus (`TicketStatus::writableStatuses()`), filter "Lainnya" dan tombol Tugaskan/Mulai Kerja dihapus, endpoint `assign`/`start` dihapus, update tipe `started` hanya mencatat `work_started_at` (status tetap On-Progress). Data lama tetap dibaca (badge, filter `status=`, `status_counts`, export) dan `activeStatuses()` tidak dipangkas supaya tetap melindungi komplain dari auto-clear. `stats()` tidak lagi mengirim `legacy_options`. Tanpa migrasi (kolom `status` string bebas). Verifikasi: `composer test` **64 lolos / 560 assertions** (test baru 422 untuk 6 status + update `Cancelled` disimulasikan via DB untuk data lama), `npm run build:web` lolos, `php -l` OK.
 
@@ -115,12 +123,13 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 
 ## Langkah berikutnya
 
+- **Verifikasi manual Buat Tiket ≥5 menit & Clear saat eskalasi (2026-11-26)**: buka `/komplain` → komplain baru menampilkan tombol "Buat Tiket" disabled + ikon jam + tooltip "Buat Tiket tersedia dalam mm:ss" (juga di carry-over & menu konteks), klik tidak membuka form, tombol aktif tepat setelah 5 menit tanpa reload; form eskalasi menandai Action wajib → kosong → error inline & backend 422 `errors.action`; isi alasan + Action → Simpan → kartu komplain langsung status **Clear** (chip performa & durasi muncul), badge "Dialihkan ke Tiket" + "Lihat Tiket #…" tetap ada; coba eskalasi sebelum 5 menit via Postman → 422 `errors.created_at`; eskalasi dengan status tiket Close → komplain tetap Clear; tutup/batalkan tiket → komplain **tidak** kembali ke Menunggu Konfirmasi/On-Progress; Dashboard: komplain eskalasi masuk Clear final (bukan lagi clear-like), KPI atas tetap 1 kasus, penutup tiket hanya dapat poin tiket; realtime komplain ter-update di tab lain saat tiket dibuat.
 - **Verifikasi manual eskalasi tiket (2026-11-23)** — setelah re-login (permission `ticket.view`/`ticket.manage` sudah ada di role, tapi route kini di-gate middleware):
   1. `/report/ticket` → Tambah Ticket masih ada; buat tiket tanpa komplain → tersimpan, `complaint_id = NULL`, badge "Tiket Langsung". Assignment teknisi dilakukan di form tiket; tidak ada tombol Tugaskan/Mulai Kerja di detail. Update Pekerjaan (isi hasil/tindakan/material/foto), Close (Action wajib), Excel, Generate masih berfungsi.
   2. `/komplain` → pada kartu komplain belum Clear & belum bertiket muncul "Buat Tiket"; klik → form "Buat Tiket dari Komplain" ter-prefill (nama/telepon/ODC/problem/NOC/waktu + riwayat update), alasan wajib; simpan → badge "Dialihkan ke Tiket" + tombol "Lihat Tiket #…" (juga di carry-over).
   3. Klik "Lihat Tiket" → panel "SUMBER TIKET: KOMPLAIN" lengkap, tombol "Lihat Komplain Asal" membuka detail komplain (bukan duplikat). Riwayat pekerjaan tiket tidak menimpa riwayat komplain.
   4. Coba klik "Buat Tiket" dua kali / dari 2 browser bersamaan → hanya satu tiket aktif; yang kedua error "sudah memiliki tiket aktif".
-  5. Tidak ada tombol "Batalkan"; tutup tiket eskalasi lewat Close + Action → komplain Menunggu Konfirmasi dengan timer 30 menit dihitung ulang. Setelah tiket tertutup, eskalasi ulang diperbolehkan & tercatat di activity log (status `Cancelled` lama masih dibaca bila ada data lama).
+  5. Tidak ada tombol "Batalkan"; tutup tiket eskalasi lewat Close + Action → komplain Menunggu Konfirmasi dengan timer 30 menit dihitung ulang. Setelah tiket tertutup, eskalasi ulang diperbolehkan & tercatat di activity log (status `Cancelled` lama masih dibaca bila ada data lama). **(Digantikan aturan 2026-11-26: eskalasi baru langsung Clear, tidak bisa dieskalasi ulang.)**
   6. Tiket aktif menahan auto-clear (komplain Menunggu Konfirmasi dengan tiket aktif tetap tidak Clear setelah 30 mnt); setelah tiket Selesai → komplain Menunggu Konfirmasi dengan timer 30 mnt dihitung ulang dari `handled_at = now()`, tidak langsung Clear; Clear manual tetap Action wajib + pembuat + umur ≥5 mnt.
   7. Dashboard: kartu "Dieskalasi ke Tiket", widget "Statistik Ticket" (sumber & status) sesuai filter periode/ODC; filter sumber Tiket Langsung/Dari Komplain di tabel, Excel, dan Generate Report konsisten.
 
@@ -151,6 +160,12 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 - (Perlu keputusan) Karena API jaringan tidak ber-middleware permission, noc yang membuka favorit OLT otomatis bisa **tambah/edit/hapus** data OLT. Bila ingin read-only, perlu gate tambahan (`network.manage`) di UI.
 
 ## File disentuh
+
+- **Buat Tiket ≥5 menit & Clear saat eskalasi (2026-11-26)**:
+  - `apps/backend/app/Support/ComplaintClearAge.php` (baru)
+  - `apps/backend/app/Http/Controllers/Api/DailyEntryController.php` (delegate guard umur), `app/Http/Controllers/Api/ReportTicketController.php` (guard eskalasi, Clear komplain, realtime & audit)
+  - `apps/backend/tests/Feature/TicketEscalationTest.php`, `tests/Feature/DashboardPerformanceClearLikeTest.php`
+  - `apps/frontend/src/components/daily/ComplaintDataList.vue`, `apps/frontend/src/views/InputHarianView.vue`, `apps/frontend/src/components/tickets/TicketFormModal.vue`
 
 - **Eskalasi tiket (2026-11-23)**:
   - `apps/backend/database/migrations/2026_11_23_000000_add_escalation_fields_to_report_tickets.php`, `2026_11_23_010000_create_report_ticket_updates_table.php`, `2026_11_23_020000_add_ticket_link_to_daily_complaints.php`
@@ -239,6 +254,8 @@ Baca di awal sesi, perbarui setiap selesai satu langkah berarti. Dikosongkan ole
 
 - **Minimum umur Clear**: frontend tidak punya endpoint waktu — `serverNow()` memakai offset header HTTP `Date` yang resolusinya 1 detik; `Math.ceil` di helper countdown menutup selisih sub-detik. Fallback `Date.now()` hanya bila header tidak ada (mis. response di-cache).
 - **Test minimum umur**: `ComplaintClearMinimumAgeTest` mem-freeze waktu via `Carbon::setTestNow()` di `setUp`/`tearDown` supaya batas 299/300 detik deterministik. `created_at` tidak ada di `$fillable` → backdate wajib lewat `DB::table()->update()`.
+- **Umur eskalasi tiket**: aturan 5 menit memakai helper yang **sama** dengan Clear manual (`ComplaintClearAge`), jangan membuat konstanta/validasi kedua. Prioritas error di `assertCanEscalate`: pembuat (403) → sudah Clear (422 `complaint_id`) → tiket aktif (422 `complaint_id`) → umur (422 `created_at`). Action dienforce setelah prefill (`array_filter`), jadi Action komplain lama tetap berlaku bila form tidak mengubahnya.
+- **Clear saat eskalasi**: komplain yang sudah Clear tidak lagi menjadi Menunggu Konfirmasi saat tiket ditutup/dibatalkan. Konsekuensinya, penutup tiket hanya mendapat poin `tickets_clear` (bukan poin Clear komplain), dan `clear_final`/SLA komplain kini ikut terisi untuk eskalasi baru. Itu disengaja sesuai keputusan 2026-11-26; jangan "memperbaiki" sinkronisasi lama tanpa konfirmasi user.
 - **SLA komplain**: `start_problem`/`end_problem` bertipe DATE (tanpa jam) → KPI ≤60 menit memakai `handling_minutes` valid saja (aturan ketat di `App\Support\ComplaintSla`); durasi NULL **tidak dihitung** di Dashboard, `/komplain`, maupun rekap. Jangan menambah fallback atau migration hanya untuk KPI ini — ketiga tempat harus memanggil helper yang sama.
 - **Test SQLite**: cast `date` Eloquent menyimpan `YYYY-MM-DD 00:00:00`; test yang memakai `whereBetween('report_date', [from,to])` harus menulis `report_date` mentah via `DB::table()->update()` seperti di `ComplaintSlaTest`.
 - **Gamas**: data lama di `daily_complaints` (kolom `gamas_kind`/`location_label`/`impact`) dibiarkan apa adanya setelah pemindahan — kolom TIDAK di-drop supaya migration aman di production. Baris gamas sendiri sudah di-DELETE dari `daily_complaints` (kecuali histori pindah ke `daily_gamas`).

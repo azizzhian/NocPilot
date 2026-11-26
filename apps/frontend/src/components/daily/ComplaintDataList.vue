@@ -210,6 +210,12 @@ function clearHint(item: DailyEntryItem): string {
   return `Clear tersedia dalam ${formatCountdown(remaining)}`
 }
 
+function ticketHint(item: DailyEntryItem): string {
+  const remaining = complaintClearRemainingSeconds(item.created_at, clearTick.value)
+  if (remaining === null) return 'Waktu input komplain tidak valid. Buat Tiket belum tersedia.'
+  return `Buat Tiket tersedia dalam ${formatCountdown(remaining)}`
+}
+
 function performanceClass(category?: string | null) {
   switch (category) {
     case 'Cepat':
@@ -291,7 +297,7 @@ function toggleMenu(id: number, event: MouseEvent) {
   const btn = event.currentTarget as HTMLElement
   const rect = btn.getBoundingClientRect()
   const menuWidth = 192
-  const menuHeight = 96
+  const menuHeight = 132
   const left = Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8)
   const openUp = rect.bottom + menuHeight > window.innerHeight - 8
   menuPos.value = {
@@ -364,12 +370,22 @@ function clearTicketPending() {
   }
 }
 
+function isTicketAgeLocked(item: DailyEntryItem): boolean {
+  return auth.can('ticket.manage')
+    && !isComplaintLocked(item)
+    && !isClear(item.status)
+    && !item.ticket_id
+    && !activeTicketStatuses.includes(item.ticket_status ?? '')
+    && isComplaintClearTooYoung(item, clearTick.value)
+}
+
 function canCreateTicket(item: DailyEntryItem): boolean {
   return auth.can('ticket.manage')
     && !isComplaintLocked(item)
     && !isClear(item.status)
     && !item.ticket_id
     && !activeTicketStatuses.includes(item.ticket_status ?? '')
+    && !isComplaintClearTooYoung(item, clearTick.value)
     && ticketPendingId.value !== item.id
 }
 
@@ -658,6 +674,16 @@ watch(
                       Lihat Tiket #{{ item.ticket_id }}
                     </button>
                     <button
+                      v-else-if="isTicketAgeLocked(item)"
+                      type="button"
+                      disabled
+                      class="inline-flex cursor-not-allowed items-center gap-1 rounded-full border border-primary/40 px-2.5 py-1 text-[11px] font-medium text-primary opacity-60"
+                      :title="ticketHint(item)"
+                    >
+                      <Timer class="h-3 w-3" />
+                      Buat Tiket
+                    </button>
+                    <button
                       v-else-if="canCreateTicket(item)"
                       type="button"
                       class="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2.5 py-1 text-[11px] font-medium text-primary transition hover:bg-primary/10 disabled:cursor-wait disabled:opacity-60"
@@ -880,6 +906,16 @@ watch(
                       Lihat Tiket #{{ item.ticket_id }}
                     </button>
                     <button
+                      v-else-if="isTicketAgeLocked(item)"
+                      type="button"
+                      disabled
+                      class="inline-flex cursor-not-allowed items-center gap-1 rounded-full border border-primary/40 px-2.5 py-1 text-[11px] font-medium text-primary opacity-60"
+                      :title="ticketHint(item)"
+                    >
+                      <Timer class="h-3 w-3" />
+                      Buat Tiket
+                    </button>
+                    <button
                       v-else-if="canCreateTicket(item)"
                       type="button"
                       class="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2.5 py-1 text-[11px] font-medium text-primary transition hover:bg-primary/10 disabled:cursor-wait disabled:opacity-60"
@@ -1008,6 +1044,16 @@ watch(
             @click="onCreateTicket(menuItem)"
           >
             <Ticket class="h-4 w-4 text-muted" />
+            Buat Tiket
+          </button>
+        </div>
+        <div v-else-if="menuItem && isTicketAgeLocked(menuItem)" :title="ticketHint(menuItem)">
+          <button
+            type="button"
+            disabled
+            class="flex w-full cursor-not-allowed items-center gap-2 px-3 py-2.5 text-left text-sm text-foreground opacity-50"
+          >
+            <Timer class="h-4 w-4 text-muted" />
             Buat Tiket
           </button>
         </div>

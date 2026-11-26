@@ -8,6 +8,8 @@ use App\Models\DailyComplaint;
 use App\Models\ReportTicket;
 use App\Models\ReportTicketUpdate;
 use App\Services\Audit\ActivityLogger;
+use App\Services\DailyEntry\DailyEntryRealtimeService;
+use App\Support\ComplaintClearAge;
 use App\Support\ReportStatus;
 use App\Support\TicketStatus;
 use Carbon\Carbon;
@@ -21,7 +23,10 @@ use Illuminate\Validation\ValidationException;
 
 class ReportTicketController extends Controller
 {
-    public function __construct(private ActivityLogger $activity) {}
+    public function __construct(
+        private ActivityLogger $activity,
+        private DailyEntryRealtimeService $dailyEntryRealtime,
+    ) {}
 
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -57,6 +62,11 @@ class ReportTicketController extends Controller
                     'opened_at' => $complaint->report_date?->toDateString(),
                 ];
                 $data = array_merge($defaults, array_filter($data, fn ($value) => $value !== null && $value !== ''));
+                if (blank($data['action'] ?? null)) {
+                    throw ValidationException::withMessages([
+                        'action' => 'Action/perbaikan wajib diisi sebelum komplain di-Clear saat membuat tiket.',
+                    ]);
+                }
                 $data['source'] = 'complaint';
                 $data['complaint_id'] = $complaint->id;
                 $data['escalated_at'] = now();
@@ -94,8 +104,16 @@ class ReportTicketController extends Controller
             $ticket->save();
 
             if ($complaint) {
+                $previous = $complaint->status;
                 $complaint->ticket_id = $ticket->id;
                 $complaint->escalated_at = $ticket->escalated_at;
+                $complaint->action = $data['action'];
+                if (! $complaint->end_problem) {
+                    $complaint->end_problem = today();
+                }
+                $complaint->status = ReportStatus::CLEAR;
+                $complaint->syncClearAttribution(ReportStatus::CLEAR, $request->user()->id, $previous);
+                $complaint->syncHandling(ReportStatus::CLEAR, $request->user()->id, $previous);
                 $complaint->save();
 
                 $this->activity->log(
@@ -106,10 +124,18 @@ class ReportTicketController extends Controller
                     $complaint,
                     ['ticket_id' => $ticket->id, 'complaint_id' => $complaint->id],
                 );
+                $this->activity->log(
+                    'complaint',
+                    'Komplain '.$complaint->complaintNumber().' di-Clear saat dibuatkan ticket #'.$ticket->id,
+                    $request->user(),
+                    $request,
+                    $complaint,
+                    ['ticket_id' => $ticket->id, 'complaint_id' => $complaint->id, 'previous_status' => $previous],
+                );
 
-                if (TicketStatus::isClose($status)) {
-                    $this->syncComplaintOnFinish($ticket, $request->user(), $request, $ticket->action);
-                }
+                $this->dailyEntryRealtime->complaintUpdated(
+                    $complaint->fresh(['creator:id,name', 'clearer:id,name', 'ticket:id,status']),
+                );
             }
 
             $this->logUpdate($ticket, 'created', $request->user(), [
@@ -550,6 +576,8 @@ class ReportTicketController extends Controller
                 'complaint_id' => 'Komplain ini sudah memiliki tiket aktif yang dibuat petugas lain.',
             ]);
         }
+
+        ComplaintClearAge::assert($complaint);
     }
 
     private function applyTransition(

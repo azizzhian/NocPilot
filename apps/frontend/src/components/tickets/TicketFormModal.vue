@@ -188,6 +188,10 @@ async function submit() {
     error.value = 'Alasan eskalasi wajib diisi.'
     return
   }
+  if (isEscalation.value && !form.value.action.trim()) {
+    error.value = 'Action/perbaikan wajib diisi sebelum komplain di-Clear.'
+    return
+  }
   if (closing.value && !form.value.action.trim()) {
     error.value = 'Action/perbaikan wajib diisi sebelum ticket ditutup.'
     return
@@ -303,8 +307,13 @@ async function submit() {
         <Input v-model="form.problem" />
       </div>
       <div class="sm:col-span-2">
-        <label class="mb-1.5 block text-sm font-medium">Action</label>
+        <label class="mb-1.5 block text-sm font-medium">
+          Action <span v-if="isEscalation" class="text-danger">*</span>
+        </label>
         <Textarea v-model="form.action" :rows="2" />
+        <p v-if="isEscalation" class="mt-1 text-[11px] text-muted">
+          Wajib diisi — komplain akan langsung di-Clear saat tiket dibuat.
+        </p>
       </div>
 
       <div v-if="isEscalation" class="sm:col-span-2 rounded-xl border border-warning/30 bg-warning/5 p-3">

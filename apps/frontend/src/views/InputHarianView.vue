@@ -1046,6 +1046,15 @@ function openTicketForm(item: DailyEntryItem) {
     showToast('Hanya pembuat komplain yang dapat membuat tiket dari komplain.', 'error')
     return
   }
+  const nowMs = serverNow()
+  if (complaintClearRemainingSeconds(item.created_at, nowMs) === null) {
+    showToast(CLEAR_TIME_INVALID_MESSAGE, 'error')
+    return
+  }
+  if (isComplaintClearTooYoung(item, nowMs)) {
+    showToast('Komplain minimal 5 menit sebelum dapat dibuatkan tiket.', 'error')
+    return
+  }
   ticketComplaint.value = item
   ticketFormOpen.value = true
 }

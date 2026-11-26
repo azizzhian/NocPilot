@@ -20,6 +20,7 @@ use App\Services\DailyEntry\DailyEntryComplaintSerializer;
 use App\Services\DailyEntry\DailyEntryRealtimeService;
 use App\Services\DailyEntry\DailyEntrySerializer;
 use App\Services\Phone\PhoneNormalizer;
+use App\Support\ComplaintClearAge;
 use App\Support\ComplaintSla;
 use App\Support\ReportStatus;
 use Carbon\Carbon;
@@ -1392,25 +1393,7 @@ class DailyEntryController extends Controller
     /** Clear manual hanya boleh setelah MIN_CLEAR_AGE_SECONDS detik sejak created_at. */
     protected function assertComplaintMinimumAgeForClear(DailyComplaint $complaint): void
     {
-        try {
-            $createdAt = $complaint->created_at;
-        } catch (\Throwable) {
-            $createdAt = null;
-        }
-
-        if (! $createdAt instanceof Carbon || $createdAt->getTimestamp() <= 0) {
-            throw ValidationException::withMessages([
-                'created_at' => 'Waktu input komplain tidak ditemukan atau tidak valid. Komplain belum dapat di-Clear.',
-            ]);
-        }
-
-        $ageSeconds = now()->getTimestamp() - $createdAt->getTimestamp();
-
-        if ($ageSeconds < DailyComplaint::MIN_CLEAR_AGE_SECONDS) {
-            throw ValidationException::withMessages([
-                'created_at' => 'Komplain belum dapat di-Clear. Minimal waktu penanganan adalah 5 menit.',
-            ]);
-        }
+        ComplaintClearAge::assert($complaint);
     }
 
     protected function assertComplaintOwner(DailyComplaint $complaint, ?int $userId, string $message): void
